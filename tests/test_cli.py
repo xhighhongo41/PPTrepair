@@ -1,0 +1,153 @@
+"""Tests for :mod:`pptrepair.cli`.
+
+Exercises the full scanner -> census -> classify -> report pipeline
+through :func:`pptrepair.cli.main`, using small synthetic archives
+written under ``tmp_path``. ``subprocess`` is intentionally not used
+(the process is invoked in-process via ``main()``), and the real
+``broken_ppt/`` / ``normal_ppt/`` sample directories are never touched.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from fixtures import build_minimal_pptx, truncate, zero_prefix
+
+from pptrepair.cli import EXIT_CORRUPT, EXIT_ERROR, EXIT_OK, main
+
+#: Small media payload so fixtures stay fast to build and scan.
+_MEDIA_BYTES = 600_000
+
+#: Shorthand for the capsys fixture type, to keep signatures short.
+CaptureFixture = pytest.CaptureFixture[str]
+
+
+def _write(tmp_path: Path, name: str, data: bytes) -> Path:
+    """Write *data* to ``tmp_path / name`` and return the resulting path."""
+    path = tmp_path / name
+    path.write_bytes(data)
+    return path
+
+
+def test_single_healthy_file(tmp_path: Path, capsys: CaptureFixture) -> None:
+    """A single intact file yields exit code 0 and a NORMAL text report."""
+    data = build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    path = _write(tmp_path, "healthy.pptx", data)
+
+    exit_code = main(["check", str(path)])
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert "normal" in out
+    assert "===" in out
+
+
+def test_head_zero_fill_file(tmp_path: Path, capsys: CaptureFixture) -> None:
+    """A head-zero-filled file yields exit 1 and the verdict + salvage line."""
+    data = zero_prefix(build_minimal_pptx(media_bytes=_MEDIA_BYTES), 262144)
+    path = _write(tmp_path, "head_zero.pptx", data)
+
+    exit_code = main(["check", str(path)])
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_CORRUPT
+    assert "head_zero_fill" in out
+    assert "Salvageable:" in out
+
+
+def test_tail_truncated_file(tmp_path: Path, capsys: CaptureFixture) -> None:
+    """A truncated file yields exit code 1 and reports TAIL_TRUNCATED."""
+    data = truncate(build_minimal_pptx(media_bytes=_MEDIA_BYTES), 2000)
+    path = _write(tmp_path, "truncated.pptx", data)
+
+    exit_code = main(["check", str(path)])
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_CORRUPT
+    assert "tail_truncated" in out
+
+
+def test_healthy_and_broken_files_both_reported(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """Two files (one healthy, one corrupted) both produce a text report."""
+    healthy = _write(
+        tmp_path, "healthy.pptx", build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    )
+    broken_data = zero_prefix(build_minimal_pptx(media_bytes=_MEDIA_BYTES), 262144)
+    broken = _write(tmp_path, "broken.pptx", broken_data)
+
+    exit_code = main(["check", str(healthy), str(broken)])
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_CORRUPT
+    # Each report's header line is "=== <path> ==="; the opening marker
+    # ("=== " with a trailing space) appears exactly once per report.
+    assert out.count("=== ") == 2
+
+
+def test_nonexistent_path_reports_error(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """A nonexistent path yields exit code 2 with an stderr error message."""
+    missing = tmp_path / "does_not_exist.pptx"
+
+    exit_code = main(["check", str(missing)])
+
+    captured = capsys.readouterr()
+    assert exit_code == EXIT_ERROR
+    assert captured.err.strip() != ""
+
+
+def test_nonexistent_path_and_healthy_file_still_reports_healthy(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """A missing path forces exit 2 but a healthy sibling is still reported."""
+    missing = tmp_path / "does_not_exist.pptx"
+    healthy = _write(
+        tmp_path, "healthy.pptx", build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    )
+
+    exit_code = main(["check", str(missing), str(healthy)])
+
+    captured = capsys.readouterr()
+    assert exit_code == EXIT_ERROR
+    assert captured.err.strip() != ""
+    assert "normal" in captured.out
+    assert "===" in captured.out
+
+
+def test_json_output_schema(tmp_path: Path, capsys: CaptureFixture) -> None:
+    """``--json`` emits a parseable array with the documented per-entry schema."""
+    healthy = _write(
+        tmp_path, "healthy.pptx", build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    )
+    broken_data = zero_prefix(build_minimal_pptx(media_bytes=_MEDIA_BYTES), 262144)
+    broken = _write(tmp_path, "broken.pptx", broken_data)
+
+    exit_code = main(["check", "--json", str(healthy), str(broken)])
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_CORRUPT
+    payload = json.loads(out)
+    assert len(payload) == 2
+
+    verdicts = set()
+    for entry in payload:
+        assert set(entry.keys()) >= {
+            "path", "verdict", "label", "evidence", "salvage", "structure",
+        }
+        verdicts.add(entry["verdict"])
+        assert set(entry["structure"].keys()) == {
+            "size", "head_kind", "zero_bytes", "eocd_present", "lfh_count",
+        }
+    assert verdicts == {"normal", "head_zero_fill"}
+
+
+def test_exit_code_constants() -> None:
+    """Exit code constants must match the documented 0/1/2 contract."""
+    assert EXIT_OK == 0
+    assert EXIT_CORRUPT == 1
+    assert EXIT_ERROR == 2
