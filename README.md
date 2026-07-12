@@ -1,0 +1,2 @@
+# PPTrepair
+OneDriveに置いている間に破損したPowerPointファイルを修復する
