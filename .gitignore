@@ -216,3 +216,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# CLAUDE関連
+CLAUDE.md
+.claude
+
+# pptxファイル（破損・修復対象のPowerPointは場所を問わず公開しない）
+broken_ppt/
+*.ppt
+*.pptx
+*.pptm
+
+# 内部文書
+PROJECT.md
+開発資料
+
+# Mac
+.DS_Store
+
+
