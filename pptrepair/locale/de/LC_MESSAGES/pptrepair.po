@@ -1,0 +1,97 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: de\n"
+
+msgid "Category"
+msgstr "Kategorie"
+
+msgid "Created"
+msgstr "Erstellt"
+
+msgid "Creator"
+msgstr "Autor"
+
+msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
+msgstr "Hinweis: Der Web-Versionsverlauf von OneDrive enthält möglicherweise eine ältere, intakte Kopie dieser Datei."
+
+msgid "Hint: pass --force to overwrite the existing output."
+msgstr "Hinweis: Verwenden Sie --force, um die vorhandene Ausgabe zu überschreiben."
+
+msgid "Last Modified By"
+msgstr "Zuletzt geändert von"
+
+msgid "Lost entries: {n}"
+msgstr "Verlorene Einträge: {n}"
+
+msgid "Lost slides: {numbers}"
+msgstr "Verlorene Folien: {numbers}"
+
+msgid "Mode: {mode}"
+msgstr "Modus: {mode}"
+
+msgid "Modified"
+msgstr "Geändert"
+
+msgid "No slide-title heading found; listing all recovered title strings:"
+msgstr "Keine Folientitel-Überschrift gefunden; alle wiederhergestellten Titelzeichenfolgen werden aufgelistet:"
+
+msgid "Nothing to repair: the file is already an intact PowerPoint package."
+msgstr "Nichts zu reparieren: Die Datei ist bereits ein intaktes PowerPoint-Paket."
+
+msgid "Output: {path}"
+msgstr "Ausgabe: {path}"
+
+msgid "Re-check verdict: {verdict}"
+msgstr "Ergebnis der erneuten Prüfung: {verdict}"
+
+msgid "Salvaged entries: {ok} of {total}"
+msgstr "Gerettete Einträge: {ok} von {total}"
+
+msgid "Series"
+msgstr "Reihe"
+
+msgid "Slide titles recovered from document properties:"
+msgstr "Aus den Dokumenteigenschaften wiederhergestellte Folientitel:"
+
+msgid "Slides recovered: {ok} of {total}"
+msgstr "Wiederhergestellte Folien: {ok} von {total}"
+
+msgid "The recovery folder groups salvaged content by kind: images/ and media/ hold pictures, audio and video; texts/ holds best-effort recovered text; charts/ holds chart XML plus cached data; parts/ holds every salvaged part in its original, raw form."
+msgstr "Der Wiederherstellungsordner gruppiert den geretteten Inhalt nach Art: images/ und media/ enthalten Bilder, Audio und Video; texts/ enthält den bestmöglich wiederhergestellten Text; charts/ enthält Diagramm-XML samt zwischengespeicherter Daten; parts/ enthält jeden geretteten Teil in unveränderter Rohform."
+
+msgid "Title"
+msgstr "Titel"
+
+msgid "Unrepairable: no recoverable content was found."
+msgstr "Nicht reparierbar: Es wurde kein wiederherstellbarer Inhalt gefunden."
+
+msgid "Value"
+msgstr "Wert"
+
+msgid "Verdict: {verdict} ({label})"
+msgstr "Urteil: {verdict} ({label})"
+
+msgid "Warnings:"
+msgstr "Warnungen:"
+
+msgid "corrupted: file tail truncated"
+msgstr "beschädigt: Dateiende abgeschnitten"
+
+msgid "corrupted: leading region overwritten with foreign data"
+msgstr "beschädigt: Anfangsbereich mit fremden Daten überschrieben"
+
+msgid "corrupted: leading region overwritten with zeros"
+msgstr "beschädigt: Anfangsbereich mit Nullen überschrieben"
+
+msgid "corrupted: mixture of two file versions"
+msgstr "beschädigt: Mischung aus zwei Dateiversionen"
+
+msgid "corrupted: unrecognized damage pattern"
+msgstr "beschädigt: unbekanntes Schadensmuster"
+
+msgid "intact PowerPoint package"
+msgstr "intaktes PowerPoint-Paket"
+
+msgid "not a ZIP-based file"
+msgstr "keine ZIP-basierte Datei"

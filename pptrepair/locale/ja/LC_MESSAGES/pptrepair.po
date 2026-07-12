@@ -1,0 +1,97 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ja\n"
+
+msgid "Category"
+msgstr "カテゴリ"
+
+msgid "Created"
+msgstr "作成日時"
+
+msgid "Creator"
+msgstr "作成者"
+
+msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
+msgstr "ヒント: OneDriveのWeb版バージョン履歴に、このファイルの破損前のコピーが残っている場合があります。"
+
+msgid "Hint: pass --force to overwrite the existing output."
+msgstr "ヒント: 既存の出力を上書きするには --force を指定してください。"
+
+msgid "Last Modified By"
+msgstr "最終更新者"
+
+msgid "Lost entries: {n}"
+msgstr "喪失エントリ数: {n}"
+
+msgid "Lost slides: {numbers}"
+msgstr "喪失スライド: {numbers}"
+
+msgid "Mode: {mode}"
+msgstr "モード: {mode}"
+
+msgid "Modified"
+msgstr "更新日時"
+
+msgid "No slide-title heading found; listing all recovered title strings:"
+msgstr "スライドタイトルの見出しが見つからないため、復元されたタイトル文字列をすべて列挙します:"
+
+msgid "Nothing to repair: the file is already an intact PowerPoint package."
+msgstr "修復の必要はありません: このファイルは無傷のPowerPointパッケージです。"
+
+msgid "Output: {path}"
+msgstr "出力先: {path}"
+
+msgid "Re-check verdict: {verdict}"
+msgstr "再診断結果: {verdict}"
+
+msgid "Salvaged entries: {ok} of {total}"
+msgstr "救出エントリ: {total} 件中 {ok} 件"
+
+msgid "Series"
+msgstr "系列"
+
+msgid "Slide titles recovered from document properties:"
+msgstr "文書プロパティから復元されたスライドタイトル:"
+
+msgid "Slides recovered: {ok} of {total}"
+msgstr "復元スライド: {total} 枚中 {ok} 枚"
+
+msgid "The recovery folder groups salvaged content by kind: images/ and media/ hold pictures, audio and video; texts/ holds best-effort recovered text; charts/ holds chart XML plus cached data; parts/ holds every salvaged part in its original, raw form."
+msgstr "復元フォルダは内容を種類別に整理しています: images/ と media/ には画像・音声・動画、texts/ には復元できたテキスト、charts/ にはグラフXMLとキャッシュデータ、parts/ には救出された全パートの生データが入っています。"
+
+msgid "Title"
+msgstr "タイトル"
+
+msgid "Unrepairable: no recoverable content was found."
+msgstr "修復不能: 復元可能な内容が見つかりませんでした。"
+
+msgid "Value"
+msgstr "値"
+
+msgid "Verdict: {verdict} ({label})"
+msgstr "判定: {verdict}（{label}）"
+
+msgid "Warnings:"
+msgstr "警告:"
+
+msgid "corrupted: file tail truncated"
+msgstr "破損: ファイル末尾が切断されています"
+
+msgid "corrupted: leading region overwritten with foreign data"
+msgstr "破損: 先頭領域が無関係なデータで上書きされています"
+
+msgid "corrupted: leading region overwritten with zeros"
+msgstr "破損: 先頭領域がゼロで上書きされています"
+
+msgid "corrupted: mixture of two file versions"
+msgstr "破損: 2つのバージョンのデータが混在しています"
+
+msgid "corrupted: unrecognized damage pattern"
+msgstr "破損: 未知の破損パターンです"
+
+msgid "intact PowerPoint package"
+msgstr "無傷のPowerPointパッケージ"
+
+msgid "not a ZIP-based file"
+msgstr "ZIP形式のファイルではありません"

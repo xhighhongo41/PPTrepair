@@ -1,8 +1,10 @@
 """pptrepair — diagnose and repair PowerPoint files corrupted on OneDrive.
 
-Version 0.2 provides the ``pptrepair check`` command, which classifies
-.pptx files as intact or as one of the known OneDrive corruption
-patterns. Repair functionality is planned for later versions.
+``pptrepair check`` classifies .pptx files as intact or as one of the
+known OneDrive corruption patterns; ``pptrepair repair`` rebuilds an
+openable presentation from the surviving data, or salvages the
+surviving content into a recovery folder when the slides themselves
+are gone.
 """
 
-__version__ = "0.2.0"
+__version__ = "1.0.0"

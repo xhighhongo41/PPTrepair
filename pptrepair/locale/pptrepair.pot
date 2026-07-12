@@ -1,0 +1,96 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Category"
+msgstr ""
+
+msgid "Created"
+msgstr ""
+
+msgid "Creator"
+msgstr ""
+
+msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
+msgstr ""
+
+msgid "Hint: pass --force to overwrite the existing output."
+msgstr ""
+
+msgid "Last Modified By"
+msgstr ""
+
+msgid "Lost entries: {n}"
+msgstr ""
+
+msgid "Lost slides: {numbers}"
+msgstr ""
+
+msgid "Mode: {mode}"
+msgstr ""
+
+msgid "Modified"
+msgstr ""
+
+msgid "No slide-title heading found; listing all recovered title strings:"
+msgstr ""
+
+msgid "Nothing to repair: the file is already an intact PowerPoint package."
+msgstr ""
+
+msgid "Output: {path}"
+msgstr ""
+
+msgid "Re-check verdict: {verdict}"
+msgstr ""
+
+msgid "Salvaged entries: {ok} of {total}"
+msgstr ""
+
+msgid "Series"
+msgstr ""
+
+msgid "Slide titles recovered from document properties:"
+msgstr ""
+
+msgid "Slides recovered: {ok} of {total}"
+msgstr ""
+
+msgid "The recovery folder groups salvaged content by kind: images/ and media/ hold pictures, audio and video; texts/ holds best-effort recovered text; charts/ holds chart XML plus cached data; parts/ holds every salvaged part in its original, raw form."
+msgstr ""
+
+msgid "Title"
+msgstr ""
+
+msgid "Unrepairable: no recoverable content was found."
+msgstr ""
+
+msgid "Value"
+msgstr ""
+
+msgid "Verdict: {verdict} ({label})"
+msgstr ""
+
+msgid "Warnings:"
+msgstr ""
+
+msgid "corrupted: file tail truncated"
+msgstr ""
+
+msgid "corrupted: leading region overwritten with foreign data"
+msgstr ""
+
+msgid "corrupted: leading region overwritten with zeros"
+msgstr ""
+
+msgid "corrupted: mixture of two file versions"
+msgstr ""
+
+msgid "corrupted: unrecognized damage pattern"
+msgstr ""
+
+msgid "intact PowerPoint package"
+msgstr ""
+
+msgid "not a ZIP-based file"
+msgstr ""

@@ -1,0 +1,97 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: zh\n"
+
+msgid "Category"
+msgstr "类别"
+
+msgid "Created"
+msgstr "创建时间"
+
+msgid "Creator"
+msgstr "创建者"
+
+msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
+msgstr "提示: OneDrive 网页版的版本历史记录中可能保留着此文件损坏前的副本。"
+
+msgid "Hint: pass --force to overwrite the existing output."
+msgstr "提示: 使用 --force 可覆盖已存在的输出。"
+
+msgid "Last Modified By"
+msgstr "最后修改者"
+
+msgid "Lost entries: {n}"
+msgstr "丢失条目数: {n}"
+
+msgid "Lost slides: {numbers}"
+msgstr "丢失的幻灯片: {numbers}"
+
+msgid "Mode: {mode}"
+msgstr "模式: {mode}"
+
+msgid "Modified"
+msgstr "修改时间"
+
+msgid "No slide-title heading found; listing all recovered title strings:"
+msgstr "未找到幻灯片标题标头，以下列出所有恢复的标题字符串:"
+
+msgid "Nothing to repair: the file is already an intact PowerPoint package."
+msgstr "无需修复: 该文件已是完好的 PowerPoint 包。"
+
+msgid "Output: {path}"
+msgstr "输出: {path}"
+
+msgid "Re-check verdict: {verdict}"
+msgstr "复检结果: {verdict}"
+
+msgid "Salvaged entries: {ok} of {total}"
+msgstr "已抢救条目: 共 {total} 项中的 {ok} 项"
+
+msgid "Series"
+msgstr "系列"
+
+msgid "Slide titles recovered from document properties:"
+msgstr "从文档属性中恢复的幻灯片标题:"
+
+msgid "Slides recovered: {ok} of {total}"
+msgstr "已恢复幻灯片: 共 {total} 张中的 {ok} 张"
+
+msgid "The recovery folder groups salvaged content by kind: images/ and media/ hold pictures, audio and video; texts/ holds best-effort recovered text; charts/ holds chart XML plus cached data; parts/ holds every salvaged part in its original, raw form."
+msgstr "恢复文件夹按类型整理抢救出的内容: images/ 和 media/ 存放图片、音频和视频；texts/ 存放尽力恢复的文本；charts/ 存放图表 XML 及缓存数据；parts/ 以原始形式存放所有抢救出的部件。"
+
+msgid "Title"
+msgstr "标题"
+
+msgid "Unrepairable: no recoverable content was found."
+msgstr "无法修复: 未找到可恢复的内容。"
+
+msgid "Value"
+msgstr "值"
+
+msgid "Verdict: {verdict} ({label})"
+msgstr "判定: {verdict}（{label}）"
+
+msgid "Warnings:"
+msgstr "警告:"
+
+msgid "corrupted: file tail truncated"
+msgstr "损坏: 文件尾部被截断"
+
+msgid "corrupted: leading region overwritten with foreign data"
+msgstr "损坏: 文件头部被无关数据覆盖"
+
+msgid "corrupted: leading region overwritten with zeros"
+msgstr "损坏: 文件头部被零填充覆盖"
+
+msgid "corrupted: mixture of two file versions"
+msgstr "损坏: 两个版本的数据混杂"
+
+msgid "corrupted: unrecognized damage pattern"
+msgstr "损坏: 无法识别的损坏模式"
+
+msgid "intact PowerPoint package"
+msgstr "完好的 PowerPoint 包"
+
+msgid "not a ZIP-based file"
+msgstr "不是基于 ZIP 的文件"

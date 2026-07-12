@@ -54,6 +54,10 @@ cover/
 # Translations
 *.mo
 *.pot
+# ただし本プロジェクトが同梱する翻訳カタログ（コンパイル済み.moと.potテンプレート）は
+# 配布に必要なためバージョン管理に含める
+!pptrepair/locale/**/*.mo
+!pptrepair/locale/*.pot
 
 # Django stuff:
 *.log
@@ -225,6 +229,8 @@ CLAUDE.md
 
 # pptxファイル（破損・修復対象のPowerPointは場所を問わず公開しない）
 broken_ppt/
+normal_ppt/
+repaired_ppt/
 *.ppt
 *.pptx
 *.pptm
