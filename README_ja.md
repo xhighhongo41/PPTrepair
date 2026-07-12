@@ -24,13 +24,55 @@ English version: [README.md](README.md)
 
 ## インストール
 
-Python 3.12以降が必要です。標準ライブラリ以外の実行時依存はありません。
+Python 3.12以降が必要です。標準ライブラリ以外の実行時依存はありません。お使いのPython環境管理ツールに合わせて以下のいずれかの方法を選んでください。
+
+### pipx（CLIツールにおすすめ）
+
+`pptrepair` を独立した環境にインストールし、どこからでも使えるコマンドにします:
+
+```console
+$ pipx install git+https://github.com/xhighhongo41/PPTrepair.git
+$ pptrepair check presentation.pptx
+```
+
+クローン済みのディレクトリ内なら `pipx install .` でも同様です。
+
+### uv
+
+```console
+$ uv tool install git+https://github.com/xhighhongo41/PPTrepair.git
+$ pptrepair check presentation.pptx
+```
+
+クローン内であればインストールせずに直接実行することもできます:
+
+```console
+$ uv run pptrepair check presentation.pptx
+```
+
+### pip + venv（Python標準ツール）
 
 ```console
 $ git clone https://github.com/xhighhongo41/PPTrepair.git
 $ cd PPTrepair
-$ pip install .
+$ python -m venv .venv
+$ source .venv/bin/activate    # Windowsの場合: .venv\Scripts\activate
+(.venv) $ pip install .
+(.venv) $ pptrepair check presentation.pptx
 ```
+
+### pipenv
+
+```console
+$ git clone https://github.com/xhighhongo41/PPTrepair.git
+$ cd PPTrepair
+$ pipenv install -e .
+$ pipenv run pptrepair check presentation.pptx
+```
+
+### pyenv / conda をお使いの場合
+
+pyenvはPythonのバージョン管理ツールなので、`python` が3.12以降を指すようにした上で（例: `pyenv install 3.13 && pyenv shell 3.13`）、上記いずれかの方法を使ってください。condaの場合は環境を作ってからpipでインストールします: `conda create -n pptrepair python=3.13 && conda activate pptrepair && pip install .`
 
 ## 使い方
 

@@ -24,13 +24,55 @@ For corrupted files the report also shows how much content is salvageable (entri
 
 ## Installation
 
-Requires Python 3.12 or later. No runtime dependencies beyond the standard library.
+Requires Python 3.12 or later. No runtime dependencies beyond the standard library. Pick whichever workflow matches your Python setup.
+
+### pipx (recommended for CLI tools)
+
+Installs `pptrepair` as an isolated, globally available command:
+
+```console
+$ pipx install git+https://github.com/xhighhongo41/PPTrepair.git
+$ pptrepair check presentation.pptx
+```
+
+From a local clone, `pipx install .` works the same way.
+
+### uv
+
+```console
+$ uv tool install git+https://github.com/xhighhongo41/PPTrepair.git
+$ pptrepair check presentation.pptx
+```
+
+Inside a clone you can also run it without installing anything:
+
+```console
+$ uv run pptrepair check presentation.pptx
+```
+
+### pip + venv (Python standard tooling)
 
 ```console
 $ git clone https://github.com/xhighhongo41/PPTrepair.git
 $ cd PPTrepair
-$ pip install .
+$ python -m venv .venv
+$ source .venv/bin/activate    # Windows: .venv\Scripts\activate
+(.venv) $ pip install .
+(.venv) $ pptrepair check presentation.pptx
 ```
+
+### pipenv
+
+```console
+$ git clone https://github.com/xhighhongo41/PPTrepair.git
+$ cd PPTrepair
+$ pipenv install -e .
+$ pipenv run pptrepair check presentation.pptx
+```
+
+### pyenv / conda users
+
+pyenv manages Python versions rather than environments: make sure `python` resolves to 3.12+ (e.g. `pyenv install 3.13 && pyenv shell 3.13`), then use any of the methods above. With conda, create an environment first: `conda create -n pptrepair python=3.13 && conda activate pptrepair && pip install .`
 
 ## Usage
 
