@@ -1,12 +1,15 @@
 # PPTrepair
-OneDriveに置いている間に破損したPowerPointファイルを修復する
 
-※ 現在開発中であり、修復プログラムはまだ提供されていません。
+Repairs PowerPoint files that were corrupted while stored on OneDrive.
+
+日本語版は [README_ja.md](README_ja.md) を参照してください。 (For the Japanese version, see [README_ja.md](README_ja.md).)
+
+> **Note**: This project is under active development. No repair program is available yet.
 
 ## Changelog
 
 ### ver 0.1 (2026-07-12)
-- OneDrive上で発生するPowerPoint (.pptx) ファイル破損について、公開事例のWeb調査と実際の破損ファイルのバイナリ構造調査を実施
-- 破損はランダムなデータ化けではなく「チャンク単位（256KiB/1MiB境界に整列）の上書き・切断」であり、複数のパターン（先頭ゼロ埋め型・先頭異物データ型・旧バージョン混在型・末尾切断型）に分類できることを確認
-- 一部のパターンでは、ファイル内に残存するデータの走査により大部分のスライドを救出できることを検証し、修復ツールの実装方針を策定
-- 開発言語をPython（標準ライブラリのみ使用）に決定
+- Researched publicly reported cases of PowerPoint (.pptx) file corruption on OneDrive, and analyzed the binary structure of actual corrupted files
+- Confirmed that the corruption is not random bit rot, but chunk-wise overwriting/truncation aligned to 256 KiB / 1 MiB boundaries, and that it falls into several distinct patterns (leading zero-fill, leading foreign data, old-version mixture, and tail truncation)
+- Verified that for some patterns most slides can be salvaged by scanning the data remaining in the file, and formulated the implementation strategy for the repair tool
+- Decided on Python (standard library only) as the implementation language
