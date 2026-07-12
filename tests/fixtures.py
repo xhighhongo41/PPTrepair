@@ -35,11 +35,18 @@ _NS_OFFICE_DOC = "http://schemas.openxmlformats.org/officeDocument/2006"
 _NS_OFFICE_REL = f"{_NS_OFFICE_DOC}/relationships"
 _NS_PML = "http://schemas.openxmlformats.org/presentationml/2006/main"
 _NS_DML = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_NS_EXT_PROPS = f"{_NS_OFFICE_DOC}/extended-properties"
+_NS_VT = f"{_NS_OFFICE_DOC}/docPropsVTypes"
+_NS_DC = "http://purl.org/dc/elements/1.1/"
+_NS_DCTERMS = "http://purl.org/dc/terms/"
+_NS_XSI = "http://www.w3.org/2001/XMLSchema-instance"
+_NS_CHART = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 
 # Content-type prefixes shared by several package parts.
 _CT_OFFICE = "application/vnd.openxmlformats-officedocument"
 _CT_PACKAGE = "application/vnd.openxmlformats-package"
 _CT_PML = f"{_CT_OFFICE}.presentationml"
+_CT_CHART = f"{_CT_OFFICE}.drawingml.chart+xml"
 
 
 def _xml(body: str) -> bytes:
@@ -52,8 +59,12 @@ def _xml(body: str) -> bytes:
     return (declaration + body).encode("utf-8")
 
 
-def _content_types_xml(num_slides: int) -> bytes:
-    """Build a minimal ``[Content_Types].xml`` covering all package parts."""
+def _content_types_xml(num_slides: int, include_chart: bool = False) -> bytes:
+    """Build a minimal ``[Content_Types].xml`` covering all package parts.
+
+    :param include_chart: when True, add the Override entry for
+        ``ppt/charts/chart1.xml``.
+    """
     slide_overrides = "".join(
         f'<Override PartName="/ppt/slides/slide{n}.xml" '
         f'ContentType="{_CT_PML}.slide+xml"/>'
@@ -70,6 +81,8 @@ def _content_types_xml(num_slides: int) -> bytes:
         ("/docProps/core.xml", f"{_CT_PACKAGE}.core-properties+xml"),
         ("/docProps/app.xml", f"{_CT_OFFICE}.extended-properties+xml"),
     )
+    if include_chart:
+        tail_parts = tail_parts + (("/ppt/charts/chart1.xml", _CT_CHART),)
     overrides = slide_overrides + "".join(
         f'<Override PartName="{part_name}" ContentType="{content_type}"/>'
         for part_name, content_type in tail_parts
@@ -138,9 +151,15 @@ def _presentation_rels_xml(num_slides: int) -> bytes:
 
 def _slide_xml(n: int) -> bytes:
     """Build a minimal ``ppt/slides/slide{n}.xml`` part, tagged with its slide number."""
+    shape = (
+        "<p:sp><p:txBody><a:p><a:r>"
+        f"<a:t>Slide {n} body text</a:t>"
+        "</a:r></a:p></p:txBody></p:sp>"
+    )
     body = (
         f'<p:sld xmlns:p="{_NS_PML}" xmlns:a="{_NS_DML}">'
-        f'<p:cSld name="Slide{n}"><p:spTree><p:nvGrpSpPr/><p:grpSpPr/></p:spTree></p:cSld>'
+        f'<p:cSld name="Slide{n}"><p:spTree><p:nvGrpSpPr/><p:grpSpPr/>'
+        f"{shape}</p:spTree></p:cSld>"
         "</p:sld>"
     )
     return _xml(body)
@@ -190,8 +209,78 @@ def _simple_part(root_tag: str, xmlns: str) -> bytes:
     return _xml(f'<{root_tag} xmlns="{xmlns}"/>')
 
 
+def _app_xml(num_slides: int) -> bytes:
+    """Build ``docProps/app.xml`` with a slide-title heading pair.
+
+    Emits Extended Properties with a ``HeadingPairs`` entry naming
+    "Slide Titles" (paired with *num_slides*) and a matching
+    ``TitlesOfParts`` vector of ``Slide Title {n}`` strings, so tests
+    can exercise the HeadingPairs-sliced title recovery path.
+    """
+    titles = "".join(
+        f"<vt:lpstr>Slide Title {n}</vt:lpstr>" for n in range(1, num_slides + 1)
+    )
+    body = (
+        f'<Properties xmlns="{_NS_EXT_PROPS}" xmlns:vt="{_NS_VT}">'
+        "<HeadingPairs>"
+        '<vt:vector size="2" baseType="variant">'
+        "<vt:variant><vt:lpstr>Slide Titles</vt:lpstr></vt:variant>"
+        f'<vt:variant><vt:i4>{num_slides}</vt:i4></vt:variant>'
+        "</vt:vector>"
+        "</HeadingPairs>"
+        "<TitlesOfParts>"
+        f'<vt:vector size="{num_slides}" baseType="lpstr">{titles}</vt:vector>'
+        "</TitlesOfParts>"
+        "</Properties>"
+    )
+    return _xml(body)
+
+
+def _core_xml() -> bytes:
+    """Build ``docProps/core.xml`` with a creator and creation timestamp."""
+    body = (
+        f'<cp:coreProperties xmlns:cp="{_NS_CORE_PROPS}" xmlns:dc="{_NS_DC}" '
+        f'xmlns:dcterms="{_NS_DCTERMS}" xmlns:xsi="{_NS_XSI}">'
+        "<dc:title/>"
+        "<dc:creator>Fixture Author</dc:creator>"
+        '<dcterms:created xsi:type="dcterms:W3CDTF">'
+        "2024-01-01T00:00:00Z</dcterms:created>"
+        "</cp:coreProperties>"
+    )
+    return _xml(body)
+
+
+def _chart_xml() -> bytes:
+    """Build a minimal ``ppt/charts/chart1.xml`` with cached series data.
+
+    One series with two categories and two numeric values, cached in
+    ``c:strCache``/``c:numCache`` so chart-data recovery can be
+    exercised without a companion embedded workbook.
+    """
+    body = (
+        f'<c:chartSpace xmlns:c="{_NS_CHART}" xmlns:a="{_NS_DML}">'
+        "<c:chart><c:plotArea><c:barChart><c:ser>"
+        '<c:idx val="0"/><c:order val="0"/>'
+        "<c:cat><c:strRef><c:f>Sheet1!$A$2:$A$3</c:f><c:strCache>"
+        '<c:ptCount val="2"/>'
+        '<c:pt idx="0"><c:v>Category A</c:v></c:pt>'
+        '<c:pt idx="1"><c:v>Category B</c:v></c:pt>'
+        "</c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:f>Sheet1!$B$2:$B$3</c:f><c:numCache>"
+        "<c:formatCode>General</c:formatCode>"
+        '<c:ptCount val="2"/>'
+        '<c:pt idx="0"><c:v>10.5</c:v></c:pt>'
+        '<c:pt idx="1"><c:v>20.5</c:v></c:pt>'
+        "</c:numCache></c:numRef></c:val>"
+        "</c:ser></c:barChart></c:plotArea></c:chart>"
+        "</c:chartSpace>"
+    )
+    return _xml(body)
+
+
 def build_minimal_pptx(
-    num_slides: int = 3, media_bytes: int = 1_048_576, seed: int = 0
+    num_slides: int = 3, media_bytes: int = 1_048_576, seed: int = 0,
+    include_chart: bool = False,
 ) -> bytes:
     """Build a minimal but structurally valid .pptx-like ZIP in memory.
 
@@ -209,12 +298,19 @@ def build_minimal_pptx(
         payload, generated as incompressible random data so the
         resulting archive size tracks this value closely.
     :param seed: seed for the deterministic random media payload.
+    :param include_chart: when True, also emit ``ppt/charts/chart1.xml``
+        with cached series data (plus its Content_Types Override).
+        Leaving this False (the default) reproduces the archive exactly
+        as before this parameter was added.
     :return: the complete ZIP archive as bytes.
     """
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         # 1. Content types describing every part below.
-        zf.writestr("[Content_Types].xml", _content_types_xml(num_slides))
+        zf.writestr(
+            "[Content_Types].xml",
+            _content_types_xml(num_slides, include_chart=include_chart),
+        )
 
         # 2. Package-level relationships.
         zf.writestr("_rels/.rels", _package_rels_xml())
@@ -252,22 +348,17 @@ def build_minimal_pptx(
         media = random.Random(seed).randbytes(media_bytes)
         zf.writestr("ppt/media/image1.png", media)
 
+        # 6b. Optional chart part, with cached data for recovery tests.
+        if include_chart:
+            zf.writestr("ppt/charts/chart1.xml", _chart_xml())
+
         # 7. Small tail parts, written last to mirror the parts that
         # survive real-world head corruption/truncation.
         zf.writestr("ppt/presProps.xml", _simple_part("p:presentationPr", _NS_PML))
         zf.writestr("ppt/viewProps.xml", _simple_part("p:viewPr", _NS_PML))
         zf.writestr("ppt/tableStyles.xml", _simple_part("a:tblStyleLst", _NS_DML))
-        zf.writestr(
-            "docProps/core.xml",
-            _xml(
-                f'<cp:coreProperties xmlns:cp="{_NS_CORE_PROPS}" '
-                'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title/></cp:coreProperties>'
-            ),
-        )
-        zf.writestr(
-            "docProps/app.xml",
-            _simple_part("Properties", f"{_NS_OFFICE_DOC}/extended-properties"),
-        )
+        zf.writestr("docProps/core.xml", _core_xml())
+        zf.writestr("docProps/app.xml", _app_xml(num_slides))
 
     return buffer.getvalue()
 

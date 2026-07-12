@@ -1,0 +1,97 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ko\n"
+
+msgid "Category"
+msgstr "범주"
+
+msgid "Created"
+msgstr "만든 날짜"
+
+msgid "Creator"
+msgstr "만든 이"
+
+msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
+msgstr "힌트: OneDrive 웹 버전 기록에 이 파일이 손상되기 전의 복사본이 남아 있을 수 있습니다."
+
+msgid "Hint: pass --force to overwrite the existing output."
+msgstr "힌트: 기존 출력을 덮어쓰려면 --force 를 지정하세요."
+
+msgid "Last Modified By"
+msgstr "마지막 수정자"
+
+msgid "Lost entries: {n}"
+msgstr "손실된 항목 수: {n}"
+
+msgid "Lost slides: {numbers}"
+msgstr "손실된 슬라이드: {numbers}"
+
+msgid "Mode: {mode}"
+msgstr "모드: {mode}"
+
+msgid "Modified"
+msgstr "수정한 날짜"
+
+msgid "No slide-title heading found; listing all recovered title strings:"
+msgstr "슬라이드 제목 머리글을 찾을 수 없어 복구된 제목 문자열을 모두 나열합니다:"
+
+msgid "Nothing to repair: the file is already an intact PowerPoint package."
+msgstr "복구할 필요 없음: 이 파일은 이미 온전한 PowerPoint 패키지입니다."
+
+msgid "Output: {path}"
+msgstr "출력: {path}"
+
+msgid "Re-check verdict: {verdict}"
+msgstr "재검사 결과: {verdict}"
+
+msgid "Salvaged entries: {ok} of {total}"
+msgstr "복구된 항목: 총 {total}개 중 {ok}개"
+
+msgid "Series"
+msgstr "계열"
+
+msgid "Slide titles recovered from document properties:"
+msgstr "문서 속성에서 복구한 슬라이드 제목:"
+
+msgid "Slides recovered: {ok} of {total}"
+msgstr "복구된 슬라이드: 총 {total}장 중 {ok}장"
+
+msgid "The recovery folder groups salvaged content by kind: images/ and media/ hold pictures, audio and video; texts/ holds best-effort recovered text; charts/ holds chart XML plus cached data; parts/ holds every salvaged part in its original, raw form."
+msgstr "복구 폴더는 내용을 종류별로 정리합니다: images/ 와 media/ 에는 그림·오디오·비디오, texts/ 에는 최대한 복구한 텍스트, charts/ 에는 차트 XML과 캐시 데이터, parts/ 에는 복구된 모든 부분의 원본 데이터가 들어 있습니다."
+
+msgid "Title"
+msgstr "제목"
+
+msgid "Unrepairable: no recoverable content was found."
+msgstr "복구 불가: 복구할 수 있는 내용을 찾지 못했습니다."
+
+msgid "Value"
+msgstr "값"
+
+msgid "Verdict: {verdict} ({label})"
+msgstr "판정: {verdict} ({label})"
+
+msgid "Warnings:"
+msgstr "경고:"
+
+msgid "corrupted: file tail truncated"
+msgstr "손상됨: 파일 끝부분이 잘렸습니다"
+
+msgid "corrupted: leading region overwritten with foreign data"
+msgstr "손상됨: 앞부분이 무관한 데이터로 덮어써졌습니다"
+
+msgid "corrupted: leading region overwritten with zeros"
+msgstr "손상됨: 앞부분이 0으로 덮어써졌습니다"
+
+msgid "corrupted: mixture of two file versions"
+msgstr "손상됨: 두 버전의 데이터가 섞여 있습니다"
+
+msgid "corrupted: unrecognized damage pattern"
+msgstr "손상됨: 알 수 없는 손상 패턴입니다"
+
+msgid "intact PowerPoint package"
+msgstr "온전한 PowerPoint 패키지"
+
+msgid "not a ZIP-based file"
+msgstr "ZIP 기반 파일이 아닙니다"

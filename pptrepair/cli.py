@@ -19,9 +19,13 @@ import sys
 from pathlib import Path
 
 import pptrepair
+from pptrepair import i18n
+from pptrepair import repair as repair_module
 from pptrepair.census import from_central_directory, from_lfh_scan
 from pptrepair.classify import Diagnosis, Verdict, classify
-from pptrepair.report import render_json, render_text
+from pptrepair.rebuild import RebuildError
+from pptrepair.report import (render_json, render_repair_json,
+                              render_repair_text, render_text)
 from pptrepair.scanner import scan_structure
 
 EXIT_OK = 0
@@ -57,6 +61,36 @@ def build_parser() -> argparse.ArgumentParser:
                        help=".pptx file(s) to examine")
     check.add_argument("--json", action="store_true", dest="json_output",
                        help="emit a JSON array instead of text reports")
+
+    repair = subparsers.add_parser(
+        "repair",
+        help="repair a corrupted file, or salvage its surviving content",
+        description=(
+            "Diagnose FILE and produce the best possible repair "
+            "artifact: a rebuilt .pptx when the package can be made "
+            "consistent again, or a recovery folder of salvaged "
+            "images, media and text otherwise. The input file itself "
+            "is never modified."
+        ),
+    )
+    repair.add_argument("file", metavar="FILE",
+                        help="corrupted .pptx file to repair")
+    repair.add_argument("-o", "--output", metavar="PATH", default=None,
+                        help=(
+                            "output path (default: <name>.repaired.pptx "
+                            "or <name>.salvaged/ next to FILE)"
+                        ))
+    repair.add_argument("--mode", choices=repair_module.MODES,
+                        default="auto",
+                        help="repair strategy (default: auto)")
+    repair.add_argument("--force", action="store_true",
+                        help="overwrite an existing output path")
+    repair.add_argument("--lang", choices=i18n.SUPPORTED_LANGUAGES,
+                        default=i18n.DEFAULT_LANGUAGE,
+                        help="language of the human-readable report "
+                             "(default: en)")
+    repair.add_argument("--json", action="store_true", dest="json_output",
+                        help="emit a JSON object instead of a text report")
     return parser
 
 
@@ -127,11 +161,80 @@ def _diagnose_file(file: str) -> tuple[Diagnosis | None, str | None]:
     return diagnosis, None
 
 
+def run_repair(file: str, output: str | None, mode: str, force: bool,
+               lang: str, json_output: bool) -> int:
+    """Repair one file, print the report, and return an exit code.
+
+    Implementation requirements:
+
+    * Validate the input path like ``run_check`` (stderr + exit 2 on a
+      missing/non-regular file); catch unexpected pipeline exceptions
+      the same way.
+    * Call :func:`pptrepair.repair.repair_file`;
+      :class:`pptrepair.repair.OutputExistsError` prints a translated
+      hint to use ``--force`` and returns 2;
+      :class:`pptrepair.rebuild.RebuildError` (forced rebuild without a
+      presentation part) reports an unrepairable input and returns 1.
+    * Print :func:`pptrepair.report.render_repair_json` when
+      *json_output* is set, otherwise
+      :func:`pptrepair.report.render_repair_text` with the *lang*
+      translator; in extract mode also write that text as
+      ``REPORT.txt`` inside the recovery folder (UTF-8).
+    * Exit code: 0 when ``outcome.success`` (artifact produced, or the
+      input was already intact), 1 when nothing was recoverable, 2 on
+      usage/IO errors.
+    """
+    path = Path(file)
+    if not path.exists():
+        print(f"pptrepair: error: {file}: no such file", file=sys.stderr)
+        return EXIT_ERROR
+    if not path.is_file():
+        print(f"pptrepair: error: {file}: not a regular file",
+              file=sys.stderr)
+        return EXIT_ERROR
+
+    tr = i18n.get_translator(lang)
+    output_path = Path(output) if output is not None else None
+
+    try:
+        outcome = repair_module.repair_file(
+            path, output_path, mode, force, lang)
+    except repair_module.OutputExistsError as exc:
+        print(f"pptrepair: error: {exc}", file=sys.stderr)
+        print(tr("Hint: pass --force to overwrite the existing output."),
+              file=sys.stderr)
+        return EXIT_ERROR
+    except RebuildError as exc:
+        print(f"pptrepair: error: unrepairable: {exc}", file=sys.stderr)
+        return EXIT_CORRUPT
+    except Exception as exc:
+        # Any other pipeline failure (bad input, I/O error while reading
+        # or writing) is reported the same way run_check reports one.
+        print(f"pptrepair: error: {file}: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return EXIT_ERROR
+
+    if json_output:
+        print(render_repair_json(outcome))
+    else:
+        text = render_repair_text(outcome, tr)
+        print(text)
+        if outcome.mode == "extract" and outcome.success:
+            assert outcome.output_path is not None
+            report_path = outcome.output_path / "REPORT.txt"
+            report_path.write_text(text, encoding="utf-8")
+
+    return EXIT_OK if outcome.success else EXIT_CORRUPT
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns the process exit code."""
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "check":
         return run_check(args.files, args.json_output)
+    if args.command == "repair":
+        return run_repair(args.file, args.output, args.mode, args.force,
+                          args.lang, args.json_output)
     parser.error(f"unknown command: {args.command}")
     return EXIT_ERROR

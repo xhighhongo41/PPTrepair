@@ -1,10 +1,8 @@
 # PPTrepair
 
-Diagnoses (and will eventually repair) PowerPoint files that were corrupted while stored on OneDrive.
+Diagnoses and repairs PowerPoint files that were corrupted while stored on OneDrive.
 
 日本語版は [README_ja.md](README_ja.md) を参照してください。 (For the Japanese version, see [README_ja.md](README_ja.md).)
-
-> **Note**: This project is under active development. Version 0.2 provides diagnosis only; repair is planned for version 1.0.
 
 ## What it does
 
@@ -95,7 +93,27 @@ Salvageable: 190/192 entries, 37/37 slides
 
 Exit codes: `0` — every file is intact, `1` — at least one file is corrupted, `2` — usage or I/O error.
 
+### Repairing
+
+```console
+$ pptrepair repair broken.pptx                 # automatic strategy
+$ pptrepair repair broken.pptx -o fixed.pptx   # explicit output path
+$ pptrepair repair broken.pptx --lang ja       # report language
+```
+
+`repair` never modifies the input file. Depending on the damage it produces one of:
+
+* **a rebuilt presentation** `<name>.repaired.pptx` — when the surviving data still contains the slides (tail-truncated and version-mixed files). On this project's real-world corpus every surviving slide was recovered and the results open in PowerPoint.
+* **a recovery folder** `<name>.salvaged/` — when the slide bodies themselves were destroyed. Surviving pictures land in `images/`, audio/video in `media/`, best-effort recovered text (slide titles, document metadata) in `texts/`, chart data in `charts/`, every raw part in `parts/`, plus a human-readable `REPORT.txt` stating exactly what was lost.
+
+The report language is selectable with `--lang` (`en`, `ja`, `zh`, `ko`, `es`, `fr`, `de`; default English). An existing output is never overwritten unless you pass `--force`; `--json` gives machine-readable results. Exit codes: `0` — artifact produced (or the file was already intact), `1` — nothing recoverable, `2` — usage or I/O error.
+
 ## Changelog
+
+### ver 1.0 (2026-07-12)
+- Added the `pptrepair repair` command: rebuilds a consistent, openable .pptx from tail-truncated and version-mixed files, or produces a recovery folder (images, media, recovered text, chart data, raw parts and a damage report) when the slide bodies are unrecoverable
+- Human-readable reports in 7 languages via `--lang` (en, ja, zh, ko, es, fr, de), implemented with standard GNU gettext catalogs
+- The input file is never modified; existing outputs are only overwritten with `--force`
 
 ### ver 0.2 (2026-07-12)
 - Added the `pptrepair check` command, which classifies `.pptx` files as intact or as one of the known OneDrive corruption patterns, with evidence and a salvageability summary
