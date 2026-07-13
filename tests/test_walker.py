@@ -235,27 +235,59 @@ def test_discover_targets_skips_cloud_placeholder_file(
     assert result.targets == [normal_file]
 
 
-def test_discover_targets_skips_cloud_placeholder_directory(
+def test_discover_targets_descends_into_cloud_placeholder_directory(
         tmp_path: Path, monkeypatch) -> None:
-    """A directory flagged as a cloud placeholder is recorded but never
-    listed, so its contents are never discovered."""
+    """A cloud-placeholder directory is still descended into (listing is
+    metadata only); the PowerPoint placeholders inside are counted
+    individually, and the directory itself is never in skipped_cloud."""
     root = tmp_path / "root"
     root.mkdir()
     cloud_dir = root / "cloud_dir"
     cloud_dir.mkdir()
-    (cloud_dir / "inner.pptx").write_bytes(b"data")
+    inner = cloud_dir / "inner.pptx"
+    inner.write_bytes(b"data")
     normal_file = root / "normal.pptx"
     normal_file.write_bytes(b"data")
-    cloud_ino = os.lstat(cloud_dir).st_ino
+    cloud_inos = {os.lstat(cloud_dir).st_ino, os.lstat(inner).st_ino}
 
     monkeypatch.setattr(
         walker, "is_cloud_placeholder",
-        lambda st: st.st_ino == cloud_ino)
+        lambda st: st.st_ino in cloud_inos)
 
     result = discover_targets([root])
 
-    assert cloud_dir in result.skipped_cloud
+    assert result.skipped_cloud == [inner]
+    assert cloud_dir not in result.skipped_cloud
     assert result.targets == [normal_file]
+
+
+def test_discover_targets_ignores_non_powerpoint_cloud_placeholders(
+        tmp_path: Path, monkeypatch) -> None:
+    """Non-PowerPoint placeholders are filtered out by name and never
+    counted as cloud skips; legacy .ppt and ~$ temps keep their own
+    buckets even when they are placeholders."""
+    root = tmp_path / "root"
+    root.mkdir()
+    names = ["report.docx", "photo.jpg", "notes.pdf", "deck.pptx",
+             "old.ppt", "~$lock.pptx"]
+    for name in names:
+        (root / name).write_bytes(b"data")
+    cloud_inos = {os.lstat(root / name).st_ino for name in names}
+
+    monkeypatch.setattr(
+        walker, "is_cloud_placeholder",
+        lambda st: st.st_ino in cloud_inos)
+
+    result = discover_targets([root])
+
+    assert result.skipped_cloud == [root / "deck.pptx"]
+    assert result.skipped_legacy == [root / "old.ppt"]
+    assert result.skipped_temp == [root / "~$lock.pptx"]
+    assert result.targets == []
+
+    downloaded = discover_targets([root], allow_download=True)
+    assert downloaded.targets == [root / "deck.pptx"]
+    assert downloaded.download_targets == [root / "deck.pptx"]
 
 
 def test_discover_targets_allow_download_bypasses_cloud_check(

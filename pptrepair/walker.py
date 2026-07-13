@@ -6,7 +6,8 @@ reads matters because cloud-sync placeholders (OneDrive Files
 On-Demand, iCloud Drive, and other clients built on the OS-standard
 placeholder mechanisms) download their content as soon as the file is
 opened. Discovery relies on ``os.stat`` metadata only, which does not
-trigger a download.
+trigger a download (entering a cloud-only directory may fetch its
+listing metadata, but never file contents).
 
 Cloud-placeholder detection is best-effort and OS-mechanism based:
 
@@ -64,7 +65,9 @@ class WalkResult:
     skipped_temp: list[Path] = field(default_factory=list)
     """Office ``~$`` owner/lock temp files."""
     skipped_cloud: list[Path] = field(default_factory=list)
-    """Cloud-only placeholders (files and directories) left untouched."""
+    """PowerPoint files that are cloud-only placeholders, skipped
+    without downloading. Non-PowerPoint placeholders are filtered out
+    by name beforehand and never appear here."""
     download_targets: list[Path] = field(default_factory=list)
     """Subset of ``targets`` that are cloud-only placeholders and will
     be downloaded when read (populated only with ``allow_download``)."""
@@ -131,46 +134,49 @@ def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
                     allow_download: bool) -> None:
     """Sort *path* into the appropriate bucket of *result*.
 
-    Applies the cloud -> temp -> suffix classification order described
-    in :func:`discover_targets`.
+    The name-based filters run first: placeholder metadata already
+    carries the file name, so temp files and non-PowerPoint files are
+    ruled out without ever considering a download. Only ``.pptx`` /
+    ``.pptm`` candidates are subject to the cloud-placeholder skip and
+    download accounting.
     """
-    cloud = is_cloud_placeholder(st)
-    if cloud and not allow_download:
-        result.skipped_cloud.append(path)
-        return
     if path.name.startswith(TEMP_PREFIX):
         result.skipped_temp.append(path)
         return
     suffix = path.suffix.lower()
-    if suffix in TARGET_SUFFIXES:
-        result.targets.append(path)
-        if cloud:
-            # Reading this target will make the sync client download
-            # it; recorded so the CLI can announce the download.
-            result.download_targets.append(path)
-    elif suffix in LEGACY_SUFFIXES:
+    if suffix in LEGACY_SUFFIXES:
         result.skipped_legacy.append(path)
-    # Unrelated suffixes are neither a target nor an error: ignored.
+        return
+    if suffix not in TARGET_SUFFIXES:
+        return  # unrelated suffixes are neither a target nor an error
+    if is_cloud_placeholder(st):
+        if not allow_download:
+            result.skipped_cloud.append(path)
+            return
+        # Reading this target will make the sync client download it;
+        # recorded so the CLI can announce the download.
+        result.download_targets.append(path)
+    result.targets.append(path)
 
 
 def _enter_directory(result: WalkResult, path: Path, st: os.stat_result, *,
-                      follow_symlinks: bool, allow_download: bool,
+                      follow_symlinks: bool,
                       visited: set[tuple[int, int]]) -> bool:
     """Return True when *path* should be descended into.
 
-    Records *path* in ``skipped_cloud`` (without recursing) when it is
-    a cloud placeholder. When *follow_symlinks* is true, also guards
-    against revisiting the same directory identity twice, which is
-    what makes cyclic and diamond symlinks safe to follow.
+    Directories are always entered — including cloud-placeholder
+    (dataless) ones, whose enumeration transfers listing metadata only;
+    the files inside are still guarded individually by
+    :func:`_classify_file`. When *follow_symlinks* is true, a visited
+    set of directory identities prevents revisiting the same directory
+    twice, which is what makes cyclic and diamond symlinks safe to
+    follow.
     """
     if follow_symlinks:
         key = (st.st_dev, st.st_ino)
         if key in visited:
             return False
         visited.add(key)
-    if not allow_download and is_cloud_placeholder(st):
-        result.skipped_cloud.append(path)
-        return False
     return True
 
 
@@ -209,7 +215,6 @@ def _walk_directory(root: Path, result: WalkResult, *, follow_symlinks: bool,
                 continue  # symlink ignored, or following it failed
             if _enter_directory(result, dir_path, child_st,
                                  follow_symlinks=follow_symlinks,
-                                 allow_download=allow_download,
                                  visited=visited):
                 kept_dirs.append(name)
         dirs[:] = kept_dirs
@@ -238,18 +243,21 @@ def discover_targets(roots: Sequence[Path], *,
     * Each root may be a file (classified directly into the result
       buckets) or a directory (walked recursively). A nonexistent root
       is recorded in ``errors``.
-    * Classification order per file: cloud placeholder (unless
-      *allow_download*) -> ``~$`` temp -> suffix match (targets /
-      skipped_legacy / no bucket for unrelated suffixes). Suffixes are
-      compared case-insensitively; only ``os.lstat`` /
-      ``os.stat(..., follow_symlinks=False)`` metadata may be used.
-    * Directories whose stat shows a cloud placeholder are recorded in
-      ``skipped_cloud`` and NOT descended into (listing a dataless
-      directory can materialize it), unless *allow_download* is true.
-    * With ``allow_download=True`` placeholder files become ordinary
-      candidates and are additionally recorded in ``download_targets``
-      (so callers can announce the impending download); placeholder
-      directories are descended into normally.
+    * Classification order per file: ``~$`` temp -> suffix match
+      (skipped_legacy / unrelated suffixes ignored) -> cloud
+      placeholder. The name-based filters come first so that only
+      PowerPoint files (``.pptx`` / ``.pptm``) are ever subject to the
+      cloud skip/download accounting — placeholder metadata already
+      carries the name. Suffixes are compared case-insensitively; only
+      ``os.lstat`` / ``os.stat(..., follow_symlinks=False)`` metadata
+      may be used.
+    * Directories are always descended into, including cloud-placeholder
+      (dataless) ones: enumerating them transfers listing metadata only,
+      while the files inside remain individually guarded placeholders.
+    * With ``allow_download=True`` placeholder PowerPoint files become
+      ordinary candidates and are additionally recorded in
+      ``download_targets`` (so callers can announce the impending
+      download).
     * Symbolic links (both to files and to directories) found during
       the walk are ignored unless *follow_symlinks* is true. When
       following, a visited set of ``(st_dev, st_ino)`` directory
@@ -283,7 +291,6 @@ def discover_targets(roots: Sequence[Path], *,
         if stat.S_ISDIR(root_st.st_mode):
             if _enter_directory(result, root, root_st,
                                  follow_symlinks=follow_symlinks,
-                                 allow_download=allow_download,
                                  visited=visited):
                 _walk_directory(root, result,
                                  follow_symlinks=follow_symlinks,
