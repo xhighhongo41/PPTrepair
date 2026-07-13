@@ -3,8 +3,14 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: ja\n"
 
+msgid "=== Scan summary ==="
+msgstr "=== スキャン概要 ==="
+
 msgid "Category"
 msgstr "カテゴリ"
+
+msgid "Corrupted files:"
+msgstr "破損ファイル:"
 
 msgid "Created"
 msgstr "作成日時"
@@ -12,11 +18,23 @@ msgstr "作成日時"
 msgid "Creator"
 msgstr "作成者"
 
+msgid "Diagnostic fingerprints were written to {path}; please attach them to a new issue at {url}."
+msgstr "診断用フィンガープリントを {path} に書き出しました。{url} で新しいIssueを作成し、添付してください。"
+
+msgid "Errors:"
+msgstr "エラー:"
+
 msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
 msgstr "ヒント: OneDriveのWeb版バージョン履歴に、このファイルの破損前のコピーが残っている場合があります。"
 
+msgid "Hint: pass --allow-download to also examine cloud-only files (this may take long and use significant disk space)."
+msgstr "ヒント: --allow-download を指定するとクラウド専用ファイルも検査対象になります(時間がかかり、ディスク容量を大きく消費する場合があります)。"
+
 msgid "Hint: pass --force to overwrite the existing output."
 msgstr "ヒント: 既存の出力を上書きするには --force を指定してください。"
+
+msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
+msgstr "ヒント: --report DIR を付けて再実行すると、共有可能な診断用フィンガープリントを保存できます。"
 
 msgid "Last Modified By"
 msgstr "最終更新者"
@@ -36,6 +54,15 @@ msgstr "更新日時"
 msgid "No slide-title heading found; listing all recovered title strings:"
 msgstr "スライドタイトルの見出しが見つからないため、復元されたタイトル文字列をすべて列挙します:"
 
+msgid "Not examined: {n} cloud-only file(s) were skipped without downloading."
+msgstr "未検査: {n} 件のクラウド専用ファイルはダウンロードせずにスキップされました。"
+
+msgid "Note: {n} additional unknown-pattern file(s) were not fingerprinted because of the per-run cap."
+msgstr "注記: 未知パターンのファイルのうち {n} 件は、1回の実行あたりの上限のためフィンガープリントを記録できませんでした。"
+
+msgid "Note: {n} of the not_a_zip file(s) look like encrypted or legacy Office documents, not OneDrive corruption."
+msgstr "注記: not_a_zip と判定されたファイルのうち {n} 件は、暗号化済みまたはレガシー形式のOfficeファイルの可能性があります(OneDriveの破損ではありません)。"
+
 msgid "Nothing to repair: the file is already an intact PowerPoint package."
 msgstr "修復の必要はありません: このファイルは無傷のPowerPointパッケージです。"
 
@@ -48,8 +75,17 @@ msgstr "再診断結果: {verdict}"
 msgid "Salvaged entries: {ok} of {total}"
 msgstr "救出エントリ: {total} 件中 {ok} 件"
 
+msgid "Scanned: {n} file(s)"
+msgstr "スキャン件数: {n} 件"
+
 msgid "Series"
 msgstr "系列"
+
+msgid "Skipped: {n} Office temp file(s)"
+msgstr "スキップ: Officeの一時ファイル {n} 件"
+
+msgid "Skipped: {n} legacy .ppt file(s)"
+msgstr "スキップ: レガシー .ppt ファイル {n} 件"
 
 msgid "Slide titles recovered from document properties:"
 msgstr "文書プロパティから復元されたスライドタイトル:"
@@ -62,6 +98,9 @@ msgstr "復元フォルダは内容を種類別に整理しています: images/
 
 msgid "Title"
 msgstr "タイトル"
+
+msgid "Unknown pattern: {n} file(s) did not match any known corruption pattern."
+msgstr "未知パターン: {n} 件のファイルはどの既知の破損パターンにも一致しませんでした。"
 
 msgid "Unrepairable: no recoverable content was found."
 msgstr "修復不能: 復元可能な内容が見つかりませんでした。"

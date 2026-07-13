@@ -108,7 +108,45 @@ $ pptrepair repair broken.pptx --lang ja       # report language
 
 The report language is selectable with `--lang` (`en`, `ja`, `zh`, `ko`, `es`, `fr`, `de`; default English). An existing output is never overwritten unless you pass `--force`; `--json` gives machine-readable results. Exit codes: `0` — artifact produced (or the file was already intact), `1` — nothing recoverable, `2` — usage or I/O error.
 
+### Scanning whole folder trees
+
+```console
+$ pptrepair scan ~/OneDrive/Documents            # find corrupted files
+$ pptrepair scan ~/slides --report scan_out      # also save reports
+```
+
+`scan` walks each directory recursively, diagnoses every `.pptx` / `.pptm` file it finds (read-only, nothing is written without `--report`), prints corrupted files as they are found, and ends with a summary:
+
+```
+Projects/deck1.pptx: head_zero_fill
+Projects/old/deck2.pptx: tail_truncated
+=== Scan summary ===
+Scanned: 16 file(s)
+  normal: 14
+  head_zero_fill: 1
+  tail_truncated: 1
+```
+
+Useful to know:
+
+* **Cloud-only files are never downloaded by default.** Placeholder files that exist only in the cloud (OneDrive Files On-Demand, iCloud Drive, and other clients built on the OS-standard placeholder mechanisms) are detected from metadata alone and skipped; the summary always states how many files were left unexamined. Pass `--allow-download` to have them downloaded and examined too (this may take long and use significant disk space). Clients with proprietary placeholder implementations — notably Google Drive for desktop on Windows — cannot be detected this way, so reading their files may still trigger a download.
+* Encrypted or legacy binary Office files (OLE compound documents) are recognized and reported as such rather than as corruption. Legacy `.ppt` and Office `~$` lock files are counted and skipped; symbolic links are ignored unless you pass `--follow-symlinks`.
+* `--report DIR` writes `scan_report.txt`, machine-readable `scan_report.json`, and — for unknown corruption patterns — anonymous diagnostic fingerprints (see below). An existing report directory needs `--force`. `--lang` and `--json` work like in `repair`.
+* Exit codes: `0` — everything examined is intact, `1` — corruption found, `2` — some paths could not be examined.
+
+### Reporting unknown corruption patterns
+
+When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `not_a_zip` that is not an encrypted/legacy Office file), running it with `--report` writes one `diagnostics/<id>.diag.json` fingerprint per affected file (at most 20 per run). A fingerprint contains **structural information only** — byte offsets, an entropy profile, ZIP statistics and standardized OOXML part names — never your document's text, images, file name or path. The file's basename is included only if you opt in with `--include-filenames`.
+
+If you hit an unknown pattern, please review the fingerprint file yourself and consider attaching it to a [new issue](https://github.com/xhighhongo41/PPTrepair/issues/new/choose) using the *Unknown corruption pattern report* template. These reports are what future repair strategies get built from.
+
 ## Changelog
+
+### ver 1.1 (2026-07-13)
+- Added the `pptrepair scan` command: recursively sweeps directory trees for corrupted `.pptx` / `.pptm` files, streaming per-file verdicts and ending with a summary (all 7 report languages supported)
+- Cloud-only placeholder files (OneDrive Files On-Demand, iCloud Drive and other OS-standard placeholder mechanisms) are detected from metadata and skipped without triggering downloads; `--allow-download` opts in, and every scan discloses how many files were left unexamined
+- Opt-in `--report` folder with `scan_report.txt` / `scan_report.json` and anonymous, shareable diagnostic fingerprints (versioned schema, no document content) for unknown corruption patterns, plus a GitHub issue template for submitting them
+- Encrypted and legacy binary Office files (OLE compound documents) are now recognized and no longer look like corruption candidates
 
 ### ver 1.0 (2026-07-12)
 - Added the `pptrepair repair` command: rebuilds a consistent, openable .pptx from tail-truncated and version-mixed files, or produces a recovery folder (images, media, recovered text, chart data, raw parts and a damage report) when the slide bodies are unrecoverable

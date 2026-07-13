@@ -3,8 +3,14 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: zh\n"
 
+msgid "=== Scan summary ==="
+msgstr "=== 扫描摘要 ==="
+
 msgid "Category"
 msgstr "类别"
+
+msgid "Corrupted files:"
+msgstr "损坏的文件:"
 
 msgid "Created"
 msgstr "创建时间"
@@ -12,11 +18,23 @@ msgstr "创建时间"
 msgid "Creator"
 msgstr "创建者"
 
+msgid "Diagnostic fingerprints were written to {path}; please attach them to a new issue at {url}."
+msgstr "诊断指纹已写入 {path};请在 {url} 新建 Issue 并附上这些文件。"
+
+msgid "Errors:"
+msgstr "错误:"
+
 msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
 msgstr "提示: OneDrive 网页版的版本历史记录中可能保留着此文件损坏前的副本。"
 
+msgid "Hint: pass --allow-download to also examine cloud-only files (this may take long and use significant disk space)."
+msgstr "提示: 使用 --allow-download 也可检查仅云端存储的文件(可能耗时较长并占用大量磁盘空间)。"
+
 msgid "Hint: pass --force to overwrite the existing output."
 msgstr "提示: 使用 --force 可覆盖已存在的输出。"
+
+msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
+msgstr "提示: 使用 --report DIR 重新运行,以保存可共享的诊断指纹。"
 
 msgid "Last Modified By"
 msgstr "最后修改者"
@@ -36,6 +54,15 @@ msgstr "修改时间"
 msgid "No slide-title heading found; listing all recovered title strings:"
 msgstr "未找到幻灯片标题标头，以下列出所有恢复的标题字符串:"
 
+msgid "Not examined: {n} cloud-only file(s) were skipped without downloading."
+msgstr "未检查: {n} 个仅云端文件已跳过,未下载。"
+
+msgid "Note: {n} additional unknown-pattern file(s) were not fingerprinted because of the per-run cap."
+msgstr "提示: 有 {n} 个未知模式文件因单次运行上限未生成指纹。"
+
+msgid "Note: {n} of the not_a_zip file(s) look like encrypted or legacy Office documents, not OneDrive corruption."
+msgstr "提示: 在判定为 not_a_zip 的文件中,有 {n} 个看起来像是加密或旧版 Office 文档,而非 OneDrive 损坏。"
+
 msgid "Nothing to repair: the file is already an intact PowerPoint package."
 msgstr "无需修复: 该文件已是完好的 PowerPoint 包。"
 
@@ -48,8 +75,17 @@ msgstr "复检结果: {verdict}"
 msgid "Salvaged entries: {ok} of {total}"
 msgstr "已抢救条目: 共 {total} 项中的 {ok} 项"
 
+msgid "Scanned: {n} file(s)"
+msgstr "已扫描: {n} 个文件"
+
 msgid "Series"
 msgstr "系列"
+
+msgid "Skipped: {n} Office temp file(s)"
+msgstr "已跳过: {n} 个 Office 临时文件"
+
+msgid "Skipped: {n} legacy .ppt file(s)"
+msgstr "已跳过: {n} 个旧版 .ppt 文件"
 
 msgid "Slide titles recovered from document properties:"
 msgstr "从文档属性中恢复的幻灯片标题:"
@@ -62,6 +98,9 @@ msgstr "恢复文件夹按类型整理抢救出的内容: images/ 和 media/ 存
 
 msgid "Title"
 msgstr "标题"
+
+msgid "Unknown pattern: {n} file(s) did not match any known corruption pattern."
+msgstr "未知模式: {n} 个文件未匹配任何已知损坏模式。"
 
 msgid "Unrepairable: no recoverable content was found."
 msgstr "无法修复: 未找到可恢复的内容。"

@@ -4,7 +4,8 @@
 known OneDrive corruption patterns; ``pptrepair repair`` rebuilds an
 openable presentation from the surviving data, or salvages the
 surviving content into a recovery folder when the slides themselves
-are gone.
+are gone; ``pptrepair scan`` sweeps whole directory trees and collects
+shareable diagnostic fingerprints for unknown corruption patterns.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

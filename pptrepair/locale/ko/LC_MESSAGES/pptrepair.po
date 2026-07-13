@@ -3,8 +3,14 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: ko\n"
 
+msgid "=== Scan summary ==="
+msgstr "=== 스캔 요약 ==="
+
 msgid "Category"
 msgstr "범주"
+
+msgid "Corrupted files:"
+msgstr "손상된 파일:"
 
 msgid "Created"
 msgstr "만든 날짜"
@@ -12,11 +18,23 @@ msgstr "만든 날짜"
 msgid "Creator"
 msgstr "만든 이"
 
+msgid "Diagnostic fingerprints were written to {path}; please attach them to a new issue at {url}."
+msgstr "진단용 핑거프린트를 {path} 에 저장했습니다. {url} 에 새 이슈를 만들어 첨부해 주세요."
+
+msgid "Errors:"
+msgstr "오류:"
+
 msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
 msgstr "힌트: OneDrive 웹 버전 기록에 이 파일이 손상되기 전의 복사본이 남아 있을 수 있습니다."
 
+msgid "Hint: pass --allow-download to also examine cloud-only files (this may take long and use significant disk space)."
+msgstr "힌트: --allow-download 를 지정하면 클라우드 전용 파일도 검사합니다(시간이 오래 걸리고 디스크 공간을 많이 사용할 수 있습니다)."
+
 msgid "Hint: pass --force to overwrite the existing output."
 msgstr "힌트: 기존 출력을 덮어쓰려면 --force 를 지정하세요."
+
+msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
+msgstr "힌트: --report DIR 옵션으로 다시 실행하면 공유 가능한 진단용 핑거프린트를 저장할 수 있습니다."
 
 msgid "Last Modified By"
 msgstr "마지막 수정자"
@@ -36,6 +54,15 @@ msgstr "수정한 날짜"
 msgid "No slide-title heading found; listing all recovered title strings:"
 msgstr "슬라이드 제목 머리글을 찾을 수 없어 복구된 제목 문자열을 모두 나열합니다:"
 
+msgid "Not examined: {n} cloud-only file(s) were skipped without downloading."
+msgstr "미검사: 클라우드 전용 파일 {n}개를 다운로드하지 않고 건너뛰었습니다."
+
+msgid "Note: {n} additional unknown-pattern file(s) were not fingerprinted because of the per-run cap."
+msgstr "참고: 알 수 없는 패턴 파일 중 {n}개는 실행당 상한 때문에 핑거프린트를 기록하지 못했습니다."
+
+msgid "Note: {n} of the not_a_zip file(s) look like encrypted or legacy Office documents, not OneDrive corruption."
+msgstr "참고: not_a_zip 로 판정된 파일 중 {n}개는 암호화되었거나 레거시 Office 문서로 보입니다(OneDrive 손상이 아님)."
+
 msgid "Nothing to repair: the file is already an intact PowerPoint package."
 msgstr "복구할 필요 없음: 이 파일은 이미 온전한 PowerPoint 패키지입니다."
 
@@ -48,8 +75,17 @@ msgstr "재검사 결과: {verdict}"
 msgid "Salvaged entries: {ok} of {total}"
 msgstr "복구된 항목: 총 {total}개 중 {ok}개"
 
+msgid "Scanned: {n} file(s)"
+msgstr "스캔한 파일: {n}개"
+
 msgid "Series"
 msgstr "계열"
+
+msgid "Skipped: {n} Office temp file(s)"
+msgstr "건너뜀: Office 임시 파일 {n}개"
+
+msgid "Skipped: {n} legacy .ppt file(s)"
+msgstr "건너뜀: 레거시 .ppt 파일 {n}개"
 
 msgid "Slide titles recovered from document properties:"
 msgstr "문서 속성에서 복구한 슬라이드 제목:"
@@ -62,6 +98,9 @@ msgstr "복구 폴더는 내용을 종류별로 정리합니다: images/ 와 med
 
 msgid "Title"
 msgstr "제목"
+
+msgid "Unknown pattern: {n} file(s) did not match any known corruption pattern."
+msgstr "알 수 없는 패턴: {n}개의 파일이 알려진 손상 패턴과 일치하지 않았습니다."
 
 msgid "Unrepairable: no recoverable content was found."
 msgstr "복구 불가: 복구할 수 있는 내용을 찾지 못했습니다."

@@ -2,7 +2,13 @@ msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 
+msgid "=== Scan summary ==="
+msgstr ""
+
 msgid "Category"
+msgstr ""
+
+msgid "Corrupted files:"
 msgstr ""
 
 msgid "Created"
@@ -11,10 +17,22 @@ msgstr ""
 msgid "Creator"
 msgstr ""
 
+msgid "Diagnostic fingerprints were written to {path}; please attach them to a new issue at {url}."
+msgstr ""
+
+msgid "Errors:"
+msgstr ""
+
 msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
 msgstr ""
 
+msgid "Hint: pass --allow-download to also examine cloud-only files (this may take long and use significant disk space)."
+msgstr ""
+
 msgid "Hint: pass --force to overwrite the existing output."
+msgstr ""
+
+msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
 msgstr ""
 
 msgid "Last Modified By"
@@ -35,6 +53,15 @@ msgstr ""
 msgid "No slide-title heading found; listing all recovered title strings:"
 msgstr ""
 
+msgid "Not examined: {n} cloud-only file(s) were skipped without downloading."
+msgstr ""
+
+msgid "Note: {n} additional unknown-pattern file(s) were not fingerprinted because of the per-run cap."
+msgstr ""
+
+msgid "Note: {n} of the not_a_zip file(s) look like encrypted or legacy Office documents, not OneDrive corruption."
+msgstr ""
+
 msgid "Nothing to repair: the file is already an intact PowerPoint package."
 msgstr ""
 
@@ -47,7 +74,16 @@ msgstr ""
 msgid "Salvaged entries: {ok} of {total}"
 msgstr ""
 
+msgid "Scanned: {n} file(s)"
+msgstr ""
+
 msgid "Series"
+msgstr ""
+
+msgid "Skipped: {n} Office temp file(s)"
+msgstr ""
+
+msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr ""
 
 msgid "Slide titles recovered from document properties:"
@@ -60,6 +96,9 @@ msgid "The recovery folder groups salvaged content by kind: images/ and media/ h
 msgstr ""
 
 msgid "Title"
+msgstr ""
+
+msgid "Unknown pattern: {n} file(s) did not match any known corruption pattern."
 msgstr ""
 
 msgid "Unrepairable: no recoverable content was found."

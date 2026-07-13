@@ -9,7 +9,8 @@ Exit codes:
 * 2 — usage error, unreadable path, or unexpected internal error
 
 All inputs are opened read-only; this tool never writes to the files
-it examines.
+it examines (``scan --report`` writes only inside its report
+directory).
 """
 
 from __future__ import annotations
@@ -21,12 +22,12 @@ from pathlib import Path
 import pptrepair
 from pptrepair import i18n
 from pptrepair import repair as repair_module
-from pptrepair.census import from_central_directory, from_lfh_scan
-from pptrepair.classify import Diagnosis, Verdict, classify
+from pptrepair import scan as scan_module
+from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.rebuild import RebuildError
 from pptrepair.report import (render_json, render_repair_json,
-                              render_repair_text, render_text)
-from pptrepair.scanner import scan_structure
+                              render_repair_text, render_scan_json,
+                              render_scan_text, render_text)
 
 EXIT_OK = 0
 EXIT_CORRUPT = 1
@@ -91,6 +92,49 @@ def build_parser() -> argparse.ArgumentParser:
                              "(default: en)")
     repair.add_argument("--json", action="store_true", dest="json_output",
                         help="emit a JSON object instead of a text report")
+
+    scan = subparsers.add_parser(
+        "scan",
+        help="recursively scan directories for corrupted PowerPoint files",
+        description=(
+            "Walk each DIR recursively, diagnose every .pptx/.pptm file "
+            "found, and print a summary of intact and corrupted files. "
+            "Files are opened read-only; nothing is written unless "
+            "--report is given."
+        ),
+    )
+    scan.add_argument("roots", metavar="DIR", nargs="+",
+                      help="directory (or file) to scan")
+    scan.add_argument("--report", metavar="DIR", default=None,
+                      help=(
+                          "write scan_report.txt / scan_report.json and, "
+                          "for unknown corruption patterns, shareable "
+                          "anonymous diagnostic fingerprints into DIR"
+                      ))
+    scan.add_argument("--force", action="store_true",
+                      help="reuse an existing --report directory")
+    scan.add_argument("--all", action="store_true", dest="show_all",
+                      help="list every scanned file, not only corrupted "
+                           "ones")
+    scan.add_argument("--lang", choices=i18n.SUPPORTED_LANGUAGES,
+                      default=i18n.DEFAULT_LANGUAGE,
+                      help="language of the human-readable output "
+                           "(default: en)")
+    scan.add_argument("--json", action="store_true", dest="json_output",
+                      help="emit a JSON object instead of text output")
+    scan.add_argument("--follow-symlinks", action="store_true",
+                      help="follow symbolic links while walking "
+                           "(default: ignore them)")
+    scan.add_argument("--include-filenames", action="store_true",
+                      help="include file basenames in diagnostic "
+                           "fingerprints (default: anonymous)")
+    scan.add_argument("--allow-download", action="store_true",
+                      help=(
+                          "also read cloud-only placeholder files; this "
+                          "makes the sync client download their content "
+                          "and may take long and use significant disk "
+                          "space (default: skip them without downloading)"
+                      ))
     return parser
 
 
@@ -141,24 +185,10 @@ def _diagnose_file(file: str) -> tuple[Diagnosis | None, str | None]:
     Returns ``(diagnosis, None)`` on success, or ``(None, message)`` when
     the path is unusable or the pipeline raises; *message* is meant to
     be printed to stderr and never includes the ``pptrepair: error:``
-    prefix (added by the caller).
+    prefix (added by the caller). The pipeline itself lives in
+    :func:`pptrepair.scan.diagnose_file`, shared with ``scan``.
     """
-    path = Path(file)
-    if not path.exists():
-        return None, f"{file}: no such file"
-    if not path.is_file():
-        return None, f"{file}: not a regular file"
-
-    try:
-        structure = scan_structure(path)
-        cd_census = from_central_directory(path)
-        lfh_census = from_lfh_scan(path)
-        diagnosis = classify(path, structure, cd_census, lfh_census)
-    except Exception as exc:
-        # Any pipeline failure is reported for this file only; processing
-        # of the remaining files must continue.
-        return None, f"{file}: {type(exc).__name__}: {exc}"
-    return diagnosis, None
+    return scan_module.diagnose_file(Path(file))
 
 
 def run_repair(file: str, output: str | None, mode: str, force: bool,
@@ -227,6 +257,86 @@ def run_repair(file: str, output: str | None, mode: str, force: bool,
     return EXIT_OK if outcome.success else EXIT_CORRUPT
 
 
+def run_scan(roots: list[str], report: str | None, force: bool,
+             show_all: bool, lang: str, json_output: bool,
+             follow_symlinks: bool, include_filenames: bool,
+             allow_download: bool) -> int:
+    """Scan directory trees, print the results, and return an exit code.
+
+    Implementation requirements:
+
+    * Call :func:`pptrepair.scan.scan_paths` with the options mapped
+      through.
+      :class:`pptrepair.repair.OutputExistsError` (existing ``--report``
+      dir without ``--force``) prints the error plus a translated
+      ``--force`` hint to stderr and returns 2, mirroring ``repair``.
+    * Text mode streams one line per diagnosed file through the
+      ``progress`` callback while scanning: corrupted files always,
+      intact ones only with *show_all*; format ``{path}: {verdict}``
+      (and `` -> {error}`` for pipeline failures, streamed to stderr).
+      JSON mode passes no callback and prints nothing during the scan.
+    * After the scan, text mode prints
+      :func:`render_scan_text(result, tr, include_files=False)
+      <pptrepair.report.render_scan_text>`; JSON mode prints
+      :func:`render_scan_json <pptrepair.report.render_scan_json>`.
+    * With ``--report``, additionally write ``scan_report.txt``
+      (``render_scan_text(result, tr, include_files=True)`` + trailing
+      newline, UTF-8) and ``scan_report.json``
+      (``render_scan_json(result)`` + trailing newline, UTF-8) into the
+      report directory — in *both* output modes.
+    * Exit code: 2 when ``result.had_errors()``, else 1 when any
+      diagnosed file is not NORMAL, else 0 (cloud-skips alone never
+      change the exit code).
+    """
+    tr = i18n.get_translator(lang)
+    report_dir = Path(report) if report is not None else None
+
+    def _report_progress(outcome: scan_module.FileOutcome) -> None:
+        if outcome.error is not None:
+            # diagnose_file's error message already carries the path
+            # ("{path}: {reason}"); stream it as-is.
+            print(outcome.error, file=sys.stderr)
+            return
+        assert outcome.diagnosis is not None
+        if show_all or outcome.diagnosis.verdict != Verdict.NORMAL:
+            print(f"{outcome.path}: {outcome.diagnosis.verdict.value}")
+
+    try:
+        result = scan_module.scan_paths(
+            [Path(root) for root in roots],
+            report_dir=report_dir,
+            force=force,
+            follow_symlinks=follow_symlinks,
+            allow_download=allow_download,
+            include_filenames=include_filenames,
+            progress=None if json_output else _report_progress,
+        )
+    except repair_module.OutputExistsError as exc:
+        print(f"pptrepair: error: {exc}", file=sys.stderr)
+        print(tr("Hint: pass --force to overwrite the existing output."),
+              file=sys.stderr)
+        return EXIT_ERROR
+
+    if json_output:
+        print(render_scan_json(result))
+    else:
+        print(render_scan_text(result, tr, include_files=False))
+
+    if report_dir is not None:
+        text_report = render_scan_text(result, tr, include_files=True)
+        (report_dir / "scan_report.txt").write_text(
+            text_report + "\n", encoding="utf-8")
+        json_report = render_scan_json(result)
+        (report_dir / "scan_report.json").write_text(
+            json_report + "\n", encoding="utf-8")
+
+    if result.had_errors():
+        return EXIT_ERROR
+    if result.corrupted():
+        return EXIT_CORRUPT
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns the process exit code."""
     parser = build_parser()
@@ -236,5 +346,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "repair":
         return run_repair(args.file, args.output, args.mode, args.force,
                           args.lang, args.json_output)
+    if args.command == "scan":
+        return run_scan(args.roots, args.report, args.force, args.show_all,
+                        args.lang, args.json_output, args.follow_symlinks,
+                        args.include_filenames, args.allow_download)
     parser.error(f"unknown command: {args.command}")
     return EXIT_ERROR

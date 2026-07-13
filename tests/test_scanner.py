@@ -207,6 +207,26 @@ def test_head_kind_other(tmp_path: Path) -> None:
     assert result.head_kind == "other"
 
 
+def test_head_kind_cfb(tmp_path: Path) -> None:
+    """A file starting with the OLE compound signature is ``"cfb"``."""
+    path = tmp_path / "encrypted.pptx"
+    path.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x42" * 100)
+
+    result = scan_structure(path)
+
+    assert result.head_kind == "cfb"
+
+
+def test_head_kind_truncated_cfb_signature_is_other(tmp_path: Path) -> None:
+    """Only the first four CFB bytes present -> ``"other"``, not ``"cfb"``."""
+    path = tmp_path / "short.bin"
+    path.write_bytes(b"\xd0\xcf\x11\xe0")
+
+    result = scan_structure(path)
+
+    assert result.head_kind == "other"
+
+
 # --- chunk-size independence ---------------------------------------------
 
 
