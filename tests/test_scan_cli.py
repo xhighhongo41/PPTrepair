@@ -260,6 +260,39 @@ def test_cloud_skip_note_always_shown_and_reported_in_json(
     assert str(cloud_path) in payload["skipped_cloud"]
 
 
+def test_allow_download_announces_each_download_on_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: CaptureFixture
+) -> None:
+    """--allow-download prints a per-file download notice to stderr,
+    in text and JSON mode alike; without the flag nothing is announced."""
+    root = _mkroot(tmp_path)
+    cloud_path = _write(root, "cloud.pptx",
+                        build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+    cloud_ino = cloud_path.stat().st_ino
+    monkeypatch.setattr(
+        walker_module, "is_cloud_placeholder",
+        lambda st: st.st_ino == cloud_ino)
+
+    exit_code = main(["scan", str(root), "--allow-download"])
+    captured = capsys.readouterr()
+    assert exit_code == EXIT_OK
+    assert f"Downloading cloud-only file: {cloud_path}" in captured.err
+    assert "Downloading" not in captured.out  # stderr only
+    assert "Scanned: 1 file(s)" in captured.out
+
+    exit_code_json = main(["scan", str(root), "--allow-download", "--json"])
+    captured_json = capsys.readouterr()
+    assert exit_code_json == EXIT_OK
+    payload = json.loads(captured_json.out)  # stdout stays pure JSON
+    assert payload["summary"]["scanned"] == 1
+    assert f"Downloading cloud-only file: {cloud_path}" in captured_json.err
+
+    exit_code_skip = main(["scan", str(root)])
+    captured_skip = capsys.readouterr()
+    assert exit_code_skip == EXIT_OK
+    assert "Downloading" not in captured_skip.err
+
+
 def test_no_cloud_skip_message_absent_when_nothing_skipped(
     tmp_path: Path, capsys: CaptureFixture
 ) -> None:

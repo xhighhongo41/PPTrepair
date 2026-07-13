@@ -134,3 +134,6 @@ msgstr "온전한 PowerPoint 패키지"
 
 msgid "not a ZIP-based file"
 msgstr "ZIP 기반 파일이 아닙니다"
+
+msgid "Downloading cloud-only file: {path}"
+msgstr "클라우드 전용 파일 다운로드 중: {path}"

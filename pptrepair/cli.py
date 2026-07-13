@@ -275,6 +275,10 @@ def run_scan(roots: list[str], report: str | None, force: bool,
       intact ones only with *show_all*; format ``{path}: {verdict}``
       (and `` -> {error}`` for pipeline failures, streamed to stderr).
       JSON mode passes no callback and prints nothing during the scan.
+    * In both modes, a translated ``Downloading cloud-only file: ...``
+      notice goes to stderr (flushed) right before a placeholder target
+      is read with ``--allow-download``, so the terminal is never
+      silent while the sync client hydrates a file.
     * After the scan, text mode prints
       :func:`render_scan_text(result, tr, include_files=False)
       <pptrepair.report.render_scan_text>`; JSON mode prints
@@ -301,6 +305,13 @@ def run_scan(roots: list[str], report: str | None, force: bool,
         if show_all or outcome.diagnosis.verdict != Verdict.NORMAL:
             print(f"{outcome.path}: {outcome.diagnosis.verdict.value}")
 
+    def _announce_download(path: Path) -> None:
+        # Reading the placeholder blocks until the sync client has
+        # downloaded it, so flush the notice out first. stderr keeps
+        # the stdout verdict stream / JSON parseable.
+        print(tr("Downloading cloud-only file: {path}").format(path=path),
+              file=sys.stderr, flush=True)
+
     try:
         result = scan_module.scan_paths(
             [Path(root) for root in roots],
@@ -310,6 +321,7 @@ def run_scan(roots: list[str], report: str | None, force: bool,
             allow_download=allow_download,
             include_filenames=include_filenames,
             progress=None if json_output else _report_progress,
+            on_download=_announce_download,
         )
     except repair_module.OutputExistsError as exc:
         print(f"pptrepair: error: {exc}", file=sys.stderr)

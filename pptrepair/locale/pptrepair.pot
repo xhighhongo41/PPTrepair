@@ -20,6 +20,9 @@ msgstr ""
 msgid "Diagnostic fingerprints were written to {path}; please attach them to a new issue at {url}."
 msgstr ""
 
+msgid "Downloading cloud-only file: {path}"
+msgstr ""
+
 msgid "Errors:"
 msgstr ""
 

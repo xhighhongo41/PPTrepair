@@ -134,3 +134,6 @@ msgstr "paquete de PowerPoint intacto"
 
 msgid "not a ZIP-based file"
 msgstr "no es un archivo basado en ZIP"
+
+msgid "Downloading cloud-only file: {path}"
+msgstr "Descargando archivo exclusivo de la nube: {path}"

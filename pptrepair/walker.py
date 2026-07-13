@@ -65,6 +65,9 @@ class WalkResult:
     """Office ``~$`` owner/lock temp files."""
     skipped_cloud: list[Path] = field(default_factory=list)
     """Cloud-only placeholders (files and directories) left untouched."""
+    download_targets: list[Path] = field(default_factory=list)
+    """Subset of ``targets`` that are cloud-only placeholders and will
+    be downloaded when read (populated only with ``allow_download``)."""
     errors: list[tuple[Path, str]] = field(default_factory=list)
     """Paths that could not be examined, with the error message."""
 
@@ -131,7 +134,8 @@ def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
     Applies the cloud -> temp -> suffix classification order described
     in :func:`discover_targets`.
     """
-    if not allow_download and is_cloud_placeholder(st):
+    cloud = is_cloud_placeholder(st)
+    if cloud and not allow_download:
         result.skipped_cloud.append(path)
         return
     if path.name.startswith(TEMP_PREFIX):
@@ -140,6 +144,10 @@ def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
     suffix = path.suffix.lower()
     if suffix in TARGET_SUFFIXES:
         result.targets.append(path)
+        if cloud:
+            # Reading this target will make the sync client download
+            # it; recorded so the CLI can announce the download.
+            result.download_targets.append(path)
     elif suffix in LEGACY_SUFFIXES:
         result.skipped_legacy.append(path)
     # Unrelated suffixes are neither a target nor an error: ignored.
@@ -238,8 +246,10 @@ def discover_targets(roots: Sequence[Path], *,
     * Directories whose stat shows a cloud placeholder are recorded in
       ``skipped_cloud`` and NOT descended into (listing a dataless
       directory can materialize it), unless *allow_download* is true.
-    * With ``allow_download=True`` the placeholder check is skipped
-      entirely; placeholders become ordinary candidates.
+    * With ``allow_download=True`` placeholder files become ordinary
+      candidates and are additionally recorded in ``download_targets``
+      (so callers can announce the impending download); placeholder
+      directories are descended into normally.
     * Symbolic links (both to files and to directories) found during
       the walk are ignored unless *follow_symlinks* is true. When
       following, a visited set of ``(st_dev, st_ino)`` directory

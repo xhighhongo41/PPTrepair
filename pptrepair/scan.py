@@ -134,7 +134,8 @@ def scan_paths(roots: Sequence[Path], *,
                follow_symlinks: bool = False,
                allow_download: bool = False,
                include_filenames: bool = False,
-               progress: Callable[[FileOutcome], None] | None = None
+               progress: Callable[[FileOutcome], None] | None = None,
+               on_download: Callable[[Path], None] | None = None
                ) -> ScanResult:
     """Scan *roots* and return the aggregate result.
 
@@ -150,6 +151,10 @@ def scan_paths(roots: Sequence[Path], *,
     * Diagnose targets in walk order with :func:`diagnose_file`; wrap
       each into a :class:`FileOutcome` and invoke *progress* with it
       (when given) right after, so the CLI can stream results.
+    * Invoke *on_download* (when given) with the path of every target
+      listed in ``walk.download_targets`` right *before* diagnosing it:
+      reading a cloud-only placeholder blocks while the sync client
+      downloads it, and the announcement must appear first.
     * For each outcome that is a fingerprint target
       (:func:`is_fingerprint_target`), when *report_dir* is given:
       write ``<report_dir>/diagnostics/<file_id>.diag.json``
@@ -181,7 +186,11 @@ def scan_paths(roots: Sequence[Path], *,
     )
     fingerprints_written = 0
 
+    download_set = set(walk.download_targets)
+
     for path in walk.targets:
+        if on_download is not None and path in download_set:
+            on_download(path)
         diagnosis, error = diagnose_file(path)
         outcome = FileOutcome(path=path, diagnosis=diagnosis, error=error)
 

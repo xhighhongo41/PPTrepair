@@ -261,7 +261,7 @@ def test_discover_targets_skips_cloud_placeholder_directory(
 def test_discover_targets_allow_download_bypasses_cloud_check(
         tmp_path: Path, monkeypatch) -> None:
     """With allow_download=True, placeholders are treated as ordinary
-    candidates and the placeholder check itself is never consulted."""
+    candidates instead of being skipped."""
     root = tmp_path / "root"
     root.mkdir()
     cloud_file = root / "cloud.pptx"
@@ -276,6 +276,33 @@ def test_discover_targets_allow_download_bypasses_cloud_check(
 
     assert result.skipped_cloud == []
     assert result.targets == [cloud_file]
+
+
+def test_discover_targets_allow_download_records_download_targets(
+        tmp_path: Path, monkeypatch) -> None:
+    """With allow_download=True, placeholder targets are additionally
+    listed in download_targets; local files and the default mode are
+    not."""
+    root = tmp_path / "root"
+    root.mkdir()
+    cloud_file = root / "cloud.pptx"
+    cloud_file.write_bytes(b"data")
+    local_file = root / "local.pptx"
+    local_file.write_bytes(b"data")
+    cloud_ino = os.lstat(cloud_file).st_ino
+
+    monkeypatch.setattr(
+        walker, "is_cloud_placeholder",
+        lambda st: st.st_ino == cloud_ino)
+
+    result = discover_targets([root], allow_download=True)
+    assert result.targets == [cloud_file, local_file]
+    assert result.download_targets == [cloud_file]
+
+    default_result = discover_targets([root])
+    assert default_result.download_targets == []
+    assert default_result.skipped_cloud == [cloud_file]
+    assert default_result.targets == [local_file]
 
 
 # --- discover_targets: error handling ---------------------------------------
