@@ -275,6 +275,10 @@ def run_scan(roots: list[str], report: str | None, force: bool,
       intact ones only with *show_all*; format ``{path}: {verdict}``
       (and `` -> {error}`` for pipeline failures, streamed to stderr).
       JSON mode passes no callback and prints nothing during the scan.
+    * Walk errors (nonexistent roots, unreadable directories) print one
+      ``pptrepair: error: {message}`` line each to stderr in both
+      modes, so an exit-2 scan never masquerades as a clean 0-file
+      report.
     * In both modes, a translated ``Downloading cloud-only file: ...``
       notice goes to stderr (flushed) right before a placeholder target
       is read with ``--allow-download``, so the terminal is never
@@ -328,6 +332,13 @@ def run_scan(roots: list[str], report: str | None, force: bool,
         print(tr("Hint: pass --force to overwrite the existing output."),
               file=sys.stderr)
         return EXIT_ERROR
+
+    # Walk errors (nonexistent roots, unreadable directories) are not
+    # streamed by the progress callback, so a silent exit-2 would look
+    # like a clean 0-file scan; report them the way `check` does. The
+    # message already carries the offending path.
+    for _path, message in result.walk.errors:
+        print(f"pptrepair: error: {message}", file=sys.stderr)
 
     if json_output:
         print(render_scan_json(result))

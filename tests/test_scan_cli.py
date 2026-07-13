@@ -94,11 +94,33 @@ def test_nonexistent_root_exits_error(tmp_path: Path, capsys: CaptureFixture) ->
 
     exit_code = main(["scan", str(missing), "--json"])
 
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
     assert exit_code == EXIT_ERROR
-    payload = json.loads(out)
+    payload = json.loads(captured.out)
     assert payload["summary"]["errors"] >= 1
     assert payload["errors"]
+    # The error must also be visible, not only encoded in the payload.
+    assert "pptrepair: error:" in captured.err
+    assert "No such file or directory" in captured.err
+
+
+def test_nonexistent_root_prints_error_in_text_mode(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """Text mode: a missing root is announced on stderr instead of
+    silently producing a clean-looking 0-file summary; other roots are
+    still scanned."""
+    missing = tmp_path / "does_not_exist"
+    root = _mkroot(tmp_path)
+    _write(root, "normal.pptx", build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+
+    exit_code = main(["scan", str(missing), str(root)])
+
+    captured = capsys.readouterr()
+    assert exit_code == EXIT_ERROR
+    assert "pptrepair: error:" in captured.err
+    assert str(missing) in captured.err
+    assert "Scanned: 1 file(s)" in captured.out
 
 
 # --- --json schema --------------------------------------------------------
