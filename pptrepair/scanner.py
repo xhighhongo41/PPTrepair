@@ -36,6 +36,10 @@ LFH_SIG = b"PK\x03\x04"
 CD_SIG = b"PK\x01\x02"
 EOCD_SIG = b"PK\x05\x06"
 
+#: OLE compound file (CFB) signature — encrypted Office documents and
+#: legacy binary formats (.doc/.xls/.ppt) start with these eight bytes.
+CFB_SIG = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
 #: struct format of the fixed 22-byte EOCD record (including signature).
 EOCD_STRUCT = "<IHHHHIIH"
 
@@ -92,9 +96,10 @@ class ZipStructure:
 
     size: int
     head_kind: str
-    """Kind of the first four bytes: ``"zip"`` (``PK\\x03\\x04``),
-    ``"zeros"`` (all zero bytes), or ``"other"`` (anything else,
-    including files shorter than four bytes)."""
+    """Kind of the file head: ``"zip"`` (``PK\\x03\\x04``), ``"cfb"``
+    (OLE compound file signature, eight bytes), ``"zeros"`` (first four
+    bytes all zero), or ``"other"`` (anything else, including files
+    shorter than four bytes)."""
     zero_runs: list[ZeroRun]
     lfh_offsets: list[int]
     cd_sig_count: int
@@ -229,10 +234,12 @@ def _parse_eocd(path: Path, offset: int) -> EocdInfo | None:
 
 
 def _detect_head_kind(head: bytes) -> str:
-    """Classify the first four bytes of the file."""
-    if head == LFH_SIG:
+    """Classify the head bytes of the file (up to eight are examined)."""
+    if head[:4] == LFH_SIG:
         return "zip"
-    if len(head) == 4 and head.count(0) == 4:
+    if head[:8] == CFB_SIG:
+        return "cfb"
+    if len(head) >= 4 and head[:4].count(0) == 4:
         return "zeros"
     return "other"
 
@@ -270,7 +277,7 @@ def scan_structure(path: Path) -> ZipStructure:
             if not chunk:
                 break
             if offset == 0:
-                head = chunk[:4]
+                head = chunk[:8]
 
             _detect_zero_blocks(chunk, offset, zero_blocks)
 

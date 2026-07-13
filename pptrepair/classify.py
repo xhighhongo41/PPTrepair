@@ -179,8 +179,19 @@ def _decide(structure: ZipStructure, cd_census: CensusResult | None,
     return _decide_partial_cd(structure, cd_census, lfh_census)
 
 
+#: Evidence line attached to files whose head bears the OLE compound
+#: file signature: those are encrypted Office documents or legacy binary
+#: formats rather than OneDrive chunk corruption.
+CFB_EVIDENCE = (
+    "file is an OLE compound document (likely an encrypted Office file "
+    "or a legacy binary Office format, not OneDrive corruption)"
+)
+
+
 def _decide_no_signatures(structure: ZipStructure) -> tuple[Verdict, list[str]]:
     """Rule 1's second branch: no ZIP signatures found anywhere."""
+    if structure.head_kind == "cfb":
+        return Verdict.NOT_A_ZIP, [CFB_EVIDENCE]
     if structure.zero_ratio() >= ALL_ZERO_RATIO:
         return Verdict.OTHER_CORRUPT, _zero_ratio_evidence(structure)
     return Verdict.NOT_A_ZIP, ["no ZIP signatures found"]
@@ -194,6 +205,10 @@ def _decide_no_eocd(structure: ZipStructure) -> tuple[Verdict, list[str]]:
             "file starts with a local file header signature",
             f"{len(structure.lfh_offsets)} local file header(s) found",
         ]
+    if structure.head_kind == "cfb":
+        # Stray ZIP signatures inside an OLE container (e.g. embedded
+        # archives) do not make the file a damaged pptx package.
+        return Verdict.NOT_A_ZIP, [CFB_EVIDENCE]
     if structure.zero_ratio() >= ALL_ZERO_RATIO:
         return Verdict.OTHER_CORRUPT, _zero_ratio_evidence(structure)
     return Verdict.OTHER_CORRUPT, ["no end-of-central-directory record"]

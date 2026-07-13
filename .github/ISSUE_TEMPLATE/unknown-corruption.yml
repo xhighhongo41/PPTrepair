@@ -1,0 +1,71 @@
+name: Unknown corruption pattern report
+description: >-
+  Report a corrupted PowerPoint file that pptrepair could not recognize
+  (verdict "other_corrupt" or an unexplained "not_a_zip") by attaching
+  the anonymous diagnostic fingerprint from `pptrepair scan --report`.
+title: "[unknown-pattern] "
+labels: ["unknown-pattern"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve PPTrepair!
+
+        A diagnostic fingerprint (`*.diag.json`) contains only structural
+        information — byte offsets, an entropy profile, ZIP statistics and
+        standardized OOXML part names such as `ppt/slides/slide1.xml`.
+        It never contains your document's text, images or file name.
+        Still, please open the file and review it yourself before attaching.
+
+        To generate fingerprints:
+
+        ```console
+        $ pptrepair scan <folder> --report <report-dir>
+        ```
+
+        Fingerprints for unknown patterns are written to
+        `<report-dir>/diagnostics/`.
+  - type: input
+    id: version
+    attributes:
+      label: pptrepair version
+      description: Output of `pptrepair --version`
+      placeholder: pptrepair 1.1.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS and cloud storage client (optional)
+      description: e.g. "macOS 15.5, OneDrive (personal account)"
+    validations:
+      required: false
+  - type: textarea
+    id: fingerprint
+    attributes:
+      label: Diagnostic fingerprint
+      description: >-
+        Attach the `.diag.json` file(s) from the diagnostics/ folder,
+        or paste their content here.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context (optional)
+      description: >-
+        Anything you know about the file's history: when it was likely
+        corrupted, which devices and apps accessed it, whether the cloud
+        provider's web version history still holds an intact copy, etc.
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: >-
+            I have reviewed the fingerprint file(s) and confirmed they
+            contain no document content I am unwilling to share.
+          required: true

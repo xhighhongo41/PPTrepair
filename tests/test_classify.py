@@ -11,7 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from pptrepair.census import CensusResult, EntryResult
-from pptrepair.classify import HEAD_ZERO_MIN_LENGTH, Verdict, classify
+from pptrepair.classify import (CFB_EVIDENCE, HEAD_ZERO_MIN_LENGTH, Verdict,
+                                classify)
 from pptrepair.scanner import EocdInfo, ZeroRun, ZipStructure
 
 DUMMY_PATH = Path("dummy.pptx")
@@ -307,6 +308,32 @@ def test_text_like_file_is_not_a_zip() -> None:
     diag = classify(DUMMY_PATH, structure, None, lfh)
 
     assert diag.verdict == Verdict.NOT_A_ZIP
+
+
+def test_cfb_file_is_not_a_zip_with_ole_evidence() -> None:
+    """An OLE compound file (e.g. encrypted pptx) -> NOT_A_ZIP + CFB note."""
+    structure = _structure(size=8192, head_kind="cfb", zero_runs=[],
+                            lfh_offsets=[], cd_sig_count=0, eocd=None)
+    lfh = _census("lfh_scan", [])
+
+    diag = classify(DUMMY_PATH, structure, None, lfh)
+
+    assert diag.verdict == Verdict.NOT_A_ZIP
+    assert CFB_EVIDENCE in diag.evidence
+
+
+def test_cfb_file_with_stray_zip_signatures_is_still_not_a_zip() -> None:
+    """Stray LFH signatures inside an OLE container do not change the
+    verdict: the file is an OLE document, not a damaged pptx."""
+    structure = _structure(size=65536, head_kind="cfb", zero_runs=[],
+                            lfh_offsets=[3000, 12000], cd_sig_count=0,
+                            eocd=None)
+    lfh = _census("lfh_scan", [])
+
+    diag = classify(DUMMY_PATH, structure, None, lfh)
+
+    assert diag.verdict == Verdict.NOT_A_ZIP
+    assert CFB_EVIDENCE in diag.evidence
 
 
 def test_eocd_present_but_cd_census_none_is_other_corrupt() -> None:

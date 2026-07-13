@@ -3,8 +3,14 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Language: es\n"
 
+msgid "=== Scan summary ==="
+msgstr "=== Resumen del análisis ==="
+
 msgid "Category"
 msgstr "Categoría"
+
+msgid "Corrupted files:"
+msgstr "Archivos dañados:"
 
 msgid "Created"
 msgstr "Creado"
@@ -12,11 +18,23 @@ msgstr "Creado"
 msgid "Creator"
 msgstr "Autor"
 
+msgid "Diagnostic fingerprints were written to {path}; please attach them to a new issue at {url}."
+msgstr "Las huellas de diagnóstico se guardaron en {path}; adjúntelas a un nuevo issue en {url}."
+
+msgid "Errors:"
+msgstr "Errores:"
+
 msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
 msgstr "Sugerencia: el historial de versiones web de OneDrive puede conservar una copia intacta anterior de este archivo."
 
+msgid "Hint: pass --allow-download to also examine cloud-only files (this may take long and use significant disk space)."
+msgstr "Sugerencia: use --allow-download para examinar también los archivos exclusivos de la nube (esto puede tardar mucho y usar mucho espacio en disco)."
+
 msgid "Hint: pass --force to overwrite the existing output."
 msgstr "Sugerencia: use --force para sobrescribir la salida existente."
+
+msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
+msgstr "Sugerencia: vuelva a ejecutar con --report DIR para guardar huellas de diagnóstico compartibles."
 
 msgid "Last Modified By"
 msgstr "Última modificación por"
@@ -36,6 +54,15 @@ msgstr "Modificado"
 msgid "No slide-title heading found; listing all recovered title strings:"
 msgstr "No se encontró el encabezado de títulos de diapositivas; se listan todas las cadenas de título recuperadas:"
 
+msgid "Not examined: {n} cloud-only file(s) were skipped without downloading."
+msgstr "No examinados: se omitieron {n} archivo(s) exclusivo(s) de la nube sin descargarlos."
+
+msgid "Note: {n} additional unknown-pattern file(s) were not fingerprinted because of the per-run cap."
+msgstr "Nota: {n} archivo(s) adicionales de patrón desconocido no se pudieron registrar por el límite por ejecución."
+
+msgid "Note: {n} of the not_a_zip file(s) look like encrypted or legacy Office documents, not OneDrive corruption."
+msgstr "Nota: {n} de los archivos not_a_zip parecen documentos de Office cifrados o de formato antiguo, no daño de OneDrive."
+
 msgid "Nothing to repair: the file is already an intact PowerPoint package."
 msgstr "Nada que reparar: el archivo ya es un paquete de PowerPoint intacto."
 
@@ -48,8 +75,17 @@ msgstr "Veredicto de la nueva comprobación: {verdict}"
 msgid "Salvaged entries: {ok} of {total}"
 msgstr "Entradas rescatadas: {ok} de {total}"
 
+msgid "Scanned: {n} file(s)"
+msgstr "Analizados: {n} archivo(s)"
+
 msgid "Series"
 msgstr "Serie"
+
+msgid "Skipped: {n} Office temp file(s)"
+msgstr "Omitidos: {n} archivo(s) temporal(es) de Office"
+
+msgid "Skipped: {n} legacy .ppt file(s)"
+msgstr "Omitidos: {n} archivo(s) .ppt antiguos"
 
 msgid "Slide titles recovered from document properties:"
 msgstr "Títulos de diapositivas recuperados de las propiedades del documento:"
@@ -62,6 +98,9 @@ msgstr "La carpeta de recuperación agrupa el contenido rescatado por tipo: imag
 
 msgid "Title"
 msgstr "Título"
+
+msgid "Unknown pattern: {n} file(s) did not match any known corruption pattern."
+msgstr "Patrón desconocido: {n} archivo(s) no coincidieron con ningún patrón de daño conocido."
 
 msgid "Unrepairable: no recoverable content was found."
 msgstr "Irreparable: no se encontró contenido recuperable."
@@ -95,3 +134,6 @@ msgstr "paquete de PowerPoint intacto"
 
 msgid "not a ZIP-based file"
 msgstr "no es un archivo basado en ZIP"
+
+msgid "Downloading cloud-only file: {path}"
+msgstr "Descargando archivo exclusivo de la nube: {path}"
