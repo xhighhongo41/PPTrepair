@@ -107,8 +107,8 @@ $ pptrepair repair broken.pptx --lang ja       # report language
 
 `repair` never modifies the input file. Depending on the damage it produces one of:
 
-* **a rebuilt presentation** `<name>.repaired.pptx` — when the surviving data still contains the slides (tail-truncated, version-mixed and interior-damaged files). On this project's real-world corpus every surviving slide was recovered and the results open in PowerPoint.
-* **a trimmed presentation** `<name>.repaired.pptx` — when a complete archive is hiding behind appended foreign data (`tail_foreign_data`): the appended bytes are cut off and the original archive is recovered byte-for-byte, losing nothing (falls back to a rebuild if the leading archive is itself damaged).
+* **a rebuilt presentation** `<name>.repaired.pptx` — when the surviving data still contains the slides (tail-truncated, version-mixed and interior-damaged files). Every surviving slide is recovered. When some images were lost with the damage, the rebuilt file still opens, but PowerPoint may offer to repair it once to clear the now-missing picture references; a future release will remove those stale references automatically.
+* **a trimmed presentation** `<name>.repaired.pptx` — when a complete archive is hiding behind appended foreign data (`tail_foreign_data`): the appended bytes are cut off to recover the original archive byte-for-byte, falling back to a rebuild when the leading archive is itself damaged.
 * **a recovery folder** `<name>.salvaged/` — when the slide bodies themselves were destroyed. Surviving pictures land in `images/`, audio/video in `media/`, best-effort recovered text (slide titles, document metadata) in `texts/`, chart data in `charts/`, every raw part in `parts/`, plus a human-readable `REPORT.txt` stating exactly what was lost.
 
 The report language is selectable with `--lang` (`en`, `ja`, `zh`, `ko`, `es`, `fr`, `de`; default English). An existing output is never overwritten unless you pass `--force`; `--json` gives machine-readable results. Exit codes: `0` — artifact produced (or the file was already intact), `1` — nothing recoverable, `2` — usage or I/O error.
@@ -152,6 +152,7 @@ If you hit an unknown pattern, please review the fingerprint file yourself and c
 - `repair` gains a trim strategy: a `tail_foreign_data` file is recovered byte-for-byte by cutting the appended foreign data off (falling back to a salvage rebuild when the leading archive is itself damaged); `interior_damage` files repair through the existing rebuild path
 - More sensitive head-damage detection: `head_zero_fill` now triggers from 4 KiB of leading zeros (previously 64 KiB), and `head_foreign_data` is recognized even when the foreign data starts with zero bytes
 - Empty and fully zero-filled files no longer consume diagnostic-fingerprint slots and receive honest "nothing survives" guidance instead of unknown-pattern prompts
+- Known limitation: when a repair recovers slides whose images were lost, the rebuilt file still references those now-missing pictures, so PowerPoint may offer a one-time repair on first open; automatic cleanup of the stale references is planned for the next release
 
 ### ver 1.1 (2026-07-13)
 - Added the `pptrepair scan` command: recursively sweeps directory trees for corrupted `.pptx` / `.pptm` files, streaming per-file verdicts and ending with a summary (all 7 report languages supported)
