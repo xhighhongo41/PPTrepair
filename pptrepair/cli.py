@@ -24,7 +24,9 @@ from pptrepair import i18n
 from pptrepair import repair as repair_module
 from pptrepair import scan as scan_module
 from pptrepair.classify import Diagnosis, Verdict
-from pptrepair.integrity import RefIntegrityResult, inspect_references
+from pptrepair.integrity import (RefIntegrityResult, StructureIntegrityResult,
+                                 TimingIntegrityResult, inspect_references,
+                                 inspect_structure, inspect_timing)
 from pptrepair.rebuild import RebuildError
 from pptrepair.report import (render_json, render_repair_json,
                               render_repair_text, render_scan_json,
@@ -148,22 +150,30 @@ def run_check(files: list[str], json_output: bool) -> int:
     * A nonexistent or unreadable path prints an error to stderr and
       forces exit code 2, but remaining files are still processed.
     * A file diagnosed as NORMAL is additionally passed through
-      :func:`pptrepair.integrity.inspect_references`; an unexpected
-      failure there is reported the same way as a diagnosis failure
-      (stderr + exit code 2) but does not stop the remaining files. Any
-      other verdict skips this pass (its :class:`RefIntegrityResult` is
-      None), since check's exit code never depends on it either way.
+      :func:`pptrepair.integrity.inspect_references`,
+      :func:`pptrepair.integrity.inspect_timing` and
+      :func:`pptrepair.integrity.inspect_structure`; an unexpected
+      failure in any of the three is reported the same way as a
+      diagnosis failure (stderr + exit code 2), with all three results
+      falling back to None, but does not stop the remaining files. Any
+      other verdict skips this pass entirely (all three results stay
+      None), since check's exit code never depends on any of them
+      either way.
     * With ``json_output`` a single JSON array covering all successfully
       diagnosed files goes to stdout; otherwise one text report per
       file.
     * Exit code: 2 on any per-file error, else 1 if any verdict is not
-      NORMAL, else 0. The reference-integrity result never changes this:
-      a package with dangling references is still reported as normal
-      (see ``開発資料/v1.1.2実装計画.md`` §4.3 for the rationale).
+      NORMAL, else 0. None of the three integrity results ever changes
+      this: a package with dangling references, timing inconsistencies
+      or missing structural relationships is still reported as normal
+      (see ``開発資料/v1.1.2実装計画.md`` §4.3 and §10 addendum item C
+      for the rationale).
     """
     had_error = False
     diagnoses: list[Diagnosis] = []
     integrities: list[RefIntegrityResult | None] = []
+    timings: list[TimingIntegrityResult | None] = []
+    structures: list[StructureIntegrityResult | None] = []
 
     for file in files:
         diagnosis, error_message = _diagnose_file(file)
@@ -175,9 +185,13 @@ def run_check(files: list[str], json_output: bool) -> int:
         diagnoses.append(diagnosis)
 
         integrity: RefIntegrityResult | None = None
+        timing: TimingIntegrityResult | None = None
+        structure: StructureIntegrityResult | None = None
         if diagnosis.verdict == Verdict.NORMAL:
             try:
                 integrity = inspect_references(Path(file))
+                timing = inspect_timing(Path(file))
+                structure = inspect_structure(Path(file))
             except Exception as exc:
                 # Defensive: a verdict of NORMAL already implies the
                 # archive opened cleanly once, so this should not
@@ -185,15 +199,20 @@ def run_check(files: list[str], json_output: bool) -> int:
                 print(f"pptrepair: error: {file}: "
                       f"{type(exc).__name__}: {exc}", file=sys.stderr)
                 had_error = True
+                integrity = timing = structure = None
         integrities.append(integrity)
+        timings.append(timing)
+        structures.append(structure)
 
     if json_output:
-        print(render_json(diagnoses, integrities))
+        print(render_json(diagnoses, integrities, timings, structures))
     else:
         for index, diagnosis in enumerate(diagnoses):
             if index > 0:
                 print()
-            print(render_text(diagnosis, ref_integrity=integrities[index]))
+            print(render_text(diagnosis, ref_integrity=integrities[index],
+                              timing=timings[index],
+                              structure=structures[index]))
 
     if had_error:
         return EXIT_ERROR

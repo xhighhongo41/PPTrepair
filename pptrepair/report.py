@@ -10,7 +10,9 @@ from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.scanner import ZipStructure
 
 if TYPE_CHECKING:  # avoid runtime import cycles with repair / scan
-    from pptrepair.integrity import RefIntegrityResult
+    from pptrepair.integrity import (RefIntegrityResult,
+                                     StructureIntegrityResult,
+                                     TimingIntegrityResult)
     from pptrepair.repair import RepairOutcome
     from pptrepair.scan import ScanResult
 
@@ -38,7 +40,9 @@ VERDICT_LABELS: dict[Verdict, str] = {
 
 
 def render_text(diagnosis: Diagnosis,
-               ref_integrity: "RefIntegrityResult | None" = None) -> str:
+               ref_integrity: "RefIntegrityResult | None" = None,
+               timing: "TimingIntegrityResult | None" = None,
+               structure: "StructureIntegrityResult | None" = None) -> str:
     """Render one diagnosis as a human-readable multi-line report.
 
     Layout contract (kept stable for tests):
@@ -55,6 +59,21 @@ def render_text(diagnosis: Diagnosis,
       part(s)`` followed by a PowerPoint hint. Omitted entirely when
       *ref_integrity* is None or carries no dangling references, so
       the output of a `check` run on a clean file is unchanged.
+    * when *timing* is given and reports at least one issue (dangling
+      ``spid`` reference or media/shape mismatch; see
+      :func:`pptrepair.integrity.inspect_timing`), one trailing line:
+      ``Timing integrity: <n> inconsistent reference(s) in <m>
+      part(s)``. Omitted when *timing* is None or reports no issue.
+    * when *structure* is given and has at least one missing required
+      relationship (see :func:`pptrepair.integrity.inspect_structure`),
+      a ``Structure integrity: <n> required relationship(s) missing``
+      line followed by one ``  - <part>: no <required_type>
+      relationship`` line per missing entry. Omitted when *structure*
+      is None or reports nothing missing.
+
+    All three integrity summaries are plain, untranslated English (like
+    the rest of this function's output), since ``check`` never routes
+    its text report through a translator.
     """
     lines = [f"=== {diagnosis.path} ==="]
     label = VERDICT_LABELS[diagnosis.verdict]
@@ -80,18 +99,41 @@ def render_text(diagnosis: Diagnosis,
         lines.append(
             "  PowerPoint may offer a one-time repair on first open.")
 
+    if timing is not None and (timing.dangling or timing.media_mismatch):
+        timing_count = len(timing.dangling) + len(timing.media_mismatch)
+        affected_parts = {ref.part for ref in timing.dangling} | {
+            mismatch.part for mismatch in timing.media_mismatch}
+        lines.append(
+            f"Timing integrity: {timing_count} inconsistent reference(s) "
+            f"in {len(affected_parts)} part(s)"
+        )
+
+    if structure is not None and structure.missing:
+        lines.append(
+            f"Structure integrity: {len(structure.missing)} required "
+            "relationship(s) missing"
+        )
+        lines.extend(
+            f"  - {item.part}: no {item.required_type} relationship"
+            for item in structure.missing
+        )
+
     return "\n".join(lines)
 
 
 def render_json(diagnoses: list[Diagnosis],
-               integrities: "list[RefIntegrityResult | None] | None" = None
-               ) -> str:
+               integrities: "list[RefIntegrityResult | None] | None" = None,
+               timings: "list[TimingIntegrityResult | None] | None" = None,
+               structures: "list[StructureIntegrityResult | None] | None"
+               = None) -> str:
     """Render diagnoses as a JSON array (schema kept stable for tests).
 
-    *integrities*, when given, must have the same length as *diagnoses*
-    and pairs up with it index-by-index (each entry is either a
-    :class:`pptrepair.integrity.RefIntegrityResult` or None). Left as
-    the default None, every element's ``xml_ref_integrity`` is null.
+    *integrities*/*timings*/*structures*, each optional, must have the
+    same length as *diagnoses* and pair up with it index-by-index (each
+    entry is either the matching :mod:`pptrepair.integrity` result type
+    or None). Left at their default None, every element's
+    ``xml_ref_integrity``/``timing_integrity``/``structure_integrity``
+    is null.
 
     Each element::
 
@@ -111,14 +153,28 @@ def render_json(diagnoses: list[Diagnosis],
           "xml_ref_integrity": {       # null when no integrity result
             "dangling_count": int,
             "parts": [str, ...]        # sorted, deduplicated part names
+          } | null,
+          "timing_integrity": {        # null when no timing result
+            "dangling_count": int,
+            "media_mismatch_count": int,
+            "parts": [str, ...]        # sorted, deduplicated part names
+          } | null,
+          "structure_integrity": {     # null when no structure result
+            "missing_count": int,
+            "items": [{"part": str, "required": str}, ...]
           } | null
         }
     """
     if integrities is None:
         integrities = [None] * len(diagnoses)
+    if timings is None:
+        timings = [None] * len(diagnoses)
+    if structures is None:
+        structures = [None] * len(diagnoses)
     payload = [
-        _to_dict(diagnosis, integrity)
-        for diagnosis, integrity in zip(diagnoses, integrities)
+        _to_dict(diagnosis, integrity, timing, structure_integrity)
+        for diagnosis, integrity, timing, structure_integrity
+        in zip(diagnoses, integrities, timings, structures)
     ]
     return json.dumps(payload, indent=2)
 
@@ -137,12 +193,15 @@ def _structure_to_dict(structure: ZipStructure | None) -> dict | None:
 
 
 def _to_dict(diagnosis: Diagnosis,
-            integrity: "RefIntegrityResult | None" = None) -> dict:
+            integrity: "RefIntegrityResult | None" = None,
+            timing: "TimingIntegrityResult | None" = None,
+            structure_integrity: "StructureIntegrityResult | None" = None,
+            ) -> dict:
     """Render one diagnosis as a JSON-schema dict.
 
     Used by :func:`render_json` (the ``check`` command) only;
     :func:`render_scan_json` builds its own, unrelated per-file dicts
-    and is unaffected by *integrity*.
+    and is unaffected by *integrity*/*timing*/*structure_integrity*.
     """
     return {
         "path": str(diagnosis.path),
@@ -152,6 +211,9 @@ def _to_dict(diagnosis: Diagnosis,
         "salvage": diagnosis.salvage_summary or None,
         "structure": _structure_to_dict(diagnosis.structure),
         "xml_ref_integrity": _integrity_to_dict(integrity),
+        "timing_integrity": _timing_integrity_to_dict(timing),
+        "structure_integrity":
+            _structure_integrity_to_dict(structure_integrity),
     }
 
 
@@ -164,6 +226,36 @@ def _integrity_to_dict(
     return {
         "dangling_count": len(integrity.dangling),
         "parts": sorted({ref.part for ref in integrity.dangling}),
+    }
+
+
+def _timing_integrity_to_dict(
+    timing: "TimingIntegrityResult | None",
+) -> dict | None:
+    """Render *timing* as its JSON-schema dict, or None when absent."""
+    if timing is None:
+        return None
+    affected_parts = {ref.part for ref in timing.dangling} | {
+        mismatch.part for mismatch in timing.media_mismatch}
+    return {
+        "dangling_count": len(timing.dangling),
+        "media_mismatch_count": len(timing.media_mismatch),
+        "parts": sorted(affected_parts),
+    }
+
+
+def _structure_integrity_to_dict(
+    structure: "StructureIntegrityResult | None",
+) -> dict | None:
+    """Render *structure* as its JSON-schema dict, or None when absent."""
+    if structure is None:
+        return None
+    return {
+        "missing_count": len(structure.missing),
+        "items": [
+            {"part": item.part, "required": item.required_type}
+            for item in structure.missing
+        ],
     }
 
 
@@ -202,6 +294,13 @@ def render_repair_text(outcome: "RepairOutcome",
     * extract only: overview of the recovery-folder layout and the
       OneDrive version-history hint;
     * any warnings, one per line.
+
+    ``recheck_timing_issues``/``recheck_structure_issues`` (see
+    :mod:`pptrepair.integrity`) add no dedicated line here by design (no
+    new translated string was introduced for them): a positive count on
+    a rebuild artifact already surfaces through the warnings list above,
+    and both counts are always available in full via
+    :func:`render_repair_json`.
     """
     diagnosis = outcome.diagnosis
     lines = [f"=== {outcome.src} ==="]
@@ -308,6 +407,8 @@ def render_repair_json(outcome: "RepairOutcome") -> str:
           "trimmed_bytes": int | null,      # trim mode only, else null
           "recheck_verdict": str | null,
           "recheck_dangling_refs": int | null,  # rebuild/trim, else null
+          "recheck_timing_issues": int | null,  # rebuild/trim, else null
+          "recheck_structure_issues": int | null,  # rebuild/trim, else null
           "synthesized_parts": [str, ...],
           "pruned_relationships": [str, ...],
           "pruned_slide_ids": [str, ...],
@@ -332,6 +433,8 @@ def render_repair_json(outcome: "RepairOutcome") -> str:
         "trimmed_bytes": outcome.trimmed_bytes,
         "recheck_verdict": outcome.recheck_verdict,
         "recheck_dangling_refs": outcome.recheck_dangling_refs,
+        "recheck_timing_issues": outcome.recheck_timing_issues,
+        "recheck_structure_issues": outcome.recheck_structure_issues,
         "synthesized_parts":
             list(rebuild_result.synthesized_parts) if rebuild_result else [],
         "pruned_relationships":

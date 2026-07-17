@@ -17,7 +17,8 @@ from pptrepair.census import (CensusResult, from_central_directory,
 from pptrepair.classify import Diagnosis, Verdict, classify
 from pptrepair.extract import ExtractResult, extract_salvage
 from pptrepair.i18n import get_translator
-from pptrepair.integrity import inspect_references
+from pptrepair.integrity import (inspect_references, inspect_structure,
+                                 inspect_timing)
 from pptrepair.rebuild import RebuildResult, rebuild_package
 from pptrepair.salvage import SalvagedEntry, SalvageReader, select_salvageable
 from pptrepair.scanner import scan_structure
@@ -59,6 +60,17 @@ class RepairOutcome:
     """Number of dangling relationship references (see
     :mod:`pptrepair.integrity`) found in the produced artifact by the
     post-repair recheck (rebuild/trim modes only); None otherwise."""
+    recheck_timing_issues: int | None = None
+    """Number of ``p:timing`` shape-id inconsistencies (dangling ``spid``
+    references plus media/shape mismatches; see
+    :func:`pptrepair.integrity.inspect_timing`) found in the produced
+    artifact by the post-repair recheck (rebuild/trim modes only); None
+    otherwise."""
+    recheck_structure_issues: int | None = None
+    """Number of missing required structural relationships (see
+    :func:`pptrepair.integrity.inspect_structure`) found in the produced
+    artifact by the post-repair recheck (rebuild/trim modes only); None
+    otherwise."""
     lost_slide_numbers: list[int] = field(default_factory=list)
     """Slide numbers known to be lost (exact when a CD survived)."""
     lost_entries_total: int = 0
@@ -103,14 +115,18 @@ def repair_file(src: Path, output: Path | None = None, mode: str = "auto",
     * After a rebuild or a successful trim, the artifact is
       re-diagnosed with the check pipeline and the verdict recorded in
       ``recheck_verdict``, and separately re-checked with
-      :func:`pptrepair.integrity.inspect_references`, whose dangling
-      reference count is recorded in ``recheck_dangling_refs``. A
-      positive count on a rebuild artifact also appends a warning
-      (rebuild's own reference cleanup should already have removed
-      them, so this signals a cleanup bug); a positive count after a
-      trim is recorded without a warning, since trim reproduces the
-      original archive byte-for-byte and any dangling reference
-      predates this tool.
+      :func:`pptrepair.integrity.inspect_references`,
+      :func:`pptrepair.integrity.inspect_timing` and
+      :func:`pptrepair.integrity.inspect_structure`, whose counts are
+      recorded in ``recheck_dangling_refs``, ``recheck_timing_issues``
+      and ``recheck_structure_issues`` respectively (the timing count
+      combines dangling ``spid`` references and media/shape mismatches).
+      A positive count on a rebuild artifact also appends a warning for
+      each affected check (rebuild's own cleanup should already have
+      removed them, so this signals a cleanup bug); a positive count
+      after a trim is recorded without a warning, since trim reproduces
+      the original archive byte-for-byte and any inconsistency predates
+      this tool.
     * ``lost_slide_numbers`` / ``lost_entries_total`` are computed from
       the diagnosis (exact when the central directory survived; both
       reset to empty/zero on a successful trim, which loses nothing).
@@ -285,6 +301,14 @@ def _run_rebuild(src: Path, salvaged: list[SalvagedEntry], output_path: Path,
                  outcome: RepairOutcome) -> None:
     """Rebuild *output_path* from *salvaged* and re-diagnose the result.
 
+    Besides the check-pipeline re-diagnosis, the artifact is
+    self-checked with :func:`pptrepair.integrity.inspect_references`,
+    :func:`pptrepair.integrity.inspect_timing` and
+    :func:`pptrepair.integrity.inspect_structure`: a positive count on
+    any of the three means rebuild's own cleanup left something behind,
+    which is a cleanup bug worth surfacing rather than silently
+    shipping, so each appends its own warning.
+
     :raises pptrepair.rebuild.RebuildError: propagated unchanged when the
         salvage set lacks a usable ``ppt/presentation.xml``.
     """
@@ -307,6 +331,27 @@ def _run_rebuild(src: Path, salvaged: list[SalvagedEntry], output_path: Path,
             f"{outcome.recheck_dangling_refs} dangling relationship "
             "reference(s)")
 
+    # Same self-check for the p:timing shape-id inconsistencies (dangling
+    # spid references plus media/shape mismatches) rebuild's cleanup is
+    # meant to resolve.
+    timing = inspect_timing(output_path)
+    outcome.recheck_timing_issues = (
+        len(timing.dangling) + len(timing.media_mismatch))
+    if outcome.recheck_timing_issues > 0:
+        outcome.warnings.append(
+            f"rebuild artifact has {outcome.recheck_timing_issues} "
+            "inconsistent timing reference(s)")
+
+    # Same self-check for required structural relationships (e.g. a slide
+    # master that lost its theme relationship when the theme part itself
+    # was unsalvageable).
+    structure = inspect_structure(output_path)
+    outcome.recheck_structure_issues = len(structure.missing)
+    if outcome.recheck_structure_issues > 0:
+        outcome.warnings.append(
+            f"rebuild artifact is missing {outcome.recheck_structure_issues}"
+            " required structural relationship(s)")
+
 
 #: Chunk size (bytes) used when copying the leading archive during trim,
 #: so multi-gigabyte inputs are never read into memory in one shot.
@@ -316,6 +361,13 @@ _TRIM_CHUNK_SIZE = 8 * 1024 * 1024
 def _run_trim(src: Path, output_path: Path, outcome: RepairOutcome) -> bool:
     """Copy the leading, EOCD-terminated archive out of *src*, dropping
     the foreign data appended after it (``TAIL_FOREIGN_DATA``).
+
+    On success, the trimmed archive is also re-checked with
+    :func:`pptrepair.integrity.inspect_references`,
+    :func:`pptrepair.integrity.inspect_timing` and
+    :func:`pptrepair.integrity.inspect_structure`; every count is only
+    recorded, never warned about, since trim reproduces the original
+    archive byte-for-byte and any inconsistency found predates this tool.
 
     :returns: True and updates *outcome* for success (the trimmed
         archive re-diagnoses as ``NORMAL``); False when trim did not
@@ -356,6 +408,11 @@ def _run_trim(src: Path, output_path: Path, outcome: RepairOutcome) -> bool:
         # recorded, not warned about (see repair_file's docstring).
         integrity = inspect_references(output_path)
         outcome.recheck_dangling_refs = len(integrity.dangling)
+        timing = inspect_timing(output_path)
+        outcome.recheck_timing_issues = (
+            len(timing.dangling) + len(timing.media_mismatch))
+        structure_result = inspect_structure(output_path)
+        outcome.recheck_structure_issues = len(structure_result.missing)
         # Trim keeps every indexed entry; a NORMAL re-check means the
         # whole central directory read back cleanly, so nothing is lost.
         outcome.lost_slide_numbers = []

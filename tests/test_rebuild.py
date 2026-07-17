@@ -24,6 +24,7 @@ from fixtures import build_minimal_pptx
 from pptrepair.census import (EntryResult, categorize, from_central_directory,
                               from_lfh_scan)
 from pptrepair.classify import Verdict, classify
+from pptrepair.integrity import inspect_timing
 from pptrepair.rebuild import RebuildError, rebuild_package
 from pptrepair.salvage import SalvagedEntry
 from pptrepair.scanner import scan_structure
@@ -52,6 +53,7 @@ _VIDEO_REL = f"{_R_NS}/video"
 _MEDIA_REL = f"{_R_NS}/media"
 _HLINK_REL = f"{_R_NS}/hyperlink"
 _CUSTOM_REL = f"{_R_NS}/customXml"
+_THEME_REL = f"{_R_NS}/theme"
 
 
 class FakeReader:
@@ -779,3 +781,252 @@ def test_cleanup_output_has_no_dangling_references(tmp_path: Path) -> None:
     # pictures (bare and grouped) are gone.
     slide = ET.fromstring(_member(output, "ppt/slides/slide1.xml"))
     assert len(slide.findall(f".//{{{_PML_NS}}}pic")) == 1
+
+
+# --- Timing consistency cleanup (v1.1.2 addendum B1) -----------------------
+
+
+def _slide_with_timing(shapes: str, timing: str) -> bytes:
+    """Wrap *shapes* and a *timing* block in a minimal ``p:sld``."""
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
+        f'<p:sld xmlns:p="{_PML_NS}" xmlns:a="{_A_NS}" '
+        f'xmlns:r="{_R_NS}" xmlns:p14="{_P14_NS}">'
+        '<p:cSld><p:spTree><p:nvGrpSpPr/><p:grpSpPr/>'
+        f'{shapes}'
+        '</p:spTree></p:cSld>'
+        f'{timing}'
+        '</p:sld>'
+    ).encode("utf-8")
+
+
+def _timing_seq_and_video(spid: str) -> str:
+    """A timing tree pairing a main animation ``p:seq`` with a ``p:video``.
+
+    The ``p:video`` node targets *spid* (the media shape); the ``p:seq``
+    is a sibling that must survive the video's removal.
+    """
+    return (
+        '<p:timing><p:tnLst><p:par><p:cTn id="1"><p:childTnLst>'
+        '<p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite"/>'
+        '</p:seq>'
+        '<p:video><p:cMediaNode vol="80000"><p:cTn id="7"/>'
+        f'<p:tgtEl><p:spTgt spid="{spid}"/></p:tgtEl>'
+        '</p:cMediaNode></p:video>'
+        '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
+    )
+
+
+def _timing_animation(spid: str) -> str:
+    """A timing tree whose innermost ``p:par`` animates shape *spid*.
+
+    The animated ``p:par`` is the only child of the ``p:seq``'s
+    ``p:childTnLst``, so removing it empties that list.
+    """
+    return (
+        '<p:timing><p:tnLst>'
+        '<p:par><p:cTn id="1"><p:childTnLst>'
+        '<p:seq><p:cTn id="2"><p:childTnLst>'
+        '<p:par><p:cTn id="3"><p:childTnLst>'
+        '<p:set><p:cBhvr><p:cTn id="4"/>'
+        f'<p:tgtEl><p:spTgt spid="{spid}"/></p:tgtEl>'
+        '</p:cBhvr></p:set>'
+        '</p:childTnLst></p:cTn></p:par>'
+        '</p:childTnLst></p:cTn></p:seq>'
+        '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
+    )
+
+
+def _timing_bldlst(spid: str) -> str:
+    """A timing tree whose sole ``p:bldP`` builds shape *spid*."""
+    return (
+        '<p:timing>'
+        '<p:tnLst><p:par><p:cTn id="1"/></p:par></p:tnLst>'
+        f'<p:bldLst><p:bldP spid="{spid}" grpId="0"/></p:bldLst>'
+        '</p:timing>'
+    )
+
+
+def _timing_slide1_payloads(shapes: str, timing: str,
+                            relationships: list[tuple[str, str, str]],
+                            extra_media: tuple[tuple[str, bytes], ...] = ()
+                            ) -> dict[str, bytes]:
+    """Return a salvage set whose slide1 carries *shapes* and *timing*."""
+    payloads = _unzip(
+        build_minimal_pptx(num_slides=2, media_bytes=_MEDIA_BYTES))
+    payloads["ppt/slides/slide1.xml"] = _slide_with_timing(shapes, timing)
+    payloads["ppt/slides/_rels/slide1.xml.rels"] = _rels(relationships)
+    for media_name, media_bytes in extra_media:
+        payloads[media_name] = media_bytes
+    return payloads
+
+
+def test_timing_video_dropped_when_shape_stilled_seq_survives(
+        tmp_path: Path) -> None:
+    """B1(a): a p:video for a stilled shape goes; the p:seq stays put."""
+    payloads = _timing_slide1_payloads(
+        _video_pic("rId2", "rId3", "rId4"), _timing_seq_and_video("5"),
+        [("rId1", _LAYOUT_REL, "../slideLayouts/slideLayout1.xml"),
+         ("rId2", _IMAGE_REL, "../media/image2.png"),
+         ("rId3", _VIDEO_REL, "../media/video1.mp4"),
+         ("rId4", _MEDIA_REL, "../media/media1.mp4")],
+        extra_media=(("ppt/media/image2.png", b"\x89PNG poster data"),))
+    reader = FakeReader(payloads)
+    output = tmp_path / "rebuilt.pptx"
+
+    result = rebuild_package(reader, _entries(payloads), output)
+
+    slide = ET.fromstring(_member(output, "ppt/slides/slide1.xml"))
+    # The poster picture survives as a still image; its media link is gone.
+    assert len(slide.findall(f".//{{{_PML_NS}}}pic")) == 1
+    assert slide.find(f".//{{{_A_NS}}}videoFile") is None
+    assert slide.find(f".//{{{_P14_NS}}}media") is None
+    # The p:video node is removed but the main animation p:seq remains,
+    # and its enclosing p:childTnLst (still holding the seq) is kept.
+    assert slide.find(f".//{{{_PML_NS}}}video") is None
+    assert slide.find(f".//{{{_PML_NS}}}seq") is not None
+    assert slide.find(f".//{{{_PML_NS}}}childTnLst") is not None
+    assert "ppt/slides/slide1.xml: video (spid=5)" in result.removed_elements
+    assert _no_dangling(output) == []
+    timing = inspect_timing(output)
+    assert timing.dangling == []
+    assert timing.media_mismatch == []
+
+
+def test_timing_animation_par_removed_when_shape_gone(tmp_path: Path) -> None:
+    """B1(b): an animation for a removed picture loses its enclosing par."""
+    payloads = _timing_slide1_payloads(
+        _pic("rId2") + _TEXT_SHAPE, _timing_animation("4"),
+        [("rId1", _LAYOUT_REL, "../slideLayouts/slideLayout1.xml"),
+         ("rId2", _IMAGE_REL, "../media/gone.png")])
+    reader = FakeReader(payloads)
+    output = tmp_path / "rebuilt.pptx"
+
+    result = rebuild_package(reader, _entries(payloads), output)
+
+    slide = ET.fromstring(_member(output, "ppt/slides/slide1.xml"))
+    # The broken picture is gone, taking its animation par with it, and
+    # the p:childTnLst emptied by that removal is dropped too (only the
+    # outermost one, still holding the seq, survives).
+    assert slide.findall(f".//{{{_PML_NS}}}pic") == []
+    assert slide.find(f".//{{{_PML_NS}}}set") is None
+    assert slide.find(f".//{{{_PML_NS}}}seq") is not None
+    assert len(slide.findall(f".//{{{_PML_NS}}}childTnLst")) == 1
+    assert "ppt/slides/slide1.xml: pic (rId2)" in result.removed_elements
+    assert "ppt/slides/slide1.xml: par (spid=4)" in result.removed_elements
+    assert _no_dangling(output) == []
+    timing = inspect_timing(output)
+    assert timing.dangling == []
+    assert timing.media_mismatch == []
+
+
+def test_timing_bldp_removed_and_empty_bldlst_dropped(tmp_path: Path) -> None:
+    """B1(c): a build entry for a removed shape goes, emptying its bldLst."""
+    payloads = _timing_slide1_payloads(
+        _pic("rId2") + _TEXT_SHAPE, _timing_bldlst("4"),
+        [("rId1", _LAYOUT_REL, "../slideLayouts/slideLayout1.xml"),
+         ("rId2", _IMAGE_REL, "../media/gone.png")])
+    reader = FakeReader(payloads)
+    output = tmp_path / "rebuilt.pptx"
+
+    result = rebuild_package(reader, _entries(payloads), output)
+
+    slide = ET.fromstring(_member(output, "ppt/slides/slide1.xml"))
+    assert slide.findall(f".//{{{_PML_NS}}}pic") == []
+    assert slide.find(f".//{{{_PML_NS}}}bldP") is None
+    assert slide.find(f".//{{{_PML_NS}}}bldLst") is None
+    assert "ppt/slides/slide1.xml: bldP (spid=4)" in result.removed_elements
+    assert _no_dangling(output) == []
+
+
+def test_timing_animation_kept_for_stilled_shape(tmp_path: Path) -> None:
+    """B1(d): a non-media animation on a merely stilled shape is kept."""
+    payloads = _timing_slide1_payloads(
+        _video_pic("rId2", "rId3", "rId4"), _timing_animation("5"),
+        [("rId1", _LAYOUT_REL, "../slideLayouts/slideLayout1.xml"),
+         ("rId2", _IMAGE_REL, "../media/image2.png"),
+         ("rId3", _VIDEO_REL, "../media/video1.mp4"),
+         ("rId4", _MEDIA_REL, "../media/media1.mp4")],
+        extra_media=(("ppt/media/image2.png", b"\x89PNG poster data"),))
+    reader = FakeReader(payloads)
+    output = tmp_path / "rebuilt.pptx"
+
+    result = rebuild_package(reader, _entries(payloads), output)
+
+    slide = ET.fromstring(_member(output, "ppt/slides/slide1.xml"))
+    # The shape survives as a still image, so its animation stays valid.
+    assert len(slide.findall(f".//{{{_PML_NS}}}pic")) == 1
+    assert slide.find(f".//{{{_A_NS}}}videoFile") is None
+    assert slide.find(f".//{{{_PML_NS}}}set") is not None
+    spids = [node.get("spid") for node in slide.iter(f"{{{_PML_NS}}}spTgt")]
+    assert spids == ["5"]
+    assert not any("spid=5" in item for item in result.removed_elements)
+    timing = inspect_timing(output)
+    assert timing.dangling == []
+    assert timing.media_mismatch == []
+
+
+# --- Missing theme synthesis (v1.1.2 addendum B2) --------------------------
+
+
+def test_theme_synthesized_when_master_reference_lost(tmp_path: Path) -> None:
+    """B2(e): a master's lost theme is synthesized under its original name."""
+    payloads = _unzip(
+        build_minimal_pptx(num_slides=2, media_bytes=_MEDIA_BYTES))
+    # The master still references a theme part the damage carried away.
+    payloads["ppt/slideMasters/_rels/slideMaster1.xml.rels"] = _rels(
+        [("rId1", _LAYOUT_REL, "../slideLayouts/slideLayout1.xml"),
+         ("rId2", _THEME_REL, "../theme/theme2.xml")])
+    assert "ppt/theme/theme2.xml" not in payloads
+    reader = FakeReader(payloads)
+    output = tmp_path / "rebuilt.pptx"
+
+    result = rebuild_package(reader, _entries(payloads), output)
+
+    assert "ppt/theme/theme2.xml" in result.synthesized_parts
+    assert any("theme2.xml" in warning and "default theme" in warning
+               for warning in result.warnings)
+
+    # The synthesized part is a well-formed default Office theme.
+    theme = ET.fromstring(_member(output, "ppt/theme/theme2.xml"))
+    assert theme.tag == f"{{{_A_NS}}}theme"
+    clr_scheme = theme.find(
+        f"{{{_A_NS}}}themeElements/{{{_A_NS}}}clrScheme")
+    assert clr_scheme is not None
+    assert len(list(clr_scheme)) == 12
+    assert theme.find(
+        f"{{{_A_NS}}}themeElements/{{{_A_NS}}}fmtScheme") is not None
+
+    # The master keeps its theme relationship (not pruned as dangling).
+    master_rels = ET.fromstring(
+        _member(output, "ppt/slideMasters/_rels/slideMaster1.xml.rels"))
+    theme_targets = {rel.get("Target") for rel in master_rels
+                     if rel.get("Type") == _THEME_REL}
+    assert theme_targets == {"../theme/theme2.xml"}
+
+    # A Content_Types Override is present even though the salvaged catalog
+    # never listed the (then-missing) theme part.
+    content_types = _member(output, "[Content_Types].xml").decode("utf-8")
+    assert "/ppt/theme/theme2.xml" in content_types
+    assert _verdict(output) == Verdict.NORMAL
+
+
+def test_theme_not_synthesized_when_present(tmp_path: Path) -> None:
+    """B2(f): a surviving theme is left untouched, not re-synthesized."""
+    payloads = _unzip(
+        build_minimal_pptx(num_slides=2, media_bytes=_MEDIA_BYTES))
+    # The master references the theme that is actually present.
+    payloads["ppt/slideMasters/_rels/slideMaster1.xml.rels"] = _rels(
+        [("rId1", _LAYOUT_REL, "../slideLayouts/slideLayout1.xml"),
+         ("rId2", _THEME_REL, "../theme/theme1.xml")])
+    original_theme = payloads["ppt/theme/theme1.xml"]
+    reader = FakeReader(payloads)
+    output = tmp_path / "rebuilt.pptx"
+
+    result = rebuild_package(reader, _entries(payloads), output)
+
+    assert "ppt/theme/theme1.xml" not in result.synthesized_parts
+    assert not any("default theme" in warning for warning in result.warnings)
+    # The genuine theme part is streamed through byte-identical.
+    assert _member(output, "ppt/theme/theme1.xml") == original_theme
+    assert _verdict(output) == Verdict.NORMAL

@@ -17,7 +17,9 @@ import pytest
 
 from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.i18n import get_translator
-from pptrepair.integrity import DanglingRef, RefIntegrityResult
+from pptrepair.integrity import (DanglingRef, MediaMismatch, MissingStructure,
+                                 RefIntegrityResult, StructureIntegrityResult,
+                                 TimingIntegrityResult, TimingRef)
 from pptrepair.rebuild import RebuildResult
 from pptrepair.repair import RepairOutcome
 from pptrepair.report import (VERDICT_LABELS, render_json, render_repair_json,
@@ -219,6 +221,46 @@ def test_render_repair_json_reference_integrity_defaults_are_empty() -> None:
     assert payload["removed_elements"] == []
 
 
+# --- v1.1.2 addendum: timing/structure recheck fields in render_repair_json
+
+
+def test_render_repair_json_includes_timing_and_structure_recheck_counts() -> None:
+    """render_repair_json reports the recheck_timing_issues and
+    recheck_structure_issues counts when the recheck ran."""
+    diagnosis = _diagnosis(Verdict.INTERIOR_DAMAGE, "broken.pptx")
+    outcome = RepairOutcome(
+        src=Path("broken.pptx"),
+        diagnosis=diagnosis,
+        mode="rebuild",
+        success=True,
+        output_path=Path("broken.repaired.pptx"),
+        recheck_verdict="normal",
+        recheck_dangling_refs=0,
+        recheck_timing_issues=0,
+        recheck_structure_issues=0,
+    )
+
+    payload = json.loads(render_repair_json(outcome))
+
+    assert payload["recheck_timing_issues"] == 0
+    assert payload["recheck_structure_issues"] == 0
+
+
+def test_render_repair_json_timing_and_structure_recheck_counts_are_null_by_default() -> None:
+    """Outside rebuild/trim mode (recheck never ran), recheck_timing_issues
+    and recheck_structure_issues are both null."""
+    diagnosis = _diagnosis(Verdict.NORMAL, "normal.pptx")
+    outcome = RepairOutcome(
+        src=Path("normal.pptx"), diagnosis=diagnosis,
+        mode="none", success=True,
+    )
+
+    payload = json.loads(render_repair_json(outcome))
+
+    assert payload["recheck_timing_issues"] is None
+    assert payload["recheck_structure_issues"] is None
+
+
 # --- v1.1.2: reference-integrity lines in render_repair_text -------------
 
 
@@ -377,4 +419,143 @@ def test_render_json_reports_dangling_count_and_parts() -> None:
     assert payload[0]["xml_ref_integrity"] == {
         "dangling_count": 2,
         "parts": ["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],
+    }
+
+
+# --- v1.1.2 addendum: timing/structure summary in render_text (check) ----
+
+
+def test_render_text_unchanged_without_timing_or_structure() -> None:
+    """render_text's output is unchanged when timing/structure are
+    omitted, keeping the plain check report layout stable."""
+    diagnosis = _diagnosis(Verdict.NORMAL, "clean.pptx")
+
+    assert render_text(diagnosis) == render_text(
+        diagnosis, timing=None, structure=None)
+
+
+def test_render_text_unchanged_for_clean_timing_and_structure() -> None:
+    """A TimingIntegrityResult/StructureIntegrityResult with nothing to
+    report add nothing to render_text's output."""
+    diagnosis = _diagnosis(Verdict.NORMAL, "clean.pptx")
+    clean_timing = TimingIntegrityResult(
+        parts_scanned=5, dangling=[], media_mismatch=[], parse_errors=[])
+    clean_structure = StructureIntegrityResult(
+        parts_checked=5, missing=[], parse_errors=[])
+
+    text = render_text(diagnosis, timing=clean_timing,
+                       structure=clean_structure)
+
+    assert text == render_text(diagnosis)
+
+
+def test_render_text_reports_timing_inconsistencies() -> None:
+    """A TimingIntegrityResult with dangling refs and media mismatches
+    adds a single summary line covering both, counting distinct parts
+    across the two lists."""
+    diagnosis = _diagnosis(Verdict.NORMAL, "clean.pptx")
+    timing = TimingIntegrityResult(
+        parts_scanned=5,
+        dangling=[
+            TimingRef(part="ppt/slides/slide1.xml", element="spTgt",
+                      spid="99"),
+        ],
+        media_mismatch=[
+            MediaMismatch(part="ppt/slides/slide2.xml", kind="video",
+                          spid="6"),
+        ],
+        parse_errors=[],
+    )
+
+    text = render_text(diagnosis, timing=timing)
+
+    assert (
+        "Timing integrity: 2 inconsistent reference(s) in 2 part(s)" in text
+    )
+
+
+def test_render_text_reports_missing_structural_relationships() -> None:
+    """A StructureIntegrityResult with missing entries adds a summary
+    line plus one indented line per missing relationship."""
+    diagnosis = _diagnosis(Verdict.NORMAL, "clean.pptx")
+    structure = StructureIntegrityResult(
+        parts_checked=5,
+        missing=[
+            MissingStructure(part="ppt/slideMasters/slideMaster2.xml",
+                             required_type="theme"),
+        ],
+        parse_errors=[],
+    )
+
+    text = render_text(diagnosis, structure=structure)
+
+    assert "Structure integrity: 1 required relationship(s) missing" in text
+    assert (
+        "  - ppt/slideMasters/slideMaster2.xml: no theme relationship"
+        in text
+    )
+
+
+# --- v1.1.2 addendum: timing_integrity/structure_integrity in render_json --
+
+
+def test_render_json_timing_and_structure_integrity_are_null_by_default() -> None:
+    """Without timings/structures lists, every entry's timing_integrity
+    and structure_integrity are null."""
+    payload = json.loads(render_json([_diagnosis(Verdict.NORMAL)]))
+
+    assert payload[0]["timing_integrity"] is None
+    assert payload[0]["structure_integrity"] is None
+
+
+def test_render_json_reports_timing_integrity_counts_and_parts() -> None:
+    """With a TimingIntegrityResult supplied, timing_integrity reports
+    the dangling/media-mismatch counts and the sorted, deduplicated
+    list of affected parts."""
+    diagnosis = _diagnosis(Verdict.NORMAL)
+    timing = TimingIntegrityResult(
+        parts_scanned=5,
+        dangling=[
+            TimingRef(part="ppt/slides/slide2.xml", element="spTgt",
+                      spid="99"),
+        ],
+        media_mismatch=[
+            MediaMismatch(part="ppt/slides/slide1.xml", kind="audio",
+                          spid="8"),
+        ],
+        parse_errors=[],
+    )
+
+    payload = json.loads(
+        render_json([diagnosis], timings=[timing]))
+
+    assert payload[0]["timing_integrity"] == {
+        "dangling_count": 1,
+        "media_mismatch_count": 1,
+        "parts": ["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],
+    }
+
+
+def test_render_json_reports_structure_integrity_missing_items() -> None:
+    """With a StructureIntegrityResult supplied, structure_integrity
+    reports the missing count and each missing (part, required) item."""
+    diagnosis = _diagnosis(Verdict.NORMAL)
+    structure = StructureIntegrityResult(
+        parts_checked=5,
+        missing=[
+            MissingStructure(part="ppt/slideMasters/slideMaster2.xml",
+                             required_type="theme"),
+        ],
+        parse_errors=[],
+    )
+
+    payload = json.loads(
+        render_json([diagnosis], structures=[structure]))
+
+    assert payload[0]["structure_integrity"] == {
+        "missing_count": 1,
+        "items": [
+            {"part": "ppt/slideMasters/slideMaster2.xml",
+             "required": "theme"},
+        ],
     }

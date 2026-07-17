@@ -5,7 +5,9 @@ Rewrites salvaged entries into a fresh, consistent .pptx:
 1. every salvaged entry is streamed into a new ZIP archive;
 2. missing-but-required package plumbing is synthesised
    (``[Content_Types].xml`` regenerated from the actual entry set,
-   ``_rels/.rels`` from a static template);
+   ``_rels/.rels`` from a static template, and a default Office theme
+   for any theme a surviving master still references but that the
+   damage carried away);
 3. references are reconciled so the surviving package is
    self-consistent: relationship entries whose targets are gone are
    pruned (external targets are kept), and ``<p:sldIdLst>`` /
@@ -13,16 +15,20 @@ Rewrites salvaged entries into a fresh, consistent .pptx:
 4. dangling relationship references left inside salvaged XML parts (an
    ``r:``-namespace attribute pointing at a relationship id that no
    longer survives) are cleaned up, so PowerPoint no longer offers to
-   repair the rebuilt file.
+   repair the rebuilt file;
+5. the ``p:timing`` tree of each cleaned slide is reconciled with the
+   shapes step 4 neutralised, so a ``p:video``/``p:audio`` node or an
+   animation never points at a shape that lost its media or vanished.
 
 Non-plumbing XML content is kept byte-identical whenever possible: a
 part is only re-serialised when step 4 finds a dangling reference in
 it, in which case the minimal enclosing element is removed (or, for
 shared-fill blips and references no rule covers, only the offending
-attribute). Every other salvaged part is streamed through unchanged,
-and package-plumbing XML (``[Content_Types].xml``, every ``*.rels``,
-``ppt/presentation.xml``) is re-serialised with namespace prefixes
-preserved via ``ET.register_namespace``.
+attribute) and the timing tree is reconciled in the same pass. Every
+other salvaged part is streamed through unchanged, and package-plumbing
+XML (``[Content_Types].xml``, every ``*.rels``, ``ppt/presentation.xml``)
+is re-serialised with namespace prefixes preserved via
+``ET.register_namespace``.
 """
 
 from __future__ import annotations
@@ -146,12 +152,97 @@ _P_SLD = f"{{{_PML_NS}}}sld"
 _A_BLIP = f"{{{_A_NS}}}blip"
 _P14_MEDIA = f"{{{_P14_NS}}}media"
 
+#: PresentationML timing tags consulted by the timing-consistency pass
+#: that follows reference cleanup (see :func:`_apply_timing_cleanup`).
+_P_VIDEO = f"{{{_PML_NS}}}video"
+_P_AUDIO = f"{{{_PML_NS}}}audio"
+_P_PAR = f"{{{_PML_NS}}}par"
+_P_CHILDTNLST = f"{{{_PML_NS}}}childTnLst"
+_P_BLDLST = f"{{{_PML_NS}}}bldLst"
+_P_SPTGT = f"{{{_PML_NS}}}spTgt"
+_P_CNVPR = f"{{{_PML_NS}}}cNvPr"
+
 #: DrawingML local names that carry a media *link* relationship (the
 #: paired picture keeps its poster image once the link is dropped).
 _A_MEDIA_LINK_LOCALS = frozenset(
     {"videoFile", "audioFile", "quickTimeFile", "wavAudioFile"})
 #: DrawingML local names that carry a hyperlink relationship.
 _A_HLINK_LOCALS = frozenset({"hlinkClick", "hlinkHover"})
+
+#: Relationship types (matched by URI suffix) that bind a master part to
+#: its theme; a master left without one makes PowerPoint offer to repair.
+_REL_THEME_SUFFIX = "/theme"
+
+#: Relationships parts whose lost ``/theme`` targets are re-synthesised.
+_MASTER_RELS_PREFIXES = (
+    "ppt/slideMasters/_rels/",
+    "ppt/notesMasters/_rels/",
+    "ppt/handoutMasters/_rels/",
+)
+
+#: A complete, schema-minimal default Office theme, used to replace a
+#: theme part that the damage carried away while a master still
+#: references it. The body is prefixed with :data:`_XML_DECLARATION`
+#: before it is written, mirroring every other synthesised part.
+_DEFAULT_THEME_XML = (
+    f'<a:theme xmlns:a="{_A_NS}" name="Office Theme">'
+    '<a:themeElements>'
+    '<a:clrScheme name="Office">'
+    '<a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>'
+    '<a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>'
+    '<a:dk2><a:srgbClr val="44546A"/></a:dk2>'
+    '<a:lt2><a:srgbClr val="E7E6E6"/></a:lt2>'
+    '<a:accent1><a:srgbClr val="4472C4"/></a:accent1>'
+    '<a:accent2><a:srgbClr val="ED7D31"/></a:accent2>'
+    '<a:accent3><a:srgbClr val="A5A5A5"/></a:accent3>'
+    '<a:accent4><a:srgbClr val="FFC000"/></a:accent4>'
+    '<a:accent5><a:srgbClr val="5B9BD5"/></a:accent5>'
+    '<a:accent6><a:srgbClr val="70AD47"/></a:accent6>'
+    '<a:hlink><a:srgbClr val="0563C1"/></a:hlink>'
+    '<a:folHlink><a:srgbClr val="954F72"/></a:folHlink>'
+    '</a:clrScheme>'
+    '<a:fontScheme name="Office">'
+    '<a:majorFont>'
+    '<a:latin typeface="Calibri Light"/><a:ea typeface=""/>'
+    '<a:cs typeface=""/>'
+    '</a:majorFont>'
+    '<a:minorFont>'
+    '<a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/>'
+    '</a:minorFont>'
+    '</a:fontScheme>'
+    '<a:fmtScheme name="Office">'
+    '<a:fillStyleLst>'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '</a:fillStyleLst>'
+    '<a:lnStyleLst>'
+    '<a:ln w="6350" cap="flat" cmpd="sng" algn="ctr">'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:prstDash val="solid"/></a:ln>'
+    '<a:ln w="12700" cap="flat" cmpd="sng" algn="ctr">'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:prstDash val="solid"/></a:ln>'
+    '<a:ln w="19050" cap="flat" cmpd="sng" algn="ctr">'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:prstDash val="solid"/></a:ln>'
+    '</a:lnStyleLst>'
+    '<a:effectStyleLst>'
+    '<a:effectStyle><a:effectLst/></a:effectStyle>'
+    '<a:effectStyle><a:effectLst/></a:effectStyle>'
+    '<a:effectStyle><a:effectLst/></a:effectStyle>'
+    '</a:effectStyleLst>'
+    '<a:bgFillStyleLst>'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
+    '</a:bgFillStyleLst>'
+    '</a:fmtScheme>'
+    '</a:themeElements>'
+    '<a:objectDefaults/>'
+    '<a:extraClrSchemeLst/>'
+    '</a:theme>'
+).encode("utf-8")
 
 _T = TypeVar("_T")
 
@@ -234,6 +325,13 @@ def rebuild_package(reader: SalvageReader,
 
     plumbing: dict[str, bytes] = {}
     plumbing_date_time: dict[str, tuple[int, ...] | None] = {}
+
+    # 0. Synthesise any theme part a master still references but that the
+    #    damage carried away, so no master is left themeless (which makes
+    #    PowerPoint offer to repair the file). Done before step 1 so the
+    #    relationship pruning below keeps the master's theme relationship.
+    _synthesize_missing_themes(
+        reader, salvaged, final_names, plumbing, plumbing_date_time, result)
 
     # 1. Prune every surviving relationship part, remembering the set of
     #    relationship ids that survived in each so later steps can tell
@@ -542,10 +640,7 @@ def _prune_content_types(data: bytes, final_names: set[str],
         for child in list(root):
             if child.tag != override_tag:
                 continue
-            part = child.get("PartName", "")
-            if part.startswith("/"):
-                part = part[1:]
-            if part not in final_names:
+            if _override_part(child) not in final_names:
                 root.remove(child)
         # Ensure every surviving extension has a Default entry.
         existing = {
@@ -561,8 +656,31 @@ def _prune_content_types(data: bytes, final_names: set[str],
             default.set("ContentType", content_type)
             root.insert(0, default)
             existing.add(extension)
+        # Ensure every part that needs an Override actually has one; this
+        # backfills Overrides for parts synthesised after the fact (e.g. a
+        # replacement theme), which the salvaged Content_Types could not
+        # have listed.
+        overridden = {
+            _override_part(child)
+            for child in root if child.tag == override_tag
+        }
+        for part in sorted(final_names):
+            content_type = _override_content_type(part)
+            if content_type is None or part in overridden:
+                continue
+            override = ET.Element(override_tag)
+            override.set("PartName", f"/{part}")
+            override.set("ContentType", content_type)
+            root.append(override)
+            overridden.add(part)
 
     return _reserialize(data, edit)
+
+
+def _override_part(child: ET.Element) -> str:
+    """Return the package-relative PartName of an Override *child*."""
+    part = child.get("PartName", "")
+    return part[1:] if part.startswith("/") else part
 
 
 def _default_content_type(extension: str, warnings: list[str]) -> str:
@@ -637,6 +755,55 @@ def _synthesize_root_rels(final_names: set[str]) -> bytes:
             f'<Relationship Id="{rid}" Type="{rel_type}" Target="{target}"/>')
     parts.append("</Relationships>")
     return _XML_DECLARATION + "".join(parts).encode("utf-8")
+
+
+def _synthesize_missing_themes(
+        reader: SalvageReader, salvaged: list[SalvagedEntry],
+        final_names: set[str], plumbing: dict[str, bytes],
+        plumbing_date_time: dict[str, tuple[int, ...] | None],
+        result: RebuildResult) -> None:
+    """Replace themes a master still references but the damage removed.
+
+    Scans the salvaged ``slideMasters`` / ``notesMasters`` /
+    ``handoutMasters`` relationships parts for ``/theme`` relationships
+    whose (internal) target is absent from *final_names*. Each such target
+    is registered in *plumbing* under its original name with a default
+    Office theme and added to *final_names*, so the later relationship
+    pruning keeps the master's theme relationship instead of orphaning the
+    master. Mutates *final_names*, *plumbing*, *plumbing_date_time* and
+    *result* in place.
+    """
+    for entry in salvaged:
+        name = entry.name
+        if not name.endswith(".rels"):
+            continue
+        if not any(name.startswith(prefix)
+                   for prefix in _MASTER_RELS_PREFIXES):
+            continue
+        try:
+            root = ET.fromstring(_read_entry(reader, entry))
+        except ET.ParseError:
+            continue
+        base = _rels_base(name)
+        for child in root:
+            if not isinstance(child.tag, str):
+                continue
+            if _split_qname(child.tag)[1] != "Relationship":
+                continue
+            if not child.get("Type", "").endswith(_REL_THEME_SUFFIX):
+                continue
+            if child.get("TargetMode") == "External":
+                continue
+            target = _resolve_target(base, child.get("Target", ""))
+            if target in final_names:
+                continue
+            plumbing[target] = _XML_DECLARATION + _DEFAULT_THEME_XML
+            plumbing_date_time[target] = None
+            final_names.add(target)
+            result.synthesized_parts.append(target)
+            result.warnings.append(
+                f"{target}: theme was lost with the damage; a default "
+                "theme was synthesized")
 
 
 def _rels_part_name(name: str) -> str:
@@ -726,12 +893,26 @@ def _apply_cleanup(name: str, root: ET.Element, surviving: set[str],
     parent_map = {child: parent for parent in root.iter() for child in parent}
     carriers, _has_r_attr = _collect_carriers(root, surviving)
 
+    # Shape ids the cleanup neutralises, tracked so the timing tree can be
+    # reconciled afterwards: ``stilled_ids`` are shapes that survive as a
+    # still image (their media link was dropped), ``removed_ids`` are
+    # shapes removed outright with their subtree.
+    stilled_ids: set[str] = set()
+    removed_ids: set[str] = set()
+
     # Bucket every carrier into a whole-element removal (keyed by the
     # anchor element it resolves to) or an attribute-only removal.
     element_removals: dict[ET.Element, list] = {}
     attr_removals: list[tuple[ET.Element, list[_DanglingAttr], bool]] = []
     for elem, dangling in carriers:
         kind, target = _resolve_rule(elem, parent_map)
+        # A dropped media link leaves its host picture behind as a still
+        # image; remember that shape so its timing node can be removed.
+        uri, local = _split_qname(elem.tag)
+        if uri == _A_NS and local in _A_MEDIA_LINK_LOCALS:
+            host_id = _host_shape_cnvpr_id(elem, parent_map)
+            if host_id is not None:
+                stilled_ids.add(host_id)
         if kind in ("element", "ext"):
             slot = element_removals.get(target)
             if slot is None:
@@ -757,6 +938,10 @@ def _apply_cleanup(name: str, root: ET.Element, surviving: set[str],
                         for _key, _local, value in dangling])
         removed_elements.append(
             f"{name}: {_split_qname(anchor.tag)[1]} ({', '.join(rids)})")
+        # Every shape vanishing with this subtree is a timing target that
+        # no longer resolves.
+        for shape_id in _descendant_cnvpr_ids(anchor):
+            removed_ids.add(shape_id)
         parent = parent_map.get(anchor)
         if parent is None:
             continue
@@ -785,6 +970,169 @@ def _apply_cleanup(name: str, root: ET.Element, surviving: set[str],
             warnings.append(
                 f"{name}: dangling reference on <{local_tag}> is not "
                 "covered by a cleanup rule; removed the attribute only")
+
+    # Reconcile the timing tree with the shapes just neutralised.
+    _apply_timing_cleanup(name, root, stilled_ids, removed_ids,
+                          removed_elements)
+
+
+def _apply_timing_cleanup(name: str, root: ET.Element, stilled_ids: set[str],
+                          removed_ids: set[str],
+                          removed_elements: list[str]) -> None:
+    """Reconcile a slide's ``p:timing`` tree with neutralised shapes.
+
+    Runs after the reference-cleanup removals so it operates on the final
+    shape set. A ``p:video``/``p:audio`` node targeting a shape that is
+    now a still image (*stilled_ids*) or gone (*removed_ids*) is removed;
+    any other ``spid`` carrier pointing at a removed shape loses its
+    enclosing ``p:par``; ``p:bldLst`` build entries for removed shapes are
+    dropped, and both an emptied ``p:bldLst`` and an emptied
+    ``p:childTnLst`` go with them. Shapes that are merely stilled keep
+    their animations, since the shape itself still exists.
+    """
+    target_ids = stilled_ids | removed_ids
+    if not target_ids:
+        return
+
+    # ``p:childTnLst`` elements that lose a child, checked for emptiness
+    # once every removal below has run.
+    touched: list[ET.Element] = []
+
+    # Step 1: a media node whose shape is stilled or removed is dropped;
+    # the still image (when the shape survives) stays behind.
+    parent_map = {child: parent for parent in root.iter() for child in parent}
+    for media in list(root.iter()):
+        if media.tag == _P_VIDEO:
+            kind = "video"
+        elif media.tag == _P_AUDIO:
+            kind = "audio"
+        else:
+            continue
+        spid = _sptgt_spid(media)
+        if spid is None or spid not in target_ids:
+            continue
+        parent = parent_map.get(media)
+        if parent is None:
+            continue
+        childtnlst = _nearest_ancestor(media, _P_CHILDTNLST, parent_map)
+        parent.remove(media)
+        removed_elements.append(f"{name}: {kind} (spid={spid})")
+        if childtnlst is not None:
+            touched.append(childtnlst)
+
+    # Step 2: any other timing carrier pointing at a *removed* shape loses
+    # its nearest enclosing ``p:par`` (or itself when none encloses it).
+    # ``p:bldLst`` carriers are handled separately in step 3.
+    parent_map = {child: parent for parent in root.iter() for child in parent}
+    anchors: list[tuple[ET.Element, str]] = []
+    for elem in root.iter():
+        if _nearest_ancestor(elem, _P_BLDLST, parent_map) is not None:
+            continue
+        spid = _spid_attr(elem)
+        if spid is None or spid not in removed_ids:
+            continue
+        par = _nearest_ancestor(elem, _P_PAR, parent_map)
+        anchors.append((par if par is not None else elem, spid))
+
+    anchor_set = {anchor for anchor, _spid in anchors}
+    seen: set[ET.Element] = set()
+    for anchor, spid in anchors:
+        if anchor in seen:
+            continue
+        seen.add(anchor)
+        if _has_ancestor_in(anchor, anchor_set, parent_map):
+            continue
+        parent = parent_map.get(anchor)
+        if parent is None:
+            continue
+        childtnlst = _nearest_ancestor(anchor, _P_CHILDTNLST, parent_map)
+        parent.remove(anchor)
+        removed_elements.append(
+            f"{name}: {_split_qname(anchor.tag)[1]} (spid={spid})")
+        if childtnlst is not None:
+            touched.append(childtnlst)
+
+    # Step 3: a ``p:bldLst`` build entry for a removed shape is dropped,
+    # and an emptied ``p:bldLst`` goes with it.
+    parent_map = {child: parent for parent in root.iter() for child in parent}
+    for bldlst in list(root.iter(_P_BLDLST)):
+        for child in list(bldlst):
+            spid = child.get("spid")
+            if spid and spid in removed_ids:
+                bldlst.remove(child)
+                removed_elements.append(
+                    f"{name}: {_split_qname(child.tag)[1]} (spid={spid})")
+        if len(bldlst) == 0:
+            parent = parent_map.get(bldlst)
+            if parent is not None:
+                parent.remove(bldlst)
+
+    # Step 4: a ``p:childTnLst`` emptied by the removals above is dropped;
+    # the cascade stops here, since a childless ``p:cTn``/``p:par`` is
+    # legal.
+    parent_map = {child: parent for parent in root.iter() for child in parent}
+    for childtnlst in _unique(touched):
+        if len(childtnlst) == 0:
+            parent = parent_map.get(childtnlst)
+            if parent is not None:
+                parent.remove(childtnlst)
+
+
+def _host_shape_cnvpr_id(elem: ET.Element,
+                         parent_map: dict[ET.Element, ET.Element]
+                         ) -> str | None:
+    """Return the ``p:cNvPr@id`` of the shape hosting *elem*, or None.
+
+    Prefers the nearest enclosing ``p:pic``; failing that, the nearest
+    ancestor that has a ``p:cNvPr`` descendant. The first ``p:cNvPr`` id
+    found within that host is returned.
+    """
+    pic = _nearest_ancestor(elem, _P_PIC, parent_map)
+    if pic is not None:
+        return _first_cnvpr_id(pic)
+    current = parent_map.get(elem)
+    while current is not None:
+        cnvpr_id = _first_cnvpr_id(current)
+        if cnvpr_id is not None:
+            return cnvpr_id
+        current = parent_map.get(current)
+    return None
+
+
+def _first_cnvpr_id(elem: ET.Element) -> str | None:
+    """Return the id of the first ``p:cNvPr`` in *elem*'s subtree, or None."""
+    for cnvpr in elem.iter(_P_CNVPR):
+        cnvpr_id = cnvpr.get("id")
+        if cnvpr_id:
+            return cnvpr_id
+    return None
+
+
+def _descendant_cnvpr_ids(elem: ET.Element) -> list[str]:
+    """Return the ids of every ``p:cNvPr`` in *elem*'s subtree."""
+    ids: list[str] = []
+    for cnvpr in elem.iter(_P_CNVPR):
+        cnvpr_id = cnvpr.get("id")
+        if cnvpr_id:
+            ids.append(cnvpr_id)
+    return ids
+
+
+def _sptgt_spid(media: ET.Element) -> str | None:
+    """Return the first descendant ``p:spTgt@spid`` value of *media*."""
+    for sptgt in media.iter(_P_SPTGT):
+        spid = sptgt.get("spid")
+        if spid:
+            return spid
+    return None
+
+
+def _spid_attr(elem: ET.Element) -> str | None:
+    """Return *elem*'s ``spid`` attribute value regardless of namespace."""
+    for key, value in elem.attrib.items():
+        if _split_qname(key)[1] == "spid" and value:
+            return value
+    return None
 
 
 def _resolve_rule(elem: ET.Element,

@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from pptrepair.integrity import inspect_references
+from pptrepair.integrity import (inspect_references, inspect_structure,
+                                 inspect_timing)
 
 _A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -310,3 +311,369 @@ def test_bad_zip_file_propagates(tmp_path: Path) -> None:
 
     with pytest.raises(zipfile.BadZipFile):
         inspect_references(path)
+
+
+# --- inspect_timing: p:timing / shape-id integrity -----------------------
+
+
+# --- (a) video shape with a:videoFile is healthy -------------------------
+
+
+def test_timing_video_with_videofile_shape_is_healthy(tmp_path: Path) -> None:
+    """A p:video targeting a shape that carries a:videoFile is healthy."""
+    parts = {
+        "ppt/slides/slide21.xml": (
+            f'<p:sld xmlns:p="{_P_NS}" xmlns:a="{_A_NS}" xmlns:r="{_R_NS}">'
+            '<p:cSld><p:spTree><p:pic><p:nvPicPr>'
+            '<p:cNvPr id="6" name="Video 1"/><p:cNvPicPr/>'
+            '<p:nvPr><a:videoFile r:link="rId5"/></p:nvPr>'
+            '</p:nvPicPr><p:blipFill/><p:spPr/></p:pic></p:spTree></p:cSld>'
+            '<p:timing><p:tnLst><p:par><p:cTn id="1"><p:childTnLst>'
+            '<p:seq><p:cTn id="2"/></p:seq>'
+            '<p:video><p:cMediaNode vol="80000"><p:cTn id="7"/>'
+            '<p:tgtEl><p:spTgt spid="6"/></p:tgtEl>'
+            '</p:cMediaNode></p:video>'
+            '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
+            '</p:sld>'
+        ).encode("utf-8"),
+    }
+    path = _make_pptx(tmp_path / "timing_healthy.pptx", parts)
+
+    result = inspect_timing(path)
+
+    assert result.parts_scanned == 1
+    assert result.dangling == []
+    assert result.media_mismatch == []
+    assert result.parse_errors == []
+
+
+# --- (b) video shape missing a:videoFile is a media mismatch -------------
+
+
+def test_timing_video_without_videofile_is_media_mismatch(
+        tmp_path: Path) -> None:
+    """A p:video targeting a shape lacking a:videoFile is a mismatch."""
+    parts = {
+        "ppt/slides/slide22.xml": (
+            f'<p:sld xmlns:p="{_P_NS}" xmlns:a="{_A_NS}">'
+            '<p:cSld><p:spTree><p:pic><p:nvPicPr>'
+            '<p:cNvPr id="6" name="Video 1"/><p:cNvPicPr/><p:nvPr/>'
+            '</p:nvPicPr><p:blipFill/><p:spPr/></p:pic></p:spTree></p:cSld>'
+            '<p:timing><p:tnLst><p:par><p:cTn id="1"><p:childTnLst>'
+            '<p:video><p:cMediaNode vol="80000"><p:cTn id="7"/>'
+            '<p:tgtEl><p:spTgt spid="6"/></p:tgtEl>'
+            '</p:cMediaNode></p:video>'
+            '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
+            '</p:sld>'
+        ).encode("utf-8"),
+    }
+    path = _make_pptx(tmp_path / "timing_media_mismatch.pptx", parts)
+
+    result = inspect_timing(path)
+
+    assert result.dangling == []
+    assert len(result.media_mismatch) == 1
+    mismatch = result.media_mismatch[0]
+    assert (mismatch.kind, mismatch.spid) == ("video", "6")
+
+
+# --- (c) spTgt targeting a non-existent shape is dangling, not mismatch --
+
+
+def test_timing_sptgt_missing_shape_is_dangling_not_mismatch(
+        tmp_path: Path) -> None:
+    """A spTgt pointing at a non-existent shape id is dangling only."""
+    parts = {
+        "ppt/slides/slide23.xml": (
+            f'<p:sld xmlns:p="{_P_NS}" xmlns:a="{_A_NS}" xmlns:r="{_R_NS}">'
+            '<p:cSld><p:spTree><p:pic><p:nvPicPr>'
+            '<p:cNvPr id="6" name="Video 1"/><p:cNvPicPr/>'
+            '<p:nvPr><a:videoFile r:link="rId5"/></p:nvPr>'
+            '</p:nvPicPr><p:blipFill/><p:spPr/></p:pic></p:spTree></p:cSld>'
+            '<p:timing><p:tnLst><p:par><p:cTn id="1"><p:childTnLst>'
+            '<p:video><p:cMediaNode vol="80000"><p:cTn id="7"/>'
+            '<p:tgtEl><p:spTgt spid="99"/></p:tgtEl>'
+            '</p:cMediaNode></p:video>'
+            '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
+            '</p:sld>'
+        ).encode("utf-8"),
+    }
+    path = _make_pptx(tmp_path / "timing_dangling_video_target.pptx", parts)
+
+    result = inspect_timing(path)
+
+    assert len(result.dangling) == 1
+    ref = result.dangling[0]
+    assert (ref.element, ref.spid) == ("spTgt", "99")
+    assert result.media_mismatch == []
+
+
+# --- (d) bldP targeting a non-existent shape is dangling -----------------
+
+
+def test_timing_bldp_missing_shape_is_dangling(tmp_path: Path) -> None:
+    """A p:bldP referencing a non-existent shape id is dangling."""
+    parts = {
+        "ppt/slides/slide24.xml": (
+            f'<p:sld xmlns:p="{_P_NS}">'
+            '<p:cSld><p:spTree/></p:cSld>'
+            '<p:timing><p:tnLst><p:par><p:cTn id="1"/></p:par></p:tnLst>'
+            '<p:bldLst><p:bldP spid="99" grpId="0"/></p:bldLst>'
+            '</p:timing></p:sld>'
+        ).encode("utf-8"),
+    }
+    path = _make_pptx(tmp_path / "timing_dangling_bldp.pptx", parts)
+
+    result = inspect_timing(path)
+
+    assert len(result.dangling) == 1
+    ref = result.dangling[0]
+    assert (ref.element, ref.spid) == ("bldP", "99")
+    assert result.media_mismatch == []
+
+
+# --- (e) empty spid is not reported ---------------------------------------
+
+
+def test_timing_empty_spid_is_ignored(tmp_path: Path) -> None:
+    """An empty spid attribute value is not reported as dangling."""
+    parts = {
+        "ppt/slides/slide25.xml": (
+            f'<p:sld xmlns:p="{_P_NS}">'
+            '<p:cSld><p:spTree/></p:cSld>'
+            '<p:timing><p:tnLst><p:par><p:cTn id="1"><p:childTnLst>'
+            '<p:seq><p:cTn id="2"><p:stCondLst><p:cond>'
+            '<p:tgtEl><p:spTgt spid=""/></p:tgtEl>'
+            '</p:cond></p:stCondLst></p:cTn></p:seq>'
+            '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
+            '</p:sld>'
+        ).encode("utf-8"),
+    }
+    path = _make_pptx(tmp_path / "timing_empty_spid.pptx", parts)
+
+    result = inspect_timing(path)
+
+    assert result.dangling == []
+    assert result.media_mismatch == []
+
+
+# --- (f) audio shape missing a:audioFile is a media mismatch -------------
+
+
+def test_timing_audio_without_audiofile_is_media_mismatch(
+        tmp_path: Path) -> None:
+    """A p:audio targeting a shape lacking a:audioFile is a mismatch."""
+    parts = {
+        "ppt/slides/slide26.xml": (
+            f'<p:sld xmlns:p="{_P_NS}" xmlns:a="{_A_NS}">'
+            '<p:cSld><p:spTree><p:pic><p:nvPicPr>'
+            '<p:cNvPr id="8" name="Audio 1"/><p:cNvPicPr/><p:nvPr/>'
+            '</p:nvPicPr><p:blipFill/><p:spPr/></p:pic></p:spTree></p:cSld>'
+            '<p:timing><p:tnLst><p:par><p:cTn id="1"><p:childTnLst>'
+            '<p:audio><p:cMediaNode vol="80000"><p:cTn id="9"/>'
+            '<p:tgtEl><p:spTgt spid="8"/></p:tgtEl>'
+            '</p:cMediaNode></p:audio>'
+            '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
+            '</p:sld>'
+        ).encode("utf-8"),
+    }
+    path = _make_pptx(tmp_path / "timing_audio_mismatch.pptx", parts)
+
+    result = inspect_timing(path)
+
+    assert result.dangling == []
+    assert len(result.media_mismatch) == 1
+    mismatch = result.media_mismatch[0]
+    assert (mismatch.kind, mismatch.spid) == ("audio", "8")
+
+
+# --- (g) slide without p:timing has empty results -------------------------
+
+
+def test_timing_absent_slide_has_empty_results(tmp_path: Path) -> None:
+    """A slide without any p:timing tree reports empty result lists."""
+    parts = {
+        "ppt/slides/slide27.xml": (
+            f'<p:sld xmlns:p="{_P_NS}" xmlns:a="{_A_NS}">'
+            '<p:cSld><p:spTree><p:pic><p:nvPicPr>'
+            '<p:cNvPr id="1" name="Picture 1"/><p:cNvPicPr/><p:nvPr/>'
+            '</p:nvPicPr><p:blipFill/><p:spPr/></p:pic></p:spTree></p:cSld>'
+            '</p:sld>'
+        ).encode("utf-8"),
+    }
+    path = _make_pptx(tmp_path / "timing_absent.pptx", parts)
+
+    result = inspect_timing(path)
+
+    assert result.parts_scanned == 1
+    assert result.dangling == []
+    assert result.media_mismatch == []
+    assert result.parse_errors == []
+
+
+# --- (h) corrupt XML part is recorded, others still checked ---------------
+
+
+def test_timing_corrupt_part_recorded_others_still_checked(
+        tmp_path: Path) -> None:
+    """A malformed XML part is reported without aborting other parts."""
+    parts = {
+        "ppt/slides/slide28.xml": b"<p:sld this is not well-formed xml",
+        "ppt/slides/slide29.xml": (
+            f'<p:sld xmlns:p="{_P_NS}">'
+            '<p:cSld><p:spTree/></p:cSld></p:sld>'
+        ).encode("utf-8"),
+    }
+    path = _make_pptx(tmp_path / "timing_corrupt_part.pptx", parts)
+
+    result = inspect_timing(path)
+
+    assert result.parse_errors == ["ppt/slides/slide28.xml"]
+    assert result.dangling == []
+    assert result.media_mismatch == []
+    assert result.parts_scanned == 2
+
+
+# --- inspect_structure: required relationship-type checks -----------------
+
+
+def _rel_type(tail: str) -> str:
+    """Build a full relationship ``Type`` URI ending in *tail*."""
+    return f"{_R_NS}/{tail}"
+
+
+# --- (a) a fully-related package has nothing missing ----------------------
+
+
+def test_structure_complete_package_has_no_missing(tmp_path: Path) -> None:
+    """A package satisfying every required relationship reports nothing
+    missing, across all six part kinds :func:`inspect_structure` checks."""
+    parts = {
+        "ppt/presentation.xml": b"<p:presentation/>",
+        "ppt/_rels/presentation.xml.rels": _rels_xml(
+            [("rId1", _rel_type("slideMaster"),
+              "slideMasters/slideMaster1.xml")]),
+        "ppt/slides/slide1.xml": b"<p:sld/>",
+        "ppt/slides/_rels/slide1.xml.rels": _rels_xml(
+            [("rId1", _rel_type("slideLayout"),
+              "../slideLayouts/slideLayout1.xml")]),
+        "ppt/slideLayouts/slideLayout1.xml": b"<p:sldLayout/>",
+        "ppt/slideLayouts/_rels/slideLayout1.xml.rels": _rels_xml(
+            [("rId1", _rel_type("slideMaster"),
+              "../slideMasters/slideMaster1.xml")]),
+        "ppt/slideMasters/slideMaster1.xml": b"<p:sldMaster/>",
+        "ppt/slideMasters/_rels/slideMaster1.xml.rels": _rels_xml(
+            [("rId1", _rel_type("theme"), "../theme/theme1.xml")]),
+        "ppt/notesMasters/notesMaster1.xml": b"<p:notesMaster/>",
+        "ppt/notesMasters/_rels/notesMaster1.xml.rels": _rels_xml(
+            [("rId1", _rel_type("theme"), "../theme/theme2.xml")]),
+        "ppt/notesSlides/notesSlide1.xml": b"<p:notes/>",
+        "ppt/notesSlides/_rels/notesSlide1.xml.rels": _rels_xml([
+            ("rId1", _rel_type("slide"), "../slides/slide1.xml"),
+            ("rId2", _rel_type("notesMaster"),
+             "../notesMasters/notesMaster1.xml"),
+        ]),
+    }
+    path = _make_pptx(tmp_path / "structure_complete.pptx", parts)
+
+    result = inspect_structure(path)
+
+    assert result.parts_checked == 6
+    assert result.missing == []
+    assert result.parse_errors == []
+
+
+# --- (b) slide master missing its theme relationship -----------------------
+
+
+def test_structure_slidemaster_missing_theme_is_reported(
+        tmp_path: Path) -> None:
+    """A slide master whose .rels lacks a theme relationship is flagged,
+    the Type-only unindexed relationship inspect_references cannot see."""
+    parts = {
+        "ppt/slideMasters/slideMaster2.xml": b"<p:sldMaster/>",
+        "ppt/slideMasters/_rels/slideMaster2.xml.rels": _rels_xml(
+            [("rId1", _rel_type("slideLayout"),
+              "../slideLayouts/slideLayout2.xml")]),
+    }
+    path = _make_pptx(tmp_path / "structure_missing_theme.pptx", parts)
+
+    result = inspect_structure(path)
+
+    assert result.parts_checked == 1
+    assert len(result.missing) == 1
+    missing = result.missing[0]
+    assert (missing.part, missing.required_type) == (
+        "ppt/slideMasters/slideMaster2.xml", "theme")
+    assert result.parse_errors == []
+
+
+# --- (c) the .rels part itself is absent -----------------------------------
+
+
+def test_structure_missing_rels_part_flags_all_required_types(
+        tmp_path: Path) -> None:
+    """A target part with no matching .rels part flags every one of its
+    required types (there being nothing to look any of them up in)."""
+    parts = {
+        "ppt/slides/slide2.xml": b"<p:sld/>",
+        # Deliberately no ppt/slides/_rels/slide2.xml.rels part.
+    }
+    path = _make_pptx(tmp_path / "structure_missing_rels.pptx", parts)
+
+    result = inspect_structure(path)
+
+    assert result.parts_checked == 1
+    assert len(result.missing) == 1
+    missing = result.missing[0]
+    assert (missing.part, missing.required_type) == (
+        "ppt/slides/slide2.xml", "slideLayout")
+    assert result.parse_errors == []
+
+
+# --- (d) a notes slide missing only one of its two required types ----------
+
+
+def test_structure_notes_slide_missing_one_of_two_required_types(
+        tmp_path: Path) -> None:
+    """A notes slide missing only its notesMaster relationship is flagged
+    for that type alone; its (present) slide relationship is not."""
+    parts = {
+        "ppt/notesSlides/notesSlide2.xml": b"<p:notes/>",
+        "ppt/notesSlides/_rels/notesSlide2.xml.rels": _rels_xml(
+            [("rId1", _rel_type("slide"), "../slides/slide2.xml")]),
+    }
+    path = _make_pptx(tmp_path / "structure_notes_partial.pptx", parts)
+
+    result = inspect_structure(path)
+
+    assert result.parts_checked == 1
+    assert len(result.missing) == 1
+    missing = result.missing[0]
+    assert (missing.part, missing.required_type) == (
+        "ppt/notesSlides/notesSlide2.xml", "notesMaster")
+    assert result.parse_errors == []
+
+
+# --- (e) a corrupt .rels part is recorded and its types are missing --------
+
+
+def test_structure_corrupt_rels_recorded_and_required_types_missing(
+        tmp_path: Path) -> None:
+    """An unparsable .rels part is recorded in parse_errors, and its
+    part's required types are reported missing since no relationship
+    could be read from it."""
+    parts = {
+        "ppt/slideMasters/slideMaster3.xml": b"<p:sldMaster/>",
+        "ppt/slideMasters/_rels/slideMaster3.xml.rels": b"<Relationships broken",
+    }
+    path = _make_pptx(tmp_path / "structure_corrupt_rels.pptx", parts)
+
+    result = inspect_structure(path)
+
+    assert result.parse_errors == [
+        "ppt/slideMasters/_rels/slideMaster3.xml.rels"]
+    assert len(result.missing) == 1
+    missing = result.missing[0]
+    assert (missing.part, missing.required_type) == (
+        "ppt/slideMasters/slideMaster3.xml", "theme")

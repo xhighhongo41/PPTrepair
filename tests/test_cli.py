@@ -70,6 +70,40 @@ def _inject_dangling_ref(data: bytes,
     return buffer.getvalue()
 
 
+def _add_theme_relationship_to_slide_master(data: bytes) -> bytes:
+    """Return a copy of the .pptx *data* with a theme relationship added
+    to ``ppt/slideMasters/slideMaster1.xml.rels``.
+
+    A real .pptx carries the theme relationship on the slide master's
+    own ``.rels`` (as :func:`pptrepair.integrity.inspect_structure`
+    requires), but the shared ``build_minimal_pptx`` fixture only wires
+    it onto ``presentation.xml.rels``; this patches just that one
+    part's bytes so a structurally complete package can be used to
+    exercise a clean ``structure_integrity`` result.
+    """
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        infos = archive.infolist()
+        contents = {info.filename: archive.read(info.filename)
+                    for info in infos}
+
+    part = "ppt/slideMasters/_rels/slideMaster1.xml.rels"
+    original = contents[part].decode("utf-8")
+    injected = original.replace(
+        "</Relationships>",
+        f'<Relationship Id="rIdTheme" Type="{_R_NS}/theme" '
+        'Target="../theme/theme1.xml"/></Relationships>',
+        1,
+    )
+    assert injected != original, "injection anchor not found in fixture"
+    contents[part] = injected.encode("utf-8")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as rebuilt:
+        for info in infos:
+            rebuilt.writestr(info.filename, contents[info.filename])
+    return buffer.getvalue()
+
+
 def test_single_healthy_file(tmp_path: Path, capsys: CaptureFixture) -> None:
     """A single intact file yields exit code 0 and a NORMAL text report."""
     data = build_minimal_pptx(media_bytes=_MEDIA_BYTES)
@@ -237,4 +271,45 @@ def test_check_json_reports_xml_ref_integrity(
     clean_entry = by_path[str(clean_path)]
     assert clean_entry["xml_ref_integrity"] == {
         "dangling_count": 0, "parts": [],
+    }
+
+
+# --- v1.1.2 addendum: timing/structure integrity in check --json ---------
+
+
+def test_check_json_reports_timing_and_structure_integrity(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """``--json`` includes timing_integrity/structure_integrity keys
+    alongside xml_ref_integrity for structurally normal files, all
+    reporting a clean result for a structurally complete package."""
+    clean_data = _add_theme_relationship_to_slide_master(
+        build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+    dangling_data = _inject_dangling_ref(clean_data)
+    dangling_path = _write(tmp_path, "dangling.pptx", dangling_data)
+    clean_path = _write(tmp_path, "clean.pptx", clean_data)
+
+    exit_code = main(
+        ["check", "--json", str(dangling_path), str(clean_path)])
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    payload = json.loads(out)
+    by_path = {entry["path"]: entry for entry in payload}
+
+    dangling_entry = by_path[str(dangling_path)]
+    assert dangling_entry["verdict"] == "normal"
+    assert dangling_entry["xml_ref_integrity"]["dangling_count"] > 0
+    assert "timing_integrity" in dangling_entry
+    assert "structure_integrity" in dangling_entry
+
+    clean_entry = by_path[str(clean_path)]
+    assert clean_entry["xml_ref_integrity"] == {
+        "dangling_count": 0, "parts": [],
+    }
+    assert clean_entry["timing_integrity"] == {
+        "dangling_count": 0, "media_mismatch_count": 0, "parts": [],
+    }
+    assert clean_entry["structure_integrity"] == {
+        "missing_count": 0, "items": [],
     }
