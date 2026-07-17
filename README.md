@@ -97,6 +97,8 @@ Salvageable: 190/192 entries, 37/37 slides
 
 Exit codes: `0` — every file is intact, `1` — at least one file is corrupted, `2` — usage or I/O error.
 
+On structurally intact files, `check` additionally runs three content-integrity inspections and reports what they find — the kinds of inconsistency that make PowerPoint offer a one-time repair on first open — without changing the verdict or the exit code: unresolved XML relationship references, animation/timing nodes pointing at shapes that no longer exist or no longer carry their media, and missing required structural relationships (such as a slide master left without a theme). `--json` carries the details under `xml_ref_integrity`, `timing_integrity` and `structure_integrity`. This also spots files repaired by PPTrepair 1.1.1 or earlier, whose rebuilds could leave such inconsistencies behind.
+
 ### Repairing
 
 ```console
@@ -107,7 +109,7 @@ $ pptrepair repair broken.pptx --lang ja       # report language
 
 `repair` never modifies the input file. Depending on the damage it produces one of:
 
-* **a rebuilt presentation** `<name>.repaired.pptx` — when the surviving data still contains the slides (tail-truncated, version-mixed and interior-damaged files). Every surviving slide is recovered. When some images were lost with the damage, the rebuilt file still opens, but PowerPoint may offer to repair it once to clear the now-missing picture references; a future release will remove those stale references automatically.
+* **a rebuilt presentation** `<name>.repaired.pptx` — when the surviving data still contains the slides (tail-truncated, version-mixed and interior-damaged files). Every surviving slide is recovered. When images or media were lost with the damage, the rebuild also removes the now-dangling references to them — a video whose media stream was lost keeps its poster frame as a still picture — so PowerPoint opens the result cleanly instead of offering to repair it.
 * **a trimmed presentation** `<name>.repaired.pptx` — when a complete archive is hiding behind appended foreign data (`tail_foreign_data`): the appended bytes are cut off to recover the original archive byte-for-byte, falling back to a rebuild when the leading archive is itself damaged.
 * **a recovery folder** `<name>.salvaged/` — when the slide bodies themselves were destroyed. Surviving pictures land in `images/`, audio/video in `media/`, best-effort recovered text (slide titles, document metadata) in `texts/`, chart data in `charts/`, every raw part in `parts/`, plus a human-readable `REPORT.txt` stating exactly what was lost.
 
@@ -146,6 +148,11 @@ When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `n
 If you hit an unknown pattern, please review the fingerprint file yourself and consider attaching it to a [new issue](https://github.com/xhighhongo41/PPTrepair/issues/new/choose) using the *Unknown corruption pattern report* template. These reports are what future repair strategies get built from.
 
 ## Changelog
+
+### ver 1.1.2 (2026-07-17)
+- Rebuilt presentations now open cleanly, with no PowerPoint repair prompt. Verified against a real-world corpus, `repair` now resolves all three prompt triggers it could leave behind: dangling relationship references in slide XML are removed (a video whose media stream was lost keeps its poster frame as a still picture), the animation/timing tree is reconciled with the shapes that lost their media or were removed, and a default Office theme is synthesized when the damage carried away a theme that a surviving slide master still references
+- `check` gains three content-integrity inspections for structurally intact files: unresolved relationship references, inconsistent timing references, and missing required structural relationships — reported (also under `xml_ref_integrity` / `timing_integrity` / `structure_integrity` in `--json`) without changing the verdict or exit code; this also detects files repaired by earlier releases
+- `repair` re-verifies its own artifact with the same three inspections and reports the results; trim artifacts stay byte-identical to the original archive, so pre-existing inconsistencies there are reported but left untouched
 
 ### ver 1.1.1 (2026-07-17)
 - Added four verdicts for corruption geometries identified from the first collected diagnostic fingerprints: `interior_damage`, `tail_foreign_data`, `full_zero_fill` and `empty_file`

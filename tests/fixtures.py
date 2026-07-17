@@ -183,14 +183,24 @@ def _slide_rels_xml() -> bytes:
 
 
 def _slide_master_rels_xml() -> bytes:
-    """Build ``ppt/slideMasters/_rels/slideMaster1.xml.rels``."""
+    """Build ``ppt/slideMasters/_rels/slideMaster1.xml.rels``.
+
+    Real PowerPoint masters always carry a theme relationship of their
+    own (in addition to the presentation-level one); PowerPoint treats a
+    themeless master as damage, so the fixture mirrors that shape.
+    """
     return _relationships_xml(
         [
             (
                 "rId1",
                 f"{_NS_OFFICE_REL}/slideLayout",
                 "../slideLayouts/slideLayout1.xml",
-            )
+            ),
+            (
+                "rId2",
+                f"{_NS_OFFICE_REL}/theme",
+                "../theme/theme1.xml",
+            ),
         ]
     )
 

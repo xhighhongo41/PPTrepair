@@ -155,3 +155,12 @@ msgstr "아카이브 뒤에 이어지던 무관한 데이터 {n} 바이트를 �
 
 msgid "Hint: no content survives inside this file. Check the OneDrive recycle bin, other devices' local copies, and any backups; version history rarely helps with this damage pattern."
 msgstr "힌트: 이 파일 내부에는 남아 있는 내용이 없습니다. OneDrive 휴지통, 다른 기기의 로컬 복사본, 백업을 확인하세요. 이 손상 패턴에는 버전 기록이 거의 도움이 되지 않습니다."
+
+msgid "Removed {e} stale reference(s) from {p} rebuilt part(s)."
+msgstr "재구성된 부분 {p}개에서 유효하지 않은 참조 {e}개를 제거했습니다."
+
+msgid "Unresolved references after repair: {n}"
+msgstr "복구 후 해결되지 않은 참조 수: {n}"
+
+msgid "Note: these unresolved references existed in the original archive and were left untouched (the recovered file is byte-identical to the original)."
+msgstr "참고: 이 해결되지 않은 참조는 원본 아카이브에 원래부터 있던 것으로, 손대지 않고 그대로 두었습니다(복구된 파일은 원본과 바이트 단위로 동일합니다)."
