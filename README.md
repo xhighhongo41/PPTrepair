@@ -15,6 +15,10 @@ Diagnoses and repairs PowerPoint files that were corrupted while stored on OneDr
 | `head_foreign_data` | leading chunks overwritten with unrelated data |
 | `version_mix` | a collage of chunks from two different save versions |
 | `tail_truncated` | file cut off prematurely; the ZIP central directory is lost |
+| `interior_damage` | interior entries damaged while the file head and ZIP index survive |
+| `tail_foreign_data` | a complete archive with foreign data appended after it, hiding its ZIP index |
+| `full_zero_fill` | (almost) the whole file overwritten with zeros; nothing survives |
+| `empty_file` | zero-byte file; nothing survives |
 | `other_corrupt` | damaged, but not matching a known pattern |
 | `not_a_zip` | not a ZIP-based file at all |
 
@@ -103,7 +107,8 @@ $ pptrepair repair broken.pptx --lang ja       # report language
 
 `repair` never modifies the input file. Depending on the damage it produces one of:
 
-* **a rebuilt presentation** `<name>.repaired.pptx` — when the surviving data still contains the slides (tail-truncated and version-mixed files). On this project's real-world corpus every surviving slide was recovered and the results open in PowerPoint.
+* **a rebuilt presentation** `<name>.repaired.pptx` — when the surviving data still contains the slides (tail-truncated, version-mixed and interior-damaged files). On this project's real-world corpus every surviving slide was recovered and the results open in PowerPoint.
+* **a trimmed presentation** `<name>.repaired.pptx` — when a complete archive is hiding behind appended foreign data (`tail_foreign_data`): the appended bytes are cut off and the original archive is recovered byte-for-byte, losing nothing (falls back to a rebuild if the leading archive is itself damaged).
 * **a recovery folder** `<name>.salvaged/` — when the slide bodies themselves were destroyed. Surviving pictures land in `images/`, audio/video in `media/`, best-effort recovered text (slide titles, document metadata) in `texts/`, chart data in `charts/`, every raw part in `parts/`, plus a human-readable `REPORT.txt` stating exactly what was lost.
 
 The report language is selectable with `--lang` (`en`, `ja`, `zh`, `ko`, `es`, `fr`, `de`; default English). An existing output is never overwritten unless you pass `--force`; `--json` gives machine-readable results. Exit codes: `0` — artifact produced (or the file was already intact), `1` — nothing recoverable, `2` — usage or I/O error.
@@ -141,6 +146,12 @@ When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `n
 If you hit an unknown pattern, please review the fingerprint file yourself and consider attaching it to a [new issue](https://github.com/xhighhongo41/PPTrepair/issues/new/choose) using the *Unknown corruption pattern report* template. These reports are what future repair strategies get built from.
 
 ## Changelog
+
+### ver 1.1.1 (2026-07-17)
+- Added four verdicts for corruption geometries identified from the first collected diagnostic fingerprints: `interior_damage`, `tail_foreign_data`, `full_zero_fill` and `empty_file`
+- `repair` gains a trim strategy: a `tail_foreign_data` file is recovered byte-for-byte by cutting the appended foreign data off (falling back to a salvage rebuild when the leading archive is itself damaged); `interior_damage` files repair through the existing rebuild path
+- More sensitive head-damage detection: `head_zero_fill` now triggers from 4 KiB of leading zeros (previously 64 KiB), and `head_foreign_data` is recognized even when the foreign data starts with zero bytes
+- Empty and fully zero-filled files no longer consume diagnostic-fingerprint slots and receive honest "nothing survives" guidance instead of unknown-pattern prompts
 
 ### ver 1.1 (2026-07-13)
 - Added the `pptrepair scan` command: recursively sweeps directory trees for corrupted `.pptx` / `.pptm` files, streaming per-file verdicts and ending with a summary (all 7 report languages supported)

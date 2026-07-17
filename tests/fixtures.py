@@ -25,6 +25,10 @@ _EOCD_SIG = b"PK\x05\x06"
 _FOREIGN_MARKER = b"\x01\x00\x00\x00"
 _FOREIGN_MARKER_STEP = 1000
 
+#: Local file header signature (``PK\x03\x04``), used to locate entries
+#: for :func:`zero_interior_entry`.
+_LFH_SIG = b"PK\x03\x04"
+
 # OPC/OOXML namespace URIs, factored out to keep the XML template
 # strings below under a reasonable line length.
 _NS_PACKAGE = "http://schemas.openxmlformats.org/package/2006"
@@ -411,6 +415,33 @@ def foreign_prefix(data: bytes, length: int, seed: int = 1) -> bytes:
     return bytes(prefix) + data[length:]
 
 
+def append_foreign_tail(data: bytes, length: int, seed: int = 1) -> bytes:
+    """Append *length* bytes of unrelated data after *data*.
+
+    Mimics the ``TAIL_FOREIGN_DATA`` corruption pattern: a complete
+    archive followed by a large block of unindexed foreign data that
+    hides its end-of-central-directory record from an ordinary ZIP
+    reader. The appended block never contains the byte sequence ``PK``
+    by accident, so it cannot be mistaken for a stray ZIP signature.
+    """
+    rng = random.Random(seed)
+    tail = bytearray(rng.randbytes(length))
+
+    # Ensure no accidental "PK" sequence survives in the appended
+    # region; replace it with a two-byte sequence that cannot itself
+    # form a new "PK" match ('Q' and 'x' are neither 'P' nor 'K').
+    pk = b"PK"
+    search_from = 0
+    while True:
+        idx = tail.find(pk, search_from)
+        if idx == -1:
+            break
+        tail[idx : idx + 2] = b"Qx"
+        search_from = idx + 2
+
+    return data + bytes(tail)
+
+
 def truncate(data: bytes, length: int) -> bytes:
     """Cut *data* down to its first *length* bytes.
 
@@ -444,6 +475,53 @@ def find_eocd(data: bytes) -> tuple[int, int, int]:
     cd_size = fields[5]
     cd_offset = fields[6]
     return (cd_offset, cd_size, eocd_offset)
+
+
+def zero_interior_entry(data: bytes, skip: int = 2) -> bytes:
+    """Zero out one local file header entry deep inside *data*.
+
+    Locates every ``PK\\x03\\x04`` (local file header) signature in
+    *data*, then zeroes the span from the ``(skip + 1)``-th signature up
+    to the next local file header signature -- or up to the central
+    directory (located via :func:`find_eocd`) when it is the last one.
+    The zeroed span swallows the entry's own signature, so it vanishes
+    entirely from a raw local-file-header scan rather than surviving as
+    a CRC-valid entry the central directory does not know about (which
+    would risk a spurious ``VERSION_MIX`` verdict). The leading *skip*
+    entries, the central directory and the EOCD record are left intact.
+
+    Mimics the ``INTERIOR_DAMAGE`` corruption pattern: the file head and
+    central directory survive, but one entry's data (and header) in the
+    middle of the archive is destroyed.
+
+    :param skip: number of leading local file header entries to leave
+        untouched before picking the one to zero out.
+    :raises ValueError: if fewer than ``skip + 1`` local file header
+        signatures are found in *data*.
+    """
+    offsets = []
+    search_from = 0
+    while True:
+        idx = data.find(_LFH_SIG, search_from)
+        if idx == -1:
+            break
+        offsets.append(idx)
+        search_from = idx + 1
+
+    if len(offsets) <= skip:
+        raise ValueError(
+            f"expected more than {skip} local file header(s), "
+            f"found {len(offsets)}"
+        )
+
+    start = offsets[skip]
+    if skip + 1 < len(offsets):
+        end = offsets[skip + 1]
+    else:
+        cd_offset, _cd_size, _eocd_offset = find_eocd(data)
+        end = cd_offset
+
+    return zero_range(data, start, end)
 
 
 def version_mix(old: bytes, new: bytes) -> bytes:

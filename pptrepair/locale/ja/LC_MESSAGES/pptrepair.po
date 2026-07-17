@@ -137,3 +137,21 @@ msgstr "ZIP形式のファイルではありません"
 
 msgid "Downloading cloud-only file: {path}"
 msgstr "クラウド専用ファイルをダウンロード中: {path}"
+
+msgid "corrupted: file is empty (all content lost)"
+msgstr "破損: ファイルが空です(内容がすべて失われています)"
+
+msgid "corrupted: file is (almost) entirely zero-filled"
+msgstr "破損: ファイルの(ほぼ)全体がゼロで埋められています"
+
+msgid "corrupted: interior region damaged, archive index intact"
+msgstr "破損: 内部領域が損傷していますが、アーカイブの索引は無傷です"
+
+msgid "corrupted: intact archive followed by foreign data"
+msgstr "破損: 無傷のアーカイブの後ろに無関係なデータが続いています"
+
+msgid "Removed {n} bytes of foreign data that followed the archive; the leading archive was kept unmodified."
+msgstr "アーカイブの後ろに続いていた無関係なデータを {n} バイト削除しました。先頭のアーカイブ部分は変更せずに保持しています。"
+
+msgid "Hint: no content survives inside this file. Check the OneDrive recycle bin, other devices' local copies, and any backups; version history rarely helps with this damage pattern."
+msgstr "ヒント: このファイルの内部には復元可能な内容が残っていません。OneDriveのごみ箱、他のデバイスに残るローカルコピー、各種バックアップを確認してください。このタイプの破損にはバージョン履歴はほとんど役立ちません。"

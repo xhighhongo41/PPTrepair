@@ -17,11 +17,13 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from fixtures import build_minimal_pptx, truncate, zero_prefix
+from fixtures import (append_foreign_tail, build_minimal_pptx, truncate,
+                      zero_interior_entry, zero_prefix)
 
 from pptrepair.census import from_central_directory, from_lfh_scan
 from pptrepair.classify import Diagnosis, Verdict, classify
 from pptrepair.cli import main
+from pptrepair.repair import repair_file
 from pptrepair.scanner import scan_structure
 
 #: Shorthand for the capsys fixture type, to keep signatures short.
@@ -227,9 +229,9 @@ def test_json_output_schema(tmp_path: Path, capsys: CaptureFixture) -> None:
     payload = json.loads(out)
     assert set(payload.keys()) == {
         "path", "verdict", "mode", "success", "output", "salvage",
-        "lost_slide_numbers", "lost_entries_total", "recheck_verdict",
-        "synthesized_parts", "pruned_relationships", "pruned_slide_ids",
-        "written_files", "warnings",
+        "lost_slide_numbers", "lost_entries_total", "trimmed_bytes",
+        "recheck_verdict", "synthesized_parts", "pruned_relationships",
+        "pruned_slide_ids", "written_files", "warnings",
     }
     assert payload["mode"] == "rebuild"
     assert payload["success"] is True
@@ -267,3 +269,99 @@ def test_explicit_output_path(tmp_path: Path,
     assert exit_code == 0
     assert custom_output.exists()
     assert not (tmp_path / "broken.repaired.pptx").exists()
+
+
+# --- 11. trim repairs a complete archive hidden behind foreign tail data -----
+
+
+def test_trim_success_reproduces_the_leading_archive_exactly(
+    tmp_path: Path,
+) -> None:
+    """A TAIL_FOREIGN_DATA file trims to a byte-exact copy of the
+    leading archive, with no lost entries."""
+    intact = build_minimal_pptx(num_slides=2, media_bytes=50_000)
+    broken = append_foreign_tail(intact, 131072)
+    path = _write(tmp_path, "broken.pptx", broken)
+    assert _diagnose(path).verdict == Verdict.TAIL_FOREIGN_DATA
+
+    outcome = repair_file(path)
+
+    assert outcome.mode == "trim"
+    assert outcome.success is True
+    assert outcome.output_path is not None
+    assert outcome.output_path.exists()
+    assert outcome.trimmed_bytes == 131072
+    assert outcome.recheck_verdict == "normal"
+    assert outcome.lost_entries_total == 0
+    assert outcome.output_path.read_bytes() == intact
+
+
+# --- 12. trim falls back to rebuild when the leading archive is itself broken
+
+
+def test_trim_falls_back_to_rebuild_when_leading_archive_is_damaged(
+    tmp_path: Path,
+) -> None:
+    """A TAIL_FOREIGN_DATA file whose own leading archive is damaged
+    (one non-essential entry destroyed) does not check out clean after
+    trimming, so repair falls back to a salvage-based rebuild."""
+    # skip=17 targets ppt/viewProps.xml for num_slides=3/no chart, a
+    # non-essential part: presentation.xml, every slide and the media
+    # part all stay salvageable for the rebuild fallback.
+    data = build_minimal_pptx(num_slides=3, media_bytes=50_000)
+    damaged = zero_interior_entry(data, skip=17)
+    broken = append_foreign_tail(damaged, 131072)
+    path = _write(tmp_path, "broken.pptx", broken)
+    assert _diagnose(path).verdict == Verdict.TAIL_FOREIGN_DATA
+
+    outcome = repair_file(path)
+
+    assert outcome.mode == "rebuild"
+    assert outcome.success is True
+    assert outcome.output_path is not None
+    assert outcome.output_path.exists()
+    assert any("falling back to salvage-based repair" in warning
+               for warning in outcome.warnings)
+
+
+# --- 13. empty and fully zero-filled files are unrepairable no-ops ----------
+
+
+def test_empty_file_repair_is_a_noop_failure(tmp_path: Path) -> None:
+    """An empty file yields mode "none" and reports failure."""
+    path = _write(tmp_path, "empty.pptx", b"")
+
+    outcome = repair_file(path)
+
+    assert outcome.diagnosis.verdict == Verdict.EMPTY_FILE
+    assert outcome.mode == "none"
+    assert outcome.success is False
+
+
+def test_full_zero_fill_repair_is_a_noop_failure(tmp_path: Path) -> None:
+    """A fully zero-filled file yields mode "none" and reports failure."""
+    path = _write(tmp_path, "zerofilled.pptx", b"\x00" * (256 * 1024))
+
+    outcome = repair_file(path)
+
+    assert outcome.diagnosis.verdict == Verdict.FULL_ZERO_FILL
+    assert outcome.mode == "none"
+    assert outcome.success is False
+
+
+# --- 14. interior damage rebuilds through the existing salvage path ---------
+
+
+def test_interior_damage_rebuilds_successfully(tmp_path: Path) -> None:
+    """A file with damage confined to one interior entry's data rebuilds
+    into a clean package through the pre-existing CD-salvage path."""
+    data = build_minimal_pptx(num_slides=3, media_bytes=50_000)
+    damaged = zero_interior_entry(data, skip=17)  # ppt/viewProps.xml
+    path = _write(tmp_path, "interior.pptx", damaged)
+    assert _diagnose(path).verdict == Verdict.INTERIOR_DAMAGE
+
+    outcome = repair_file(path)
+
+    assert outcome.mode == "rebuild"
+    assert outcome.success is True
+    assert outcome.recheck_verdict == "normal"

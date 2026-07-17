@@ -88,6 +88,8 @@ class EocdInfo:
     is_consistent: bool
     """True when ``cd_offset + cd_size == offset``, i.e. the EOCD's own
     position matches where it claims the central directory ends."""
+    comment_length: int = 0
+    """Value of the EOCD record's comment-length field, in bytes."""
 
 
 @dataclass
@@ -223,13 +225,14 @@ def _parse_eocd(path: Path, offset: int) -> EocdInfo | None:
     if len(data) < 22:
         return None
     (_, _disk_no, _cd_disk, _n_disk, n_total, cd_size, cd_offset,
-     _comment_len) = struct.unpack(EOCD_STRUCT, data)
+     comment_len) = struct.unpack(EOCD_STRUCT, data)
     return EocdInfo(
         offset=offset,
         total_entries=n_total,
         cd_offset=cd_offset,
         cd_size=cd_size,
         is_consistent=(cd_offset + cd_size == offset),
+        comment_length=comment_len,
     )
 
 
