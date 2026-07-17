@@ -154,6 +154,31 @@ def test_json_output_schema_and_no_progress_lines_mixed_in(
     assert summary["verdicts"] == {"normal": 1, "head_zero_fill": 1}
 
 
+# --- empty-file classification -----------------------------------------------
+
+
+def test_empty_file_counted_and_not_fingerprinted(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """An empty .pptx is tallied as ``empty_file`` and never fingerprinted,
+    even when ``--report`` is given: EMPTY_FILE is a known pattern, so no
+    ``diagnostics/`` directory is created at all."""
+    root = _mkroot(tmp_path)
+    _write(root, "empty.pptx", b"")
+    report_dir = tmp_path / "report"
+
+    exit_code = main(
+        ["scan", str(root), "--report", str(report_dir), "--json"])
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_CORRUPT
+    payload = json.loads(out)
+    assert payload["summary"]["verdicts"] == {"empty_file": 1}
+    assert payload["summary"]["unknown_pattern_files"] == 0
+    assert payload["summary"]["fingerprints_written"] == 0
+    assert not (report_dir / "diagnostics").is_dir()
+
+
 # --- --report ---------------------------------------------------------------
 
 

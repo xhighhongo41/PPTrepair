@@ -166,6 +166,31 @@ def test_eocd_none_when_tail_truncated(tmp_path: Path) -> None:
     assert len(result.lfh_offsets) == len(entries)
 
 
+def test_eocd_comment_length_present(tmp_path: Path) -> None:
+    """A ZIP archive with a comment reports its exact length."""
+    comment = b"a note about this archive"
+    path = tmp_path / "commented.zip"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("a.txt", b"hello")
+        zf.comment = comment
+
+    result = scan_structure(path)
+
+    assert result.eocd is not None
+    assert result.eocd.comment_length == len(comment)
+
+
+def test_eocd_comment_length_zero_without_comment(tmp_path: Path) -> None:
+    """An ordinary ZIP archive (no comment) reports comment_length == 0."""
+    entries = [("a.txt", b"hello"), ("b.txt", b"world" * 10)]
+    path = _make_zip(tmp_path / "sample.zip", entries)
+
+    result = scan_structure(path)
+
+    assert result.eocd is not None
+    assert result.eocd.comment_length == 0
+
+
 def test_eocd_none_when_central_directory_removed(tmp_path: Path) -> None:
     """Removing the whole central directory (and EOCD) leaves no eocd but
     keeps the local file header offsets."""

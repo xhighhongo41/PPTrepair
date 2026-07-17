@@ -273,8 +273,8 @@ def test_tail_truncated() -> None:
     assert diag.salvage_summary["entries_ok"] == 2
 
 
-def test_all_zero_file_is_other_corrupt() -> None:
-    """An all-zero file (no EOCD, zero_ratio >= 0.99) -> OTHER_CORRUPT."""
+def test_all_zero_file_is_full_zero_fill() -> None:
+    """An all-zero file (no EOCD, zero_ratio >= 0.99) -> FULL_ZERO_FILL."""
     size = 100_000
     structure = _structure(
         size=size, head_kind="zeros",
@@ -285,18 +285,18 @@ def test_all_zero_file_is_other_corrupt() -> None:
 
     diag = classify(DUMMY_PATH, structure, None, lfh)
 
-    assert diag.verdict == Verdict.OTHER_CORRUPT
+    assert diag.verdict == Verdict.FULL_ZERO_FILL
     assert diag.evidence
 
 
-def test_empty_file_is_not_a_zip() -> None:
-    """A zero-byte file -> NOT_A_ZIP."""
+def test_empty_file_verdict() -> None:
+    """A zero-byte file -> EMPTY_FILE."""
     structure = _structure(size=0, head_kind="other", eocd=None)
     lfh = _census("lfh_scan", [])
 
     diag = classify(DUMMY_PATH, structure, None, lfh)
 
-    assert diag.verdict == Verdict.NOT_A_ZIP
+    assert diag.verdict == Verdict.EMPTY_FILE
 
 
 def test_text_like_file_is_not_a_zip() -> None:

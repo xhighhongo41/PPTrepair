@@ -137,3 +137,21 @@ msgstr "不是基于 ZIP 的文件"
 
 msgid "Downloading cloud-only file: {path}"
 msgstr "正在下载仅云端文件: {path}"
+
+msgid "corrupted: file is empty (all content lost)"
+msgstr "损坏: 文件为空(全部内容已丢失)"
+
+msgid "corrupted: file is (almost) entirely zero-filled"
+msgstr "损坏: 文件(几乎)完全被零填充"
+
+msgid "corrupted: interior region damaged, archive index intact"
+msgstr "损坏: 内部区域已损坏,压缩包索引完好"
+
+msgid "corrupted: intact archive followed by foreign data"
+msgstr "损坏: 完好的压缩包后跟有无关数据"
+
+msgid "Removed {n} bytes of foreign data that followed the archive; the leading archive was kept unmodified."
+msgstr "已移除压缩包之后的 {n} 字节无关数据;开头的压缩包保持未修改。"
+
+msgid "Hint: no content survives inside this file. Check the OneDrive recycle bin, other devices' local copies, and any backups; version history rarely helps with this damage pattern."
+msgstr "提示: 此文件内部没有任何可恢复的内容。请检查 OneDrive 回收站、其他设备上的本地副本以及任何备份;版本历史记录对此类损坏模式通常没有帮助。"

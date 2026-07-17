@@ -42,8 +42,8 @@ class RepairOutcome:
     src: Path
     diagnosis: Diagnosis
     mode: str
-    """Executed mode: ``"rebuild"`` | ``"extract"`` | ``"none"``
-    (nothing to do / nothing possible)."""
+    """Executed mode: ``"rebuild"`` | ``"extract"`` | ``"trim"`` |
+    ``"none"`` (nothing to do / nothing possible)."""
     success: bool
     """True when a repair artifact was produced, or when the input was
     already intact (nothing to do counts as success)."""
@@ -52,10 +52,14 @@ class RepairOutcome:
     rebuild_result: RebuildResult | None = None
     extract_result: ExtractResult | None = None
     recheck_verdict: str | None = None
-    """`check` verdict of the rebuilt file (rebuild mode only)."""
+    """`check` verdict of the produced artifact (rebuild/trim modes
+    only)."""
     lost_slide_numbers: list[int] = field(default_factory=list)
     """Slide numbers known to be lost (exact when a CD survived)."""
     lost_entries_total: int = 0
+    trimmed_bytes: int | None = None
+    """Set only on a successful trim: the number of unindexed bytes that
+    followed the EOCD record and were removed."""
     warnings: list[str] = field(default_factory=list)
 
 
@@ -74,9 +78,14 @@ def repair_file(src: Path, output: Path | None = None, mode: str = "auto",
 
     * The input is opened read-only throughout; nothing is ever written
       next to it except the requested artifact.
-    * Automatic mode selection: ``normal`` -> mode "none", success,
-      no artifact. ``not_a_zip`` or an empty salvage set -> mode
-      "none", failure. A salvage set containing
+    * Automatic mode selection: see :func:`_select_auto_mode` for the
+      full decision order. In short: ``normal`` -> mode "none",
+      success, no artifact; ``not_a_zip``/``empty_file``/
+      ``full_zero_fill`` -> mode "none", failure;
+      ``tail_foreign_data`` -> "trim" (trailing unindexed data is cut
+      off, falling back to rebuild/extract when the trimmed archive
+      does not itself check out clean); an empty salvage set -> mode
+      "none", failure; a salvage set containing
       ``ppt/presentation.xml`` and at least one slide -> "rebuild",
       anything else -> "extract".
     * ``--mode rebuild``/``extract`` force the respective path;
@@ -86,10 +95,12 @@ def repair_file(src: Path, output: Path | None = None, mode: str = "auto",
     * *output* defaults to :func:`default_output_path`. An existing
       output path raises :class:`OutputExistsError` unless *force* is
       true (an existing extract *directory* is likewise refused).
-    * After a rebuild, the artifact is re-diagnosed with the check
-      pipeline and the verdict recorded in ``recheck_verdict``.
+    * After a rebuild or a successful trim, the artifact is
+      re-diagnosed with the check pipeline and the verdict recorded in
+      ``recheck_verdict``.
     * ``lost_slide_numbers`` / ``lost_entries_total`` are computed from
-      the diagnosis (exact when the central directory survived).
+      the diagnosis (exact when the central directory survived; both
+      reset to empty/zero on a successful trim, which loses nothing).
     * *lang* selects the translator handed to
       :func:`pptrepair.extract.extract_salvage` for the text files
       inside the recovery folder; the outcome object itself stays
@@ -118,6 +129,18 @@ def repair_file(src: Path, output: Path | None = None, mode: str = "auto",
         # or nothing could be salvaged from it at all.
         outcome.success = diagnosis.verdict == Verdict.NORMAL
         return outcome
+
+    if chosen_mode == "trim":
+        output_path = (output if output is not None
+                       else default_output_path(src, "rebuild"))
+        _ensure_output_available(output_path, "rebuild", force)
+        if _run_trim(src, output_path, outcome):
+            return outcome
+        # The trimmed archive did not check out clean: fall back to the
+        # usual salvage-based selection, as if trim had never been tried.
+        chosen_mode = _select_salvage_mode(salvaged)
+        if chosen_mode == "none":
+            return outcome
 
     if chosen_mode == "extract" and not salvaged:
         # A forced extract with nothing to write; report failure without
@@ -157,11 +180,36 @@ def _select_auto_mode(diagnosis: Diagnosis,
                       salvaged: list[SalvagedEntry]) -> str:
     """Choose the repair mode for ``--mode auto``.
 
-    See :func:`repair_file` for the decision rules.
+    Decision order (first match wins):
+
+    1. ``normal`` -> "none" (nothing to do).
+    2. ``not_a_zip`` / ``empty_file`` / ``full_zero_fill`` -> "none"
+       (no content survives to rebuild from).
+    3. ``tail_foreign_data`` -> "trim" (cut the unindexed trailing
+       data off; :func:`repair_file` falls back to salvage-based
+       repair when the trimmed archive does not check out clean).
+    4. no salvaged entries -> "none".
+    5. a salvage set containing ``ppt/presentation.xml`` and at least
+       one slide -> "rebuild", anything else -> "extract".
     """
     if diagnosis.verdict == Verdict.NORMAL:
         return "none"
-    if diagnosis.verdict == Verdict.NOT_A_ZIP or not salvaged:
+    if diagnosis.verdict in (Verdict.NOT_A_ZIP, Verdict.EMPTY_FILE,
+                             Verdict.FULL_ZERO_FILL):
+        return "none"
+    if diagnosis.verdict == Verdict.TAIL_FOREIGN_DATA:
+        return "trim"
+    return _select_salvage_mode(salvaged)
+
+
+def _select_salvage_mode(salvaged: list[SalvagedEntry]) -> str:
+    """Choose "none"/"rebuild"/"extract" from a salvage set alone.
+
+    This is the tail of :func:`_select_auto_mode`'s decision order
+    (steps 4-5), factored out so :func:`repair_file` can reapply it as
+    the fallback when a "trim" attempt does not check out clean.
+    """
+    if not salvaged:
         return "none"
     names = {entry.name for entry in salvaged}
     has_slide = any(entry.category == "slide_xml" for entry in salvaged)
@@ -175,11 +223,13 @@ def _lost_entries(diagnosis: Diagnosis) -> tuple[list[int], int]:
 
     Uses the same census :func:`pptrepair.salvage.select_salvageable`
     trusts as its source: the LFH census for ``VERSION_MIX`` /
-    ``TAIL_TRUNCATED``, the central-directory census otherwise (falling
-    back to the LFH census when the central directory is unavailable).
+    ``TAIL_TRUNCATED`` / ``TAIL_FOREIGN_DATA``, the central-directory
+    census otherwise (falling back to the LFH census when the central
+    directory is unavailable).
     """
     verdict = diagnosis.verdict
-    if verdict in (Verdict.VERSION_MIX, Verdict.TAIL_TRUNCATED):
+    if verdict in (Verdict.VERSION_MIX, Verdict.TAIL_TRUNCATED,
+                  Verdict.TAIL_FOREIGN_DATA):
         census: CensusResult | None = diagnosis.lfh_census
     elif diagnosis.cd_census is not None:
         census = diagnosis.cd_census
@@ -232,6 +282,62 @@ def _run_rebuild(src: Path, salvaged: list[SalvagedEntry], output_path: Path,
     outcome.success = True
     recheck = _diagnose(output_path)
     outcome.recheck_verdict = recheck.verdict.value
+
+
+#: Chunk size (bytes) used when copying the leading archive during trim,
+#: so multi-gigabyte inputs are never read into memory in one shot.
+_TRIM_CHUNK_SIZE = 8 * 1024 * 1024
+
+
+def _run_trim(src: Path, output_path: Path, outcome: RepairOutcome) -> bool:
+    """Copy the leading, EOCD-terminated archive out of *src*, dropping
+    the foreign data appended after it (``TAIL_FOREIGN_DATA``).
+
+    :returns: True and updates *outcome* for success (the trimmed
+        archive re-diagnoses as ``NORMAL``); False when trim did not
+        produce a clean archive (or the EOCD geometry is unusable), in
+        which case *output_path* is left absent and the caller should
+        fall back to salvage-based repair.
+    """
+    structure = outcome.diagnosis.structure
+    eocd = structure.eocd
+    eocd_end = eocd.offset + 22 + eocd.comment_length
+    if eocd_end > structure.size:
+        # Defensive guard: a malformed comment length would place the
+        # "leading archive" past the end of the file itself.
+        outcome.warnings.append(
+            "trim failed: EOCD comment field extends past the end of "
+            "the file")
+        return False
+
+    # src stays read-only; only the leading eocd_end bytes are copied.
+    with open(src, "rb") as src_file, open(output_path, "wb") as dst_file:
+        remaining = eocd_end
+        while remaining > 0:
+            chunk = src_file.read(min(_TRIM_CHUNK_SIZE, remaining))
+            if not chunk:
+                break
+            dst_file.write(chunk)
+            remaining -= len(chunk)
+
+    recheck = _diagnose(output_path)
+    if recheck.verdict == Verdict.NORMAL:
+        outcome.mode = "trim"
+        outcome.success = True
+        outcome.output_path = output_path
+        outcome.trimmed_bytes = structure.size - eocd_end
+        outcome.recheck_verdict = recheck.verdict.value
+        # Trim keeps every indexed entry; a NORMAL re-check means the
+        # whole central directory read back cleanly, so nothing is lost.
+        outcome.lost_slide_numbers = []
+        outcome.lost_entries_total = 0
+        return True
+
+    output_path.unlink()
+    outcome.warnings.append(
+        f"trim produced a {recheck.verdict.value} archive; falling back "
+        "to salvage-based repair")
+    return False
 
 
 def _run_extract(src: Path, salvaged: list[SalvagedEntry], output_path: Path,

@@ -12,6 +12,15 @@ project's investigation of real OneDrive-corrupted presentations:
   the entries indexed by the (surviving) central directory.
 * ``TAIL_TRUNCATED``     — the file ends prematurely; the central
   directory and EOCD are gone but leading entries are intact.
+* ``EMPTY_FILE``         — the file is zero bytes long; nothing
+  survives.
+* ``FULL_ZERO_FILL``     — the file is (almost) entirely zero-filled
+  and nothing is salvageable.
+* ``INTERIOR_DAMAGE``    — head and central directory are intact;
+  damage is confined to interior entry data.
+* ``TAIL_FOREIGN_DATA``  — a complete archive is followed by a large
+  region of unindexed foreign data hiding the EOCD from ordinary
+  readers.
 
 Unknown damage deliberately falls back to ``OTHER_CORRUPT`` rather than
 being forced into a known pattern.
@@ -30,12 +39,19 @@ from pptrepair.scanner import ZipStructure, alignment_of
 #: central directory for a VERSION_MIX verdict.
 VERSION_MIX_MIN_MISMATCHES = 5
 
-#: Minimum length (bytes) of a leading zero run for HEAD_ZERO_FILL.
-HEAD_ZERO_MIN_LENGTH = 65536
+#: Minimum length (bytes) of a leading zero run for HEAD_ZERO_FILL
+#: (4 KiB, matching the scanner's zero-run detection block size).
+HEAD_ZERO_MIN_LENGTH = 4096
 
 #: Zero-coverage ratio at or above which a file with no usable ZIP
 #: structure is reported as entirely zeroed.
 ALL_ZERO_RATIO = 0.99
+
+#: Amount (bytes) of unindexed data following the EOCD beyond which
+#: zipfile's EOCD search window (the fixed 22-byte record plus up to
+#: 65535 bytes of comment) no longer reaches it, so an ordinary reader
+#: cannot open the archive directly.
+TAIL_JUNK_MIN = 65557
 
 
 class Verdict(Enum):
@@ -48,6 +64,10 @@ class Verdict(Enum):
     TAIL_TRUNCATED = "tail_truncated"
     OTHER_CORRUPT = "other_corrupt"
     NOT_A_ZIP = "not_a_zip"
+    EMPTY_FILE = "empty_file"
+    FULL_ZERO_FILL = "full_zero_fill"
+    INTERIOR_DAMAGE = "interior_damage"
+    TAIL_FOREIGN_DATA = "tail_foreign_data"
 
 
 @dataclass
@@ -73,29 +93,45 @@ def classify(path: Path, structure: ZipStructure,
 
     Decision procedure (first matching rule wins):
 
-    1. Empty file, or no ZIP signatures at all and not mostly zeros
-       -> NOT_A_ZIP.
-    2. No EOCD:
+    1. Empty file (size == 0) -> EMPTY_FILE.
+    2. No ZIP signatures anywhere and no EOCD:
+       a. head is the OLE compound file signature -> NOT_A_ZIP (CFB
+          evidence);
+       b. zero_ratio >= ALL_ZERO_RATIO -> FULL_ZERO_FILL;
+       c. otherwise -> NOT_A_ZIP.
+    3. No EOCD, but some ZIP signature was found:
        a. head is a local-file-header signature and at least one LFH
           exists -> TAIL_TRUNCATED;
-       b. zero_ratio >= ALL_ZERO_RATIO -> OTHER_CORRUPT (entirely
-          zeroed);
+       b. head is the OLE compound file signature -> NOT_A_ZIP;
+       c. zero_ratio >= ALL_ZERO_RATIO -> FULL_ZERO_FILL;
+       d. otherwise -> OTHER_CORRUPT.
+    4. EOCD present but the central directory census is unavailable
+       (zipfile cannot open):
+       a. zero_ratio >= ALL_ZERO_RATIO and no CRC-valid scanned entries
+          exist -> FULL_ZERO_FILL (nothing salvageable);
+       b. the EOCD is internally consistent, more than TAIL_JUNK_MIN
+          bytes of unindexed data follow it and at least one CRC-valid
+          scanned entry exists -> TAIL_FOREIGN_DATA (a complete archive
+          hidden behind foreign trailing data);
        c. otherwise -> OTHER_CORRUPT.
-    3. EOCD present but the central directory census is unavailable
-       (zipfile cannot open) -> OTHER_CORRUPT.
-    4. Central directory census fully readable:
+    5. Central directory census fully readable:
        a. essential pptx parts present -> NORMAL;
        b. otherwise -> OTHER_CORRUPT (valid ZIP, not a pptx package).
-    5. Central directory census has failures:
+    6. Central directory census has failures:
        a. >= VERSION_MIX_MIN_MISMATCHES CRC-valid scanned entries whose
           header offsets are not listed in the central directory
           -> VERSION_MIX;
        b. leading zero run from offset 0 of >= HEAD_ZERO_MIN_LENGTH and
           every CD entry starting inside it unreadable
           -> HEAD_ZERO_FILL;
-       c. head_kind == "other" and every CD entry starting before the
-          first CRC-valid scanned entry unreadable -> HEAD_FOREIGN_DATA;
-       d. otherwise -> OTHER_CORRUPT.
+       c. head_kind in ("other", "zeros"), every CD entry starting
+          before the first CRC-valid scanned entry unreadable, and no
+          unreadable CD entry starts at or after that offset (damage
+          confined to the head) -> HEAD_FOREIGN_DATA;
+       d. head_kind == "zip", the EOCD is internally consistent and at
+          least one CD entry is readable -> INTERIOR_DAMAGE (head and
+          central directory intact, only entry data damaged);
+       e. otherwise -> OTHER_CORRUPT.
 
     Chunk-boundary alignment (256 KiB / 1 MiB) of damage borders is
     reported as *evidence* but is never a requirement, so unknown
@@ -158,7 +194,7 @@ def _decide(structure: ZipStructure, cd_census: CensusResult | None,
             lfh_census: CensusResult) -> tuple[Verdict, list[str]]:
     """Apply the decision procedure and return (verdict, evidence)."""
     if structure.size == 0:
-        return Verdict.NOT_A_ZIP, ["empty file"]
+        return Verdict.EMPTY_FILE, ["empty file"]
 
     no_signatures = not structure.lfh_offsets and structure.cd_sig_count == 0
     if no_signatures and structure.eocd is None:
@@ -168,10 +204,7 @@ def _decide(structure: ZipStructure, cd_census: CensusResult | None,
         return _decide_no_eocd(structure)
 
     if cd_census is None:
-        return Verdict.OTHER_CORRUPT, [
-            f"EOCD record found at offset {structure.eocd.offset} but the "
-            "archive could not be opened (no valid central directory)",
-        ]
+        return _decide_unopenable(structure, lfh_census)
 
     if cd_census.total() > 0 and cd_census.ok_count() == cd_census.total():
         return _decide_fully_readable(cd_census)
@@ -189,16 +222,16 @@ CFB_EVIDENCE = (
 
 
 def _decide_no_signatures(structure: ZipStructure) -> tuple[Verdict, list[str]]:
-    """Rule 1's second branch: no ZIP signatures found anywhere."""
+    """Rule 2: no ZIP signatures found anywhere, and no EOCD."""
     if structure.head_kind == "cfb":
         return Verdict.NOT_A_ZIP, [CFB_EVIDENCE]
     if structure.zero_ratio() >= ALL_ZERO_RATIO:
-        return Verdict.OTHER_CORRUPT, _zero_ratio_evidence(structure)
+        return Verdict.FULL_ZERO_FILL, _zero_ratio_evidence(structure)
     return Verdict.NOT_A_ZIP, ["no ZIP signatures found"]
 
 
 def _decide_no_eocd(structure: ZipStructure) -> tuple[Verdict, list[str]]:
-    """Rule 2: no end-of-central-directory record was found."""
+    """Rule 3: no end-of-central-directory record was found."""
     if structure.head_kind == "zip" and structure.lfh_offsets:
         return Verdict.TAIL_TRUNCATED, [
             "no end-of-central-directory record found",
@@ -210,12 +243,46 @@ def _decide_no_eocd(structure: ZipStructure) -> tuple[Verdict, list[str]]:
         # archives) do not make the file a damaged pptx package.
         return Verdict.NOT_A_ZIP, [CFB_EVIDENCE]
     if structure.zero_ratio() >= ALL_ZERO_RATIO:
-        return Verdict.OTHER_CORRUPT, _zero_ratio_evidence(structure)
+        return Verdict.FULL_ZERO_FILL, _zero_ratio_evidence(structure)
     return Verdict.OTHER_CORRUPT, ["no end-of-central-directory record"]
 
 
+def _decide_unopenable(structure: ZipStructure,
+                        lfh_census: CensusResult) -> tuple[Verdict, list[str]]:
+    """Rule 4: an EOCD exists but the archive cannot be opened as a ZIP.
+
+    Distinguishes a fully zero-filled file (nothing salvageable), a
+    complete archive hidden behind a large block of unindexed trailing
+    data (:data:`TAIL_JUNK_MIN`), and everything else, which stays
+    OTHER_CORRUPT.
+    """
+    if (structure.zero_ratio() >= ALL_ZERO_RATIO
+            and not lfh_census.ok_entries()):
+        return Verdict.FULL_ZERO_FILL, _zero_ratio_evidence(structure) + [
+            "central directory unreadable, nothing salvageable",
+        ]
+
+    eocd = structure.eocd
+    eocd_end = eocd.offset + 22 + eocd.comment_length
+    trailing = structure.size - eocd_end
+    if (eocd.is_consistent and trailing > TAIL_JUNK_MIN
+            and lfh_census.ok_entries()):
+        return Verdict.TAIL_FOREIGN_DATA, [
+            f"EOCD record found at offset {eocd.offset}, but {trailing} "
+            "bytes of unindexed data follow the archive",
+            f"leading archive [0, {eocd_end}) appears complete",
+            f"{len(lfh_census.ok_entries())} CRC-valid entries found by "
+            "scanning",
+        ]
+
+    return Verdict.OTHER_CORRUPT, [
+        f"EOCD record found at offset {eocd.offset} but the "
+        "archive could not be opened (no valid central directory)",
+    ]
+
+
 def _decide_fully_readable(cd_census: CensusResult) -> tuple[Verdict, list[str]]:
-    """Rule 4: every central directory entry read back intact."""
+    """Rule 5: every central directory entry read back intact."""
     summary = f"all {cd_census.total()} central directory entries are readable"
     if cd_census.has_pptx_core():
         return Verdict.NORMAL, [summary, "essential pptx parts present"]
@@ -226,7 +293,7 @@ def _decide_fully_readable(cd_census: CensusResult) -> tuple[Verdict, list[str]]
 
 def _decide_partial_cd(structure: ZipStructure, cd_census: CensusResult,
                         lfh_census: CensusResult) -> tuple[Verdict, list[str]]:
-    """Rule 5: the central directory census has failures (or is empty)."""
+    """Rule 6: the central directory census has failures (or is empty)."""
     version_mix = _check_version_mix(cd_census, lfh_census)
     if version_mix is not None:
         return version_mix
@@ -239,6 +306,10 @@ def _decide_partial_cd(structure: ZipStructure, cd_census: CensusResult,
     if head_foreign_data is not None:
         return head_foreign_data
 
+    interior_damage = _check_interior_damage(structure, cd_census)
+    if interior_damage is not None:
+        return interior_damage
+
     return Verdict.OTHER_CORRUPT, [
         f"{cd_census.ok_count()} of {cd_census.total()} central directory "
         "entries are readable",
@@ -247,7 +318,7 @@ def _decide_partial_cd(structure: ZipStructure, cd_census: CensusResult,
 
 def _check_version_mix(cd_census: CensusResult,
                         lfh_census: CensusResult) -> tuple[Verdict, list[str]] | None:
-    """Rule 5a: many CRC-valid LFH entries are absent from the CD."""
+    """Rule 6a: many CRC-valid LFH entries are absent from the CD."""
     cd_offsets = {entry.header_offset for entry in cd_census.entries}
     mismatches = [
         entry for entry in lfh_census.ok_entries()
@@ -267,7 +338,7 @@ def _check_version_mix(cd_census: CensusResult,
 
 def _check_head_zero_fill(structure: ZipStructure,
                            cd_census: CensusResult) -> tuple[Verdict, list[str]] | None:
-    """Rule 5b: the file starts with a large zeroed-out region."""
+    """Rule 6b: the file starts with a large zeroed-out region."""
     if not structure.zero_runs:
         return None
     first_run = structure.zero_runs[0]
@@ -294,8 +365,17 @@ def _check_head_zero_fill(structure: ZipStructure,
 def _check_head_foreign_data(
         structure: ZipStructure, cd_census: CensusResult,
         lfh_census: CensusResult) -> tuple[Verdict, list[str]] | None:
-    """Rule 5c: the file starts with unrelated non-zero data."""
-    if structure.head_kind != "other":
+    """Rule 6c: the file starts with unrelated non-zero data.
+
+    Also covers a head whose first block reads as zeros
+    (``head_kind == "zeros"``) followed by foreign data, since the
+    scanner only inspects the first four bytes to tell zeros from a ZIP
+    signature. Damage must be confined to the head region: every
+    unreadable CD entry has to start before the first CRC-valid scanned
+    entry, otherwise scattered corruption elsewhere in the file could be
+    mistaken for this pattern.
+    """
+    if structure.head_kind not in ("other", "zeros"):
         return None
     ok_entries = lfh_census.ok_entries()
     if not ok_entries:
@@ -307,6 +387,9 @@ def _check_head_foreign_data(
     ]
     if not affected or any(entry.ok for entry in affected):
         return None
+    if any(entry.header_offset >= first_ok
+           for entry in cd_census.entries if not entry.ok):
+        return None
     evidence = [
         "file does not start with a ZIP local file header signature",
         f"first CRC-valid scanned entry starts at offset {first_ok}",
@@ -316,11 +399,42 @@ def _check_head_foreign_data(
     return Verdict.HEAD_FOREIGN_DATA, evidence
 
 
+def _check_interior_damage(
+        structure: ZipStructure,
+        cd_census: CensusResult) -> tuple[Verdict, list[str]] | None:
+    """Rule 6d: the head and central directory are intact; only some
+    entries' data is damaged, with no recognisable geometry otherwise."""
+    if structure.head_kind != "zip":
+        return None
+    if structure.eocd is None or not structure.eocd.is_consistent:
+        return None
+    if cd_census.ok_count() == 0:
+        return None
+    evidence = [
+        f"{cd_census.ok_count()} of {cd_census.total()} central directory "
+        "entries are readable",
+        "file head and central directory are intact; damage is confined "
+        "to entry data",
+    ]
+    if structure.zero_runs:
+        largest_run = max(structure.zero_runs, key=lambda run: run.length())
+        line = (
+            f"largest zero region: [{largest_run.start}, "
+            f"{largest_run.end}) ({largest_run.length()} bytes)"
+        )
+        note = _alignment_note(largest_run.end)
+        if note is not None:
+            line += f", end {note}"
+        evidence.append(line)
+    return Verdict.INTERIOR_DAMAGE, evidence
+
+
 def _build_salvage_summary(
         verdict: Verdict, cd_census: CensusResult | None,
         lfh_census: CensusResult) -> dict:
     """Build the salvage summary dict for the chosen census source."""
-    if verdict in (Verdict.VERSION_MIX, Verdict.TAIL_TRUNCATED):
+    if verdict in (Verdict.VERSION_MIX, Verdict.TAIL_TRUNCATED,
+                   Verdict.TAIL_FOREIGN_DATA):
         source_census: CensusResult | None = lfh_census
         source_label = "lfh"
     elif cd_census is not None:

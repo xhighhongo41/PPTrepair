@@ -29,6 +29,9 @@ msgstr ""
 msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
 msgstr ""
 
+msgid "Hint: no content survives inside this file. Check the OneDrive recycle bin, other devices' local copies, and any backups; version history rarely helps with this damage pattern."
+msgstr ""
+
 msgid "Hint: pass --allow-download to also examine cloud-only files (this may take long and use significant disk space)."
 msgstr ""
 
@@ -74,6 +77,9 @@ msgstr ""
 msgid "Re-check verdict: {verdict}"
 msgstr ""
 
+msgid "Removed {n} bytes of foreign data that followed the archive; the leading archive was kept unmodified."
+msgstr ""
+
 msgid "Salvaged entries: {ok} of {total}"
 msgstr ""
 
@@ -116,7 +122,19 @@ msgstr ""
 msgid "Warnings:"
 msgstr ""
 
+msgid "corrupted: file is (almost) entirely zero-filled"
+msgstr ""
+
+msgid "corrupted: file is empty (all content lost)"
+msgstr ""
+
 msgid "corrupted: file tail truncated"
+msgstr ""
+
+msgid "corrupted: intact archive followed by foreign data"
+msgstr ""
+
+msgid "corrupted: interior region damaged, archive index intact"
 msgstr ""
 
 msgid "corrupted: leading region overwritten with foreign data"

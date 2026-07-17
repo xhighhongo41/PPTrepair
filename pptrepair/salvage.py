@@ -74,14 +74,17 @@ def select_salvageable(
 
     Source selection per verdict:
 
-    * ``TAIL_TRUNCATED`` / ``VERSION_MIX`` — CRC-valid entries of the
-      LFH census only (for VERSION_MIX the central directory describes
-      a different version and must not be trusted).
-    * ``HEAD_ZERO_FILL`` / ``HEAD_FOREIGN_DATA`` — readable entries of
-      the central-directory census.
+    * ``TAIL_TRUNCATED`` / ``VERSION_MIX`` / ``TAIL_FOREIGN_DATA`` —
+      CRC-valid entries of the LFH census only (for VERSION_MIX the
+      central directory describes a different version and must not be
+      trusted; for TAIL_FOREIGN_DATA the auto repair path tries a trim
+      first, so this LFH-based fallback only matters if that fails).
+    * ``HEAD_ZERO_FILL`` / ``HEAD_FOREIGN_DATA`` / ``INTERIOR_DAMAGE`` —
+      readable entries of the central-directory census.
     * ``OTHER_CORRUPT`` — union: readable CD entries first, then
       CRC-valid LFH-only entries whose names are not already taken.
-    * ``NORMAL`` / ``NOT_A_ZIP`` — empty.
+    * ``NORMAL`` / ``NOT_A_ZIP`` / ``EMPTY_FILE`` / ``FULL_ZERO_FILL`` —
+      empty.
 
     Duplicate names are resolved in favour of (1) the CD-sourced entry,
     then (2) the LFH entry written last (largest header offset): when a
@@ -93,11 +96,14 @@ def select_salvageable(
     :return: ``(entries, warnings)``.
     """
     verdict = diagnosis.verdict
-    if verdict in (Verdict.NORMAL, Verdict.NOT_A_ZIP):
+    if verdict in (Verdict.NORMAL, Verdict.NOT_A_ZIP, Verdict.EMPTY_FILE,
+                   Verdict.FULL_ZERO_FILL):
         return [], []
-    if verdict in (Verdict.TAIL_TRUNCATED, Verdict.VERSION_MIX):
+    if verdict in (Verdict.TAIL_TRUNCATED, Verdict.VERSION_MIX,
+                   Verdict.TAIL_FOREIGN_DATA):
         candidates = _lfh_candidates(diagnosis.lfh_census)
-    elif verdict in (Verdict.HEAD_ZERO_FILL, Verdict.HEAD_FOREIGN_DATA):
+    elif verdict in (Verdict.HEAD_ZERO_FILL, Verdict.HEAD_FOREIGN_DATA,
+                     Verdict.INTERIOR_DAMAGE):
         candidates = _cd_candidates(diagnosis.cd_census)
     else:  # OTHER_CORRUPT: CD first, then LFH-only names.
         candidates = (_cd_candidates(diagnosis.cd_census)

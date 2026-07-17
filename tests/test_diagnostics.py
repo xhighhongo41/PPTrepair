@@ -13,12 +13,12 @@ import hashlib
 import io
 import json
 import re
-import struct
 import zipfile
 import zlib
 from pathlib import Path
 
-from fixtures import build_minimal_pptx, version_mix, zero_prefix, zero_range
+from fixtures import (append_foreign_tail, build_minimal_pptx, foreign_prefix,
+                      version_mix, zero_interior_entry, zero_prefix)
 
 from pptrepair import __version__
 from pptrepair.census import from_central_directory, from_lfh_scan
@@ -60,25 +60,6 @@ def _header_offset(data: bytes, name: str) -> int:
         return zf.getinfo(name).header_offset
 
 
-def _corrupt_entry_middle(data: bytes, name: str,
-                          corrupt_len: int = 4096) -> bytes:
-    """Zero out a chunk from the middle of *name*'s compressed data.
-
-    The local file header and every byte outside the target entry are
-    left untouched, so only that one entry's CRC check fails while the
-    archive's overall geometry (head kind, offsets) stays intact -- this
-    reproduces damage that does not match any known corruption pattern.
-    """
-    header_offset = _header_offset(data, name)
-    (_sig, _ver, _flags, _method, _mtime, _mdate, _crc, comp_size,
-     _uncomp, name_len, extra_len) = struct.unpack(
-        "<IHHHHHIIIHH", data[header_offset:header_offset + 30])
-    data_start = header_offset + 30 + name_len + extra_len
-    corrupt_start = data_start + comp_size // 3
-    corrupt_end = min(corrupt_start + corrupt_len, data_start + comp_size)
-    return zero_range(data, corrupt_start, corrupt_end)
-
-
 def _deterministic_random(seed: bytes, length: int) -> bytes:
     """Return *length* deterministic pseudo-random bytes, chained via sha256."""
     out = bytearray()
@@ -93,10 +74,20 @@ def _deterministic_random(seed: bytes, length: int) -> bytes:
 
 
 def test_other_corrupt_is_a_fingerprint_target(tmp_path: Path) -> None:
-    """(a) A file with unclassifiable damage (OTHER_CORRUPT) is a target."""
-    data = build_minimal_pptx(num_slides=1, media_bytes=50_000)
-    corrupted = _corrupt_entry_middle(data, "ppt/media/image1.png")
-    path = _write(tmp_path, "unknown.pptx", corrupted)
+    """(a) A file with unclassifiable, scattered damage (OTHER_CORRUPT) is
+    a target.
+
+    Combines a foreign-data head (destroying every entry before
+    ``ppt/media/image1.png``) with a second, independent entry destroyed
+    further into the archive (``ppt/viewProps.xml``, at ``skip=1`` past
+    the media entry). Damage confined only to the head would classify as
+    HEAD_FOREIGN_DATA; scattering it defeats that pattern's "confined to
+    the head" guard, so the file stays unclassified.
+    """
+    data = build_minimal_pptx(num_slides=3, media_bytes=200_000)
+    corrupted = foreign_prefix(data, 8192)
+    scattered = zero_interior_entry(corrupted, skip=1)
+    path = _write(tmp_path, "unknown.pptx", scattered)
 
     diag = _diagnose(path)
 
@@ -148,6 +139,50 @@ def test_head_zero_fill_is_not_a_fingerprint_target(tmp_path: Path) -> None:
     diag = _diagnose(path)
 
     assert diag.verdict == Verdict.HEAD_ZERO_FILL
+    assert is_fingerprint_target(diag) is False
+
+
+def test_empty_file_is_not_a_fingerprint_target(tmp_path: Path) -> None:
+    """(f) A zero-byte file (EMPTY_FILE) is a known pattern, not a target."""
+    path = _write(tmp_path, "empty.pptx", b"")
+
+    diag = _diagnose(path)
+
+    assert diag.verdict == Verdict.EMPTY_FILE
+    assert is_fingerprint_target(diag) is False
+
+
+def test_full_zero_fill_is_not_a_fingerprint_target(tmp_path: Path) -> None:
+    """(g) An entirely zero-filled file (FULL_ZERO_FILL) is not a target."""
+    path = _write(tmp_path, "zerofilled.pptx", b"\x00" * (256 * 1024))
+
+    diag = _diagnose(path)
+
+    assert diag.verdict == Verdict.FULL_ZERO_FILL
+    assert is_fingerprint_target(diag) is False
+
+
+def test_interior_damage_is_not_a_fingerprint_target(tmp_path: Path) -> None:
+    """(h) A file with damage confined to interior entry data
+    (INTERIOR_DAMAGE) is a known pattern, not a target."""
+    data = build_minimal_pptx(num_slides=3, media_bytes=50_000)
+    path = _write(tmp_path, "interior.pptx", zero_interior_entry(data))
+
+    diag = _diagnose(path)
+
+    assert diag.verdict == Verdict.INTERIOR_DAMAGE
+    assert is_fingerprint_target(diag) is False
+
+
+def test_tail_foreign_data_is_not_a_fingerprint_target(tmp_path: Path) -> None:
+    """(i) A complete archive followed by foreign data (TAIL_FOREIGN_DATA)
+    is a known pattern, not a target."""
+    data = build_minimal_pptx(num_slides=1, media_bytes=50_000)
+    path = _write(tmp_path, "tail.pptx", append_foreign_tail(data, 131072))
+
+    diag = _diagnose(path)
+
+    assert diag.verdict == Verdict.TAIL_FOREIGN_DATA
     assert is_fingerprint_target(diag) is False
 
 

@@ -26,6 +26,13 @@ VERDICT_LABELS: dict[Verdict, str] = {
     Verdict.TAIL_TRUNCATED: "corrupted: file tail truncated",
     Verdict.OTHER_CORRUPT: "corrupted: unrecognized damage pattern",
     Verdict.NOT_A_ZIP: "not a ZIP-based file",
+    Verdict.EMPTY_FILE: "corrupted: file is empty (all content lost)",
+    Verdict.FULL_ZERO_FILL:
+        "corrupted: file is (almost) entirely zero-filled",
+    Verdict.INTERIOR_DAMAGE:
+        "corrupted: interior region damaged, archive index intact",
+    Verdict.TAIL_FOREIGN_DATA:
+        "corrupted: intact archive followed by foreign data",
 }
 
 
@@ -122,10 +129,14 @@ def render_repair_text(outcome: "RepairOutcome",
       translated);
     * executed mode and produced artifact path (or a translated
       "nothing to repair" / "unrepairable" statement);
+    * trim only: a note that the trailing foreign data was removed and
+      the leading archive kept as-is;
+    * unrepairable only: a hint for damage patterns where no content
+      survives (``empty_file`` / ``full_zero_fill``);
     * salvage statistics (entries, slides recovered);
     * damage summary: lost slide numbers (exact list when known),
       lost entry count;
-    * rebuild only: re-check verdict of the artifact;
+    * rebuild/trim only: re-check verdict of the artifact;
     * extract only: overview of the recovery-folder layout and the
       OneDrive version-history hint;
     * any warnings, one per line.
@@ -141,12 +152,23 @@ def render_repair_text(outcome: "RepairOutcome",
     if outcome.success and outcome.mode != "none":
         lines.append(
             tr("Output: {path}").format(path=outcome.output_path))
+        if outcome.mode == "trim":
+            lines.append(tr(
+                "Removed {n} bytes of foreign data that followed the "
+                "archive; the leading archive was kept unmodified."
+            ).format(n=outcome.trimmed_bytes))
     elif outcome.success:  # mode == "none": input was already intact
         lines.append(tr(
             "Nothing to repair: the file is already an intact PowerPoint "
             "package."))
     else:
         lines.append(tr("Unrepairable: no recoverable content was found."))
+        if diagnosis.verdict in (Verdict.EMPTY_FILE, Verdict.FULL_ZERO_FILL):
+            lines.append(tr(
+                "Hint: no content survives inside this file. Check the "
+                "OneDrive recycle bin, other devices' local copies, and "
+                "any backups; version history rarely helps with this "
+                "damage pattern."))
 
     salvage = diagnosis.salvage_summary
     if salvage:
@@ -164,7 +186,8 @@ def render_repair_text(outcome: "RepairOutcome",
             lines.append(tr("Lost entries: {n}").format(
                 n=outcome.lost_entries_total))
 
-    if outcome.mode == "rebuild" and outcome.recheck_verdict is not None:
+    if (outcome.mode in ("rebuild", "trim")
+            and outcome.recheck_verdict is not None):
         lines.append(tr("Re-check verdict: {verdict}").format(
             verdict=outcome.recheck_verdict))
 
@@ -194,7 +217,7 @@ def render_repair_json(outcome: "RepairOutcome") -> str:
         {
           "path": str,
           "verdict": str,
-          "mode": "rebuild" | "extract" | "none",
+          "mode": "rebuild" | "extract" | "trim" | "none",
           "success": bool,
           "output": str | null,
           "salvage": {"entries_ok": int, "entries_total": int,
@@ -202,6 +225,7 @@ def render_repair_json(outcome: "RepairOutcome") -> str:
                        "source": str} | null,
           "lost_slide_numbers": [int, ...],
           "lost_entries_total": int,
+          "trimmed_bytes": int | null,      # trim mode only, else null
           "recheck_verdict": str | null,
           "synthesized_parts": [str, ...],
           "pruned_relationships": [str, ...],
@@ -222,6 +246,7 @@ def render_repair_json(outcome: "RepairOutcome") -> str:
         "salvage": outcome.diagnosis.salvage_summary or None,
         "lost_slide_numbers": list(outcome.lost_slide_numbers),
         "lost_entries_total": outcome.lost_entries_total,
+        "trimmed_bytes": outcome.trimmed_bytes,
         "recheck_verdict": outcome.recheck_verdict,
         "synthesized_parts":
             list(rebuild_result.synthesized_parts) if rebuild_result else [],

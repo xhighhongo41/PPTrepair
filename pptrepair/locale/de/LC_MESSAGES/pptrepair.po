@@ -137,3 +137,21 @@ msgstr "keine ZIP-basierte Datei"
 
 msgid "Downloading cloud-only file: {path}"
 msgstr "Reine Cloud-Datei wird heruntergeladen: {path}"
+
+msgid "corrupted: file is empty (all content lost)"
+msgstr "beschädigt: Datei ist leer (gesamter Inhalt verloren)"
+
+msgid "corrupted: file is (almost) entirely zero-filled"
+msgstr "beschädigt: Datei ist (fast) vollständig mit Nullen gefüllt"
+
+msgid "corrupted: interior region damaged, archive index intact"
+msgstr "beschädigt: innerer Bereich beschädigt, Archivindex intakt"
+
+msgid "corrupted: intact archive followed by foreign data"
+msgstr "beschädigt: intaktes Archiv gefolgt von fremden Daten"
+
+msgid "Removed {n} bytes of foreign data that followed the archive; the leading archive was kept unmodified."
+msgstr "{n} Bytes fremder Daten, die dem Archiv folgten, wurden entfernt; das führende Archiv blieb unverändert erhalten."
+
+msgid "Hint: no content survives inside this file. Check the OneDrive recycle bin, other devices' local copies, and any backups; version history rarely helps with this damage pattern."
+msgstr "Hinweis: In dieser Datei ist kein Inhalt mehr erhalten. Prüfen Sie den OneDrive-Papierkorb, lokale Kopien auf anderen Geräten und etwaige Backups; der Versionsverlauf hilft bei diesem Schadensmuster selten."
