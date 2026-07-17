@@ -155,3 +155,12 @@ msgstr "Se eliminaron {n} bytes de datos ajenos que seguían al archivo; el arch
 
 msgid "Hint: no content survives inside this file. Check the OneDrive recycle bin, other devices' local copies, and any backups; version history rarely helps with this damage pattern."
 msgstr "Sugerencia: no sobrevive ningún contenido dentro de este archivo. Revise la papelera de reciclaje de OneDrive, las copias locales de otros dispositivos y cualquier copia de seguridad; el historial de versiones rara vez ayuda con este patrón de daño."
+
+msgid "Removed {e} stale reference(s) from {p} rebuilt part(s)."
+msgstr "Se eliminaron {e} referencia(s) obsoletas de {p} parte(s) reconstruidas."
+
+msgid "Unresolved references after repair: {n}"
+msgstr "Referencias sin resolver tras la reparación: {n}"
+
+msgid "Note: these unresolved references existed in the original archive and were left untouched (the recovered file is byte-identical to the original)."
+msgstr "Nota: estas referencias sin resolver ya existían en el archivo original y no se modificaron (el archivo recuperado es idéntico byte a byte al original)."

@@ -155,3 +155,12 @@ msgstr "已移除压缩包之后的 {n} 字节无关数据;开头的压缩包保
 
 msgid "Hint: no content survives inside this file. Check the OneDrive recycle bin, other devices' local copies, and any backups; version history rarely helps with this damage pattern."
 msgstr "提示: 此文件内部没有任何可恢复的内容。请检查 OneDrive 回收站、其他设备上的本地副本以及任何备份;版本历史记录对此类损坏模式通常没有帮助。"
+
+msgid "Removed {e} stale reference(s) from {p} rebuilt part(s)."
+msgstr "已从 {p} 个重建部件中移除 {e} 个失效引用。"
+
+msgid "Unresolved references after repair: {n}"
+msgstr "修复后未解决的引用数: {n}"
+
+msgid "Note: these unresolved references existed in the original archive and were left untouched (the recovered file is byte-identical to the original)."
+msgstr "提示: 这些未解决的引用在原始压缩包中就已存在,未做改动(恢复的文件与原始文件逐字节相同)。"

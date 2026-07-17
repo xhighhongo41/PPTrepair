@@ -17,6 +17,7 @@ from pptrepair.census import (CensusResult, from_central_directory,
 from pptrepair.classify import Diagnosis, Verdict, classify
 from pptrepair.extract import ExtractResult, extract_salvage
 from pptrepair.i18n import get_translator
+from pptrepair.integrity import inspect_references
 from pptrepair.rebuild import RebuildResult, rebuild_package
 from pptrepair.salvage import SalvagedEntry, SalvageReader, select_salvageable
 from pptrepair.scanner import scan_structure
@@ -54,6 +55,10 @@ class RepairOutcome:
     recheck_verdict: str | None = None
     """`check` verdict of the produced artifact (rebuild/trim modes
     only)."""
+    recheck_dangling_refs: int | None = None
+    """Number of dangling relationship references (see
+    :mod:`pptrepair.integrity`) found in the produced artifact by the
+    post-repair recheck (rebuild/trim modes only); None otherwise."""
     lost_slide_numbers: list[int] = field(default_factory=list)
     """Slide numbers known to be lost (exact when a CD survived)."""
     lost_entries_total: int = 0
@@ -97,7 +102,15 @@ def repair_file(src: Path, output: Path | None = None, mode: str = "auto",
       true (an existing extract *directory* is likewise refused).
     * After a rebuild or a successful trim, the artifact is
       re-diagnosed with the check pipeline and the verdict recorded in
-      ``recheck_verdict``.
+      ``recheck_verdict``, and separately re-checked with
+      :func:`pptrepair.integrity.inspect_references`, whose dangling
+      reference count is recorded in ``recheck_dangling_refs``. A
+      positive count on a rebuild artifact also appends a warning
+      (rebuild's own reference cleanup should already have removed
+      them, so this signals a cleanup bug); a positive count after a
+      trim is recorded without a warning, since trim reproduces the
+      original archive byte-for-byte and any dangling reference
+      predates this tool.
     * ``lost_slide_numbers`` / ``lost_entries_total`` are computed from
       the diagnosis (exact when the central directory survived; both
       reset to empty/zero on a successful trim, which loses nothing).
@@ -283,6 +296,17 @@ def _run_rebuild(src: Path, salvaged: list[SalvagedEntry], output_path: Path,
     recheck = _diagnose(output_path)
     outcome.recheck_verdict = recheck.verdict.value
 
+    # Self-check the cleanup rebuild_package just performed: a positive
+    # count here means a dangling reference slipped past it, which is a
+    # cleanup bug worth surfacing rather than silently shipping.
+    integrity = inspect_references(output_path)
+    outcome.recheck_dangling_refs = len(integrity.dangling)
+    if outcome.recheck_dangling_refs > 0:
+        outcome.warnings.append(
+            f"rebuild artifact still contains "
+            f"{outcome.recheck_dangling_refs} dangling relationship "
+            "reference(s)")
+
 
 #: Chunk size (bytes) used when copying the leading archive during trim,
 #: so multi-gigabyte inputs are never read into memory in one shot.
@@ -327,6 +351,11 @@ def _run_trim(src: Path, output_path: Path, outcome: RepairOutcome) -> bool:
         outcome.output_path = output_path
         outcome.trimmed_bytes = structure.size - eocd_end
         outcome.recheck_verdict = recheck.verdict.value
+        # Trim never touches the leading archive's bytes, so any
+        # dangling reference found here predates this tool; it is only
+        # recorded, not warned about (see repair_file's docstring).
+        integrity = inspect_references(output_path)
+        outcome.recheck_dangling_refs = len(integrity.dangling)
         # Trim keeps every indexed entry; a NORMAL re-check means the
         # whole central directory read back cleanly, so nothing is lost.
         outcome.lost_slide_numbers = []

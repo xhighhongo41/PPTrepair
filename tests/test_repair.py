@@ -230,12 +230,14 @@ def test_json_output_schema(tmp_path: Path, capsys: CaptureFixture) -> None:
     assert set(payload.keys()) == {
         "path", "verdict", "mode", "success", "output", "salvage",
         "lost_slide_numbers", "lost_entries_total", "trimmed_bytes",
-        "recheck_verdict", "synthesized_parts", "pruned_relationships",
-        "pruned_slide_ids", "written_files", "warnings",
+        "recheck_verdict", "recheck_dangling_refs", "synthesized_parts",
+        "pruned_relationships", "pruned_slide_ids", "cleaned_parts",
+        "removed_elements", "written_files", "warnings",
     }
     assert payload["mode"] == "rebuild"
     assert payload["success"] is True
     assert payload["recheck_verdict"] == "normal"
+    assert payload["recheck_dangling_refs"] == 0
 
 
 # --- 9. a nonexistent input reports an error ---------------------------------
@@ -365,3 +367,4 @@ def test_interior_damage_rebuilds_successfully(tmp_path: Path) -> None:
     assert outcome.mode == "rebuild"
     assert outcome.success is True
     assert outcome.recheck_verdict == "normal"
+    assert outcome.recheck_dangling_refs == 0

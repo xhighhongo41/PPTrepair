@@ -9,7 +9,9 @@ written under ``tmp_path``. ``subprocess`` is intentionally not used
 
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -23,12 +25,49 @@ _MEDIA_BYTES = 600_000
 #: Shorthand for the capsys fixture type, to keep signatures short.
 CaptureFixture = pytest.CaptureFixture[str]
 
+#: Relationship-reference namespace, matching pptrepair.integrity.R_NS.
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
 
 def _write(tmp_path: Path, name: str, data: bytes) -> Path:
     """Write *data* to ``tmp_path / name`` and return the resulting path."""
     path = tmp_path / name
     path.write_bytes(data)
     return path
+
+
+def _inject_dangling_ref(data: bytes,
+                         part: str = "ppt/slides/slide1.xml") -> bytes:
+    """Return a copy of the .pptx *data* with a dangling ``r:embed``
+    reference spliced into *part*.
+
+    Simulates a structurally intact package (see v1.1.2 plan §4.3)
+    whose slide XML still points at a relationship id that part's own
+    ``.rels`` no longer defines -- the exact situation
+    ``check``/``pptrepair.integrity`` is meant to surface without
+    affecting the ``normal`` verdict or exit code.
+    """
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        infos = archive.infolist()
+        contents = {info.filename: archive.read(info.filename)
+                    for info in infos}
+
+    original = contents[part].decode("utf-8")
+    injected = original.replace(
+        "<p:grpSpPr/>",
+        "<p:grpSpPr/><p:pic><p:blipFill>"
+        f'<a:blip xmlns:r="{_R_NS}" r:embed="rId99"/>'
+        "</p:blipFill></p:pic>",
+        1,
+    )
+    assert injected != original, "injection anchor not found in fixture"
+    contents[part] = injected.encode("utf-8")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as rebuilt:
+        for info in infos:
+            rebuilt.writestr(info.filename, contents[info.filename])
+    return buffer.getvalue()
 
 
 def test_single_healthy_file(tmp_path: Path, capsys: CaptureFixture) -> None:
@@ -151,3 +190,51 @@ def test_exit_code_constants() -> None:
     assert EXIT_OK == 0
     assert EXIT_CORRUPT == 1
     assert EXIT_ERROR == 2
+
+
+# --- v1.1.2: reference-integrity check on structurally normal files -----
+
+
+def test_check_reports_dangling_reference_but_stays_normal(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """A structurally intact file with a dangling XML relationship
+    reference still exits 0 (the verdict stays normal), but the text
+    report surfaces a reference-integrity warning line."""
+    data = _inject_dangling_ref(build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+    path = _write(tmp_path, "dangling.pptx", data)
+
+    exit_code = main(["check", str(path)])
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert "normal" in out
+    assert "Reference integrity:" in out
+
+
+def test_check_json_reports_xml_ref_integrity(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """``--json`` reports a positive dangling_count for a package with a
+    dangling reference, and an all-clean result for one without."""
+    dangling_data = _inject_dangling_ref(
+        build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+    dangling_path = _write(tmp_path, "dangling.pptx", dangling_data)
+    clean_path = _write(
+        tmp_path, "clean.pptx", build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+
+    exit_code = main(["check", "--json", str(dangling_path), str(clean_path)])
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    payload = json.loads(out)
+    by_path = {entry["path"]: entry for entry in payload}
+
+    dangling_entry = by_path[str(dangling_path)]
+    assert dangling_entry["verdict"] == "normal"
+    assert dangling_entry["xml_ref_integrity"]["dangling_count"] > 0
+
+    clean_entry = by_path[str(clean_path)]
+    assert clean_entry["xml_ref_integrity"] == {
+        "dangling_count": 0, "parts": [],
+    }

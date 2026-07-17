@@ -10,6 +10,7 @@ from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.scanner import ZipStructure
 
 if TYPE_CHECKING:  # avoid runtime import cycles with repair / scan
+    from pptrepair.integrity import RefIntegrityResult
     from pptrepair.repair import RepairOutcome
     from pptrepair.scan import ScanResult
 
@@ -36,7 +37,8 @@ VERDICT_LABELS: dict[Verdict, str] = {
 }
 
 
-def render_text(diagnosis: Diagnosis) -> str:
+def render_text(diagnosis: Diagnosis,
+               ref_integrity: "RefIntegrityResult | None" = None) -> str:
     """Render one diagnosis as a human-readable multi-line report.
 
     Layout contract (kept stable for tests):
@@ -47,6 +49,12 @@ def render_text(diagnosis: Diagnosis) -> str:
       (omitted when there is no evidence)
     * when the salvage summary is non-empty, a final line
       ``Salvageable: <entries_ok>/<entries_total> entries, <slides_ok>/<slides_total> slides``
+    * when *ref_integrity* is given and has at least one dangling
+      reference (see :mod:`pptrepair.integrity`), two trailing lines:
+      ``Reference integrity: <n> unresolved reference(s) in <m>
+      part(s)`` followed by a PowerPoint hint. Omitted entirely when
+      *ref_integrity* is None or carries no dangling references, so
+      the output of a `check` run on a clean file is unchanged.
     """
     lines = [f"=== {diagnosis.path} ==="]
     label = VERDICT_LABELS[diagnosis.verdict]
@@ -63,11 +71,27 @@ def render_text(diagnosis: Diagnosis) -> str:
             f"entries, {salvage['slides_ok']}/{salvage['slides_total']} slides"
         )
 
+    if ref_integrity is not None and ref_integrity.dangling:
+        affected_parts = {ref.part for ref in ref_integrity.dangling}
+        lines.append(
+            f"Reference integrity: {len(ref_integrity.dangling)} unresolved "
+            f"reference(s) in {len(affected_parts)} part(s)"
+        )
+        lines.append(
+            "  PowerPoint may offer a one-time repair on first open.")
+
     return "\n".join(lines)
 
 
-def render_json(diagnoses: list[Diagnosis]) -> str:
+def render_json(diagnoses: list[Diagnosis],
+               integrities: "list[RefIntegrityResult | None] | None" = None
+               ) -> str:
     """Render diagnoses as a JSON array (schema kept stable for tests).
+
+    *integrities*, when given, must have the same length as *diagnoses*
+    and pairs up with it index-by-index (each entry is either a
+    :class:`pptrepair.integrity.RefIntegrityResult` or None). Left as
+    the default None, every element's ``xml_ref_integrity`` is null.
 
     Each element::
 
@@ -83,10 +107,19 @@ def render_json(diagnoses: list[Diagnosis]) -> str:
             "zero_bytes": int,
             "eocd_present": bool,
             "lfh_count": int
-          }
+          },
+          "xml_ref_integrity": {       # null when no integrity result
+            "dangling_count": int,
+            "parts": [str, ...]        # sorted, deduplicated part names
+          } | null
         }
     """
-    payload = [_to_dict(diagnosis) for diagnosis in diagnoses]
+    if integrities is None:
+        integrities = [None] * len(diagnoses)
+    payload = [
+        _to_dict(diagnosis, integrity)
+        for diagnosis, integrity in zip(diagnoses, integrities)
+    ]
     return json.dumps(payload, indent=2)
 
 
@@ -103,8 +136,14 @@ def _structure_to_dict(structure: ZipStructure | None) -> dict | None:
     }
 
 
-def _to_dict(diagnosis: Diagnosis) -> dict:
-    """Render one diagnosis as a JSON-schema dict."""
+def _to_dict(diagnosis: Diagnosis,
+            integrity: "RefIntegrityResult | None" = None) -> dict:
+    """Render one diagnosis as a JSON-schema dict.
+
+    Used by :func:`render_json` (the ``check`` command) only;
+    :func:`render_scan_json` builds its own, unrelated per-file dicts
+    and is unaffected by *integrity*.
+    """
     return {
         "path": str(diagnosis.path),
         "verdict": diagnosis.verdict.value,
@@ -112,6 +151,19 @@ def _to_dict(diagnosis: Diagnosis) -> dict:
         "evidence": list(diagnosis.evidence),
         "salvage": diagnosis.salvage_summary or None,
         "structure": _structure_to_dict(diagnosis.structure),
+        "xml_ref_integrity": _integrity_to_dict(integrity),
+    }
+
+
+def _integrity_to_dict(
+    integrity: "RefIntegrityResult | None",
+) -> dict | None:
+    """Render *integrity* as its JSON-schema dict, or None when absent."""
+    if integrity is None:
+        return None
+    return {
+        "dangling_count": len(integrity.dangling),
+        "parts": sorted({ref.part for ref in integrity.dangling}),
     }
 
 
@@ -137,6 +189,16 @@ def render_repair_text(outcome: "RepairOutcome",
     * damage summary: lost slide numbers (exact list when known),
       lost entry count;
     * rebuild/trim only: re-check verdict of the artifact;
+    * rebuild only, when the rebuild's own reference cleanup touched at
+      least one part: a count of removed stale references and the
+      number of rebuilt parts they were removed from;
+    * rebuild/trim only, when the reference-integrity recheck ran: the
+      number of unresolved relationship references left in the
+      artifact;
+    * trim only, when that count is positive: a note that these
+      unresolved references already existed in the original archive
+      and were left untouched, since the recovered file is
+      byte-identical to it;
     * extract only: overview of the recovery-folder layout and the
       OneDrive version-history hint;
     * any warnings, one per line.
@@ -191,6 +253,24 @@ def render_repair_text(outcome: "RepairOutcome",
         lines.append(tr("Re-check verdict: {verdict}").format(
             verdict=outcome.recheck_verdict))
 
+    rebuild_result = outcome.rebuild_result
+    if (outcome.mode == "rebuild" and rebuild_result is not None
+            and rebuild_result.cleaned_parts):
+        lines.append(tr(
+            "Removed {e} stale reference(s) from {p} rebuilt part(s)."
+        ).format(e=len(rebuild_result.removed_elements),
+                 p=len(rebuild_result.cleaned_parts)))
+
+    if (outcome.mode in ("rebuild", "trim")
+            and outcome.recheck_dangling_refs is not None):
+        lines.append(tr("Unresolved references after repair: {n}").format(
+            n=outcome.recheck_dangling_refs))
+        if outcome.mode == "trim" and outcome.recheck_dangling_refs > 0:
+            lines.append(tr(
+                "Note: these unresolved references existed in the "
+                "original archive and were left untouched (the recovered "
+                "file is byte-identical to the original)."))
+
     if outcome.mode == "extract" and outcome.success:
         lines.append(tr(
             "The recovery folder groups salvaged content by kind: "
@@ -227,9 +307,12 @@ def render_repair_json(outcome: "RepairOutcome") -> str:
           "lost_entries_total": int,
           "trimmed_bytes": int | null,      # trim mode only, else null
           "recheck_verdict": str | null,
+          "recheck_dangling_refs": int | null,  # rebuild/trim, else null
           "synthesized_parts": [str, ...],
           "pruned_relationships": [str, ...],
           "pruned_slide_ids": [str, ...],
+          "cleaned_parts": [str, ...],      # rebuild mode, else []
+          "removed_elements": [str, ...],   # rebuild mode, else []
           "written_files": [str, ...],     # extract mode, else []
           "warnings": [str, ...]
         }
@@ -248,6 +331,7 @@ def render_repair_json(outcome: "RepairOutcome") -> str:
         "lost_entries_total": outcome.lost_entries_total,
         "trimmed_bytes": outcome.trimmed_bytes,
         "recheck_verdict": outcome.recheck_verdict,
+        "recheck_dangling_refs": outcome.recheck_dangling_refs,
         "synthesized_parts":
             list(rebuild_result.synthesized_parts) if rebuild_result else [],
         "pruned_relationships":
@@ -255,6 +339,10 @@ def render_repair_json(outcome: "RepairOutcome") -> str:
             else [],
         "pruned_slide_ids":
             list(rebuild_result.pruned_slide_ids) if rebuild_result else [],
+        "cleaned_parts":
+            list(rebuild_result.cleaned_parts) if rebuild_result else [],
+        "removed_elements":
+            list(rebuild_result.removed_elements) if rebuild_result else [],
         "written_files":
             list(extract_result.written_files) if extract_result else [],
         "warnings": list(outcome.warnings),

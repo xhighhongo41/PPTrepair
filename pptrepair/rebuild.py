@@ -9,12 +9,20 @@ Rewrites salvaged entries into a fresh, consistent .pptx:
 3. references are reconciled so the surviving package is
    self-consistent: relationship entries whose targets are gone are
    pruned (external targets are kept), and ``<p:sldIdLst>`` /
-   ``<p:sldMasterIdLst>`` etc. lose the ids whose parts vanished.
+   ``<p:sldMasterIdLst>`` etc. lose the ids whose parts vanished;
+4. dangling relationship references left inside salvaged XML parts (an
+   ``r:``-namespace attribute pointing at a relationship id that no
+   longer survives) are cleaned up, so PowerPoint no longer offers to
+   repair the rebuilt file.
 
-Slide XML *content* is never touched in v1.0: parts that survived are
-written byte-identical, and only the package-plumbing XML listed above
-is re-serialised (namespace prefixes preserved via
-``ET.register_namespace``).
+Non-plumbing XML content is kept byte-identical whenever possible: a
+part is only re-serialised when step 4 finds a dangling reference in
+it, in which case the minimal enclosing element is removed (or, for
+shared-fill blips and references no rule covers, only the offending
+attribute). Every other salvaged part is streamed through unchanged,
+and package-plumbing XML (``[Content_Types].xml``, every ``*.rels``,
+``ppt/presentation.xml``) is re-serialised with namespace prefixes
+preserved via ``ET.register_namespace``.
 """
 
 from __future__ import annotations
@@ -26,7 +34,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TypeVar
 
 from pptrepair.salvage import SalvagedEntry, SalvageReader
 
@@ -71,6 +79,11 @@ _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _R_ID = f"{{{_R_NS}}}id"
 _REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+
+#: DrawingML main and PowerPoint 2010 namespaces, consulted only by the
+#: dangling-reference cleanup step.
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_P14_NS = "http://schemas.microsoft.com/office/powerpoint/2010/main"
 
 #: Relationship type URIs used by the synthesised ``_rels/.rels``.
 _REL_OFFICE_DOCUMENT = f"{_R_NS}/officeDocument"
@@ -122,6 +135,31 @@ _XMLNS_RE = re.compile(r"xmlns(?::([A-Za-z_][\w.\-]*))?\s*=")
 #: Fallback ZIP timestamp when the original one is unavailable or invalid.
 _DEFAULT_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 
+#: Fully-qualified element tags the reference-cleanup rules test against.
+_P_PIC = f"{{{_PML_NS}}}pic"
+_P_BLIPFILL = f"{{{_PML_NS}}}blipFill"
+_P_EXT = f"{{{_PML_NS}}}ext"
+_P_EXTLST = f"{{{_PML_NS}}}extLst"
+_P_GRAPHICFRAME = f"{{{_PML_NS}}}graphicFrame"
+_P_CUSTSHOW = f"{{{_PML_NS}}}custShow"
+_P_SLD = f"{{{_PML_NS}}}sld"
+_A_BLIP = f"{{{_A_NS}}}blip"
+_P14_MEDIA = f"{{{_P14_NS}}}media"
+
+#: DrawingML local names that carry a media *link* relationship (the
+#: paired picture keeps its poster image once the link is dropped).
+_A_MEDIA_LINK_LOCALS = frozenset(
+    {"videoFile", "audioFile", "quickTimeFile", "wavAudioFile"})
+#: DrawingML local names that carry a hyperlink relationship.
+_A_HLINK_LOCALS = frozenset({"hlinkClick", "hlinkHover"})
+
+_T = TypeVar("_T")
+
+#: One dangling reference: ``(attribute key, local name, relationship id)``.
+_DanglingAttr = tuple[str, str, str]
+#: An element together with the dangling references it carries.
+_Carrier = tuple[ET.Element, list[_DanglingAttr]]
+
 
 @dataclass
 class RebuildResult:
@@ -135,6 +173,11 @@ class RebuildResult:
     """Removed relationships as ``"<rels file>: <rId> -> <target>"``."""
     pruned_slide_ids: list[str] = field(default_factory=list)
     """Removed presentation list ids as ``"<list>: <rId>"``."""
+    cleaned_parts: list[str] = field(default_factory=list)
+    """Names of parts whose dangling references were cleaned up."""
+    removed_elements: list[str] = field(default_factory=list)
+    """Removed carriers as ``"<part>: <element> (<rIds>)"`` and
+    attribute-only removals as ``"<part>: @<attr> on <element> (<rId>)"``."""
     warnings: list[str] = field(default_factory=list)
 
 
@@ -165,6 +208,13 @@ def rebuild_package(reader: SalvageReader,
       ``<p:sldId>`` entries are dropped exactly when their relationship
       disappeared. ``TargetMode="External"`` relationships are never
       pruned.
+    * After reference reconciliation, every salvaged XML part (other than
+      ``*.rels`` and ``[Content_Types].xml``) is scanned for dangling
+      relationship references and re-serialised only when at least one is
+      found; otherwise it is streamed byte-identical.
+      ``ppt/presentation.xml`` is scanned in its already-pruned form and
+      appears in ``cleaned_parts`` only when that scan changes it (an
+      id-list prune alone does not count).
     * The output must not exist beforehand (caller handles --force).
     """
     salvaged_by_name = {entry.name: entry for entry in salvaged}
@@ -185,9 +235,10 @@ def rebuild_package(reader: SalvageReader,
     plumbing: dict[str, bytes] = {}
     plumbing_date_time: dict[str, tuple[int, ...] | None] = {}
 
-    # 1. Prune every surviving relationship part, remembering which
-    #    relationship ids the presentation part may still reference.
-    surviving_presentation_rids: set[str] | None = None
+    # 1. Prune every surviving relationship part, remembering the set of
+    #    relationship ids that survived in each so later steps can tell
+    #    which references still resolve.
+    surviving_by_rels: dict[str, set[str]] = {}
     for entry in salvaged:
         if not entry.name.endswith(".rels"):
             continue
@@ -196,8 +247,9 @@ def rebuild_package(reader: SalvageReader,
             entry.name, data, final_names, result.pruned_relationships)
         plumbing[entry.name] = new_bytes
         plumbing_date_time[entry.name] = reader.datetime_of(entry)
-        if entry.name == _PRESENTATION_RELS_NAME:
-            surviving_presentation_rids = surviving
+        surviving_by_rels[entry.name] = surviving
+    surviving_presentation_rids = surviving_by_rels.get(
+        _PRESENTATION_RELS_NAME)
 
     # 2. Prune the presentation part's id lists against the surviving
     #    relationships (skipped when the presentation rels part is gone,
@@ -228,6 +280,32 @@ def rebuild_package(reader: SalvageReader,
         plumbing[_ROOT_RELS_NAME] = _synthesize_root_rels(final_names)
         plumbing_date_time[_ROOT_RELS_NAME] = None
         result.synthesized_parts.append(_ROOT_RELS_NAME)
+
+    # 4b. Reference cleanup: strip dangling relationship references left
+    #     inside salvaged XML parts so PowerPoint accepts the rebuilt
+    #     file without offering to repair it. Parts without any dangling
+    #     reference are left untouched (streamed byte-identical below).
+    for entry in salvaged:
+        name = entry.name
+        if not name.endswith(".xml") or name.endswith(".rels"):
+            continue
+        if name == _CONTENT_TYPES_NAME:
+            continue
+        rels_name = _rels_part_name(name)
+        surviving_ids = surviving_by_rels.get(rels_name)
+        rels_missing = surviving_ids is None
+        # ``ppt/presentation.xml`` is inspected in its already-pruned
+        # form; every other part is read straight from the salvage set.
+        source = plumbing.get(name)
+        if source is None:
+            source = _read_entry(reader, entry)
+        cleaned, changed = _clean_dangling_refs(
+            name, source, surviving_ids if surviving_ids is not None else set(),
+            rels_missing, rels_name, result.removed_elements, result.warnings)
+        if changed:
+            plumbing[name] = cleaned
+            plumbing_date_time[name] = reader.datetime_of(entry)
+            result.cleaned_parts.append(name)
 
     # 5. Write the new archive: buffered plumbing first, then every other
     #    salvaged entry streamed through unchanged.
@@ -559,3 +637,234 @@ def _synthesize_root_rels(final_names: set[str]) -> bytes:
             f'<Relationship Id="{rid}" Type="{rel_type}" Target="{target}"/>')
     parts.append("</Relationships>")
     return _XML_DECLARATION + "".join(parts).encode("utf-8")
+
+
+def _rels_part_name(name: str) -> str:
+    """Return the ``.rels`` part that declares *name*'s relationships.
+
+    A part ``X/Y`` resolves its relationship ids from ``X/_rels/Y.rels``.
+    """
+    directory = posixpath.dirname(name)
+    base = posixpath.basename(name)
+    return posixpath.join(directory, "_rels", f"{base}.rels")
+
+
+def _split_qname(tag: str) -> tuple[str, str]:
+    """Split a ``{uri}local`` tag into its namespace URI and local name.
+
+    Unqualified names return an empty namespace URI.
+    """
+    if tag.startswith("{"):
+        uri, _closing, local = tag[1:].partition("}")
+        return uri, local
+    return "", tag
+
+
+def _collect_carriers(root: ET.Element,
+                      surviving: set[str]) -> tuple[list[_Carrier], bool]:
+    """Collect elements carrying a dangling relationship reference.
+
+    Returns the ``(element, dangling)`` pairs -- where *dangling* lists
+    the ``(attribute key, local name, relationship id)`` triples whose id
+    is not in *surviving* -- together with a flag telling whether the
+    part uses the relationships namespace at all. Empty values are
+    ignored, since an empty ``r:id`` is a legitimate internal anchor
+    rather than a dangling reference.
+    """
+    carriers: list[_Carrier] = []
+    has_r_attr = False
+    for elem in root.iter():
+        dangling: list[_DanglingAttr] = []
+        for key, value in elem.attrib.items():
+            uri, local = _split_qname(key)
+            if uri != _R_NS:
+                continue
+            has_r_attr = True
+            if value and value not in surviving:
+                dangling.append((key, local, value))
+        if dangling:
+            carriers.append((elem, dangling))
+    return carriers, has_r_attr
+
+
+def _clean_dangling_refs(name: str, data: bytes, surviving: set[str],
+                         rels_missing: bool, rels_name: str,
+                         removed_elements: list[str],
+                         warnings: list[str]) -> tuple[bytes, bool]:
+    """Strip dangling relationship references from one XML part.
+
+    Returns ``(bytes, changed)``. When the part has no dangling reference
+    (or cannot be parsed) the original bytes are returned with
+    ``changed=False`` so the caller keeps the part byte-identical.
+    """
+    try:
+        probe = ET.fromstring(data)
+    except ET.ParseError:
+        warnings.append(
+            f"{name}: could not be parsed for reference cleanup; "
+            "left unchanged")
+        return data, False
+
+    carriers, has_r_attr = _collect_carriers(probe, surviving)
+    if rels_missing and has_r_attr:
+        warnings.append(
+            f"{name}: relationships part {rels_name} is missing; "
+            "treating all references as dangling")
+    if not carriers:
+        return data, False
+
+    def edit(root: ET.Element) -> None:
+        _apply_cleanup(name, root, surviving, removed_elements, warnings)
+
+    return _reserialize(data, edit), True
+
+
+def _apply_cleanup(name: str, root: ET.Element, surviving: set[str],
+                   removed_elements: list[str],
+                   warnings: list[str]) -> None:
+    """Resolve and apply the removal rules for one part's carriers."""
+    parent_map = {child: parent for parent in root.iter() for child in parent}
+    carriers, _has_r_attr = _collect_carriers(root, surviving)
+
+    # Bucket every carrier into a whole-element removal (keyed by the
+    # anchor element it resolves to) or an attribute-only removal.
+    element_removals: dict[ET.Element, list] = {}
+    attr_removals: list[tuple[ET.Element, list[_DanglingAttr], bool]] = []
+    for elem, dangling in carriers:
+        kind, target = _resolve_rule(elem, parent_map)
+        if kind in ("element", "ext"):
+            slot = element_removals.get(target)
+            if slot is None:
+                element_removals[target] = [kind, [(elem, dangling)]]
+            else:
+                slot[1].append((elem, dangling))
+        else:
+            attr_removals.append((elem, dangling, kind == "attrs_warn"))
+
+    # Drop anchors nested inside another anchor's subtree: the outer
+    # removal already discards them.
+    anchor_set = set(element_removals)
+    kept_anchors = [anchor for anchor in element_removals
+                    if not _has_ancestor_in(anchor, anchor_set, parent_map)]
+    kept_set = set(kept_anchors)
+
+    # Remove whole elements and record what went (aggregating every
+    # dangling id that pointed into each anchor).
+    extlst_cascade: list[ET.Element] = []
+    for anchor in kept_anchors:
+        kind, entries = element_removals[anchor]
+        rids = _unique([value for _carrier, dangling in entries
+                        for _key, _local, value in dangling])
+        removed_elements.append(
+            f"{name}: {_split_qname(anchor.tag)[1]} ({', '.join(rids)})")
+        parent = parent_map.get(anchor)
+        if parent is None:
+            continue
+        parent.remove(anchor)
+        if kind == "ext" and parent.tag == _P_EXTLST:
+            extlst_cascade.append(parent)
+
+    # A ``p:extLst`` emptied by media removal is itself dropped.
+    for extlst in _unique(extlst_cascade):
+        if len(extlst) == 0:
+            grandparent = parent_map.get(extlst)
+            if grandparent is not None:
+                grandparent.remove(extlst)
+
+    # Remove offending attributes on carriers not already discarded.
+    for elem, dangling, warn in attr_removals:
+        if _has_ancestor_in(elem, kept_set, parent_map):
+            continue
+        local_tag = _split_qname(elem.tag)[1]
+        for key, local, value in dangling:
+            if key in elem.attrib:
+                del elem.attrib[key]
+            removed_elements.append(
+                f"{name}: @{local} on {local_tag} ({value})")
+        if warn:
+            warnings.append(
+                f"{name}: dangling reference on <{local_tag}> is not "
+                "covered by a cleanup rule; removed the attribute only")
+
+
+def _resolve_rule(elem: ET.Element,
+                  parent_map: dict[ET.Element, ET.Element]
+                  ) -> tuple[str, ET.Element]:
+    """Decide how to discard the dangling reference carried by *elem*.
+
+    Returns ``(kind, target)`` where *kind* is one of ``"element"`` (drop
+    *target* wholesale), ``"ext"`` (drop *target*, then its ``p:extLst``
+    once emptied), ``"attrs"`` (drop only the offending attributes) or
+    ``"attrs_warn"`` (same, but flag it as an uncovered reference). The
+    design table's rules are tried in order and the first match wins.
+    """
+    uri, local = _split_qname(elem.tag)
+
+    # 1. Media *links* leave the poster picture behind as a still image.
+    if uri == _A_NS and local in _A_MEDIA_LINK_LOCALS:
+        return "element", elem
+    # 2. The paired ``p14:media`` extension is dropped with its ext host.
+    if elem.tag == _P14_MEDIA:
+        ext = _nearest_ancestor(elem, _P_EXT, parent_map)
+        if ext is not None:
+            return "ext", ext
+        parent = parent_map.get(elem)
+        if parent is not None:
+            return "ext", parent
+        return "attrs", elem
+    # 3/4. A picture blip means the image is gone -> drop the picture; a
+    #      fill/background blip keeps its shape and loses the attribute.
+    if elem.tag == _A_BLIP:
+        parent = parent_map.get(elem)
+        if parent is not None and parent.tag == _P_BLIPFILL:
+            pic = _nearest_ancestor(elem, _P_PIC, parent_map)
+            if pic is not None:
+                return "element", pic
+        return "attrs", elem
+    # 5. Hyperlinks vanish but their text run stays.
+    if uri == _A_NS and local in _A_HLINK_LOCALS:
+        return "element", elem
+    # 6. Charts / diagrams / OLE objects lose their whole graphic frame.
+    graphic_frame = _nearest_ancestor(elem, _P_GRAPHICFRAME, parent_map)
+    if graphic_frame is not None:
+        return "element", graphic_frame
+    # 7. A custom-show slide reference drops the reference element.
+    if elem.tag == _P_SLD \
+            and _nearest_ancestor(elem, _P_CUSTSHOW, parent_map) is not None:
+        return "element", elem
+    # 8. Anything else: minimal intervention, flagged for the caller.
+    return "attrs_warn", elem
+
+
+def _nearest_ancestor(elem: ET.Element, tag: str,
+                      parent_map: dict[ET.Element, ET.Element]
+                      ) -> ET.Element | None:
+    """Return the nearest strict ancestor of *elem* tagged *tag*, or None."""
+    current = parent_map.get(elem)
+    while current is not None:
+        if current.tag == tag:
+            return current
+        current = parent_map.get(current)
+    return None
+
+
+def _has_ancestor_in(elem: ET.Element, anchors: set[ET.Element],
+                     parent_map: dict[ET.Element, ET.Element]) -> bool:
+    """Return True when any strict ancestor of *elem* is in *anchors*."""
+    current = parent_map.get(elem)
+    while current is not None:
+        if current in anchors:
+            return True
+        current = parent_map.get(current)
+    return False
+
+
+def _unique(items: list[_T]) -> list[_T]:
+    """Return *items* de-duplicated while preserving first-seen order."""
+    seen: set[_T] = set()
+    result: list[_T] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result

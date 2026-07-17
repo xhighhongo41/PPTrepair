@@ -62,6 +62,9 @@ msgstr ""
 msgid "Not examined: {n} cloud-only file(s) were skipped without downloading."
 msgstr ""
 
+msgid "Note: these unresolved references existed in the original archive and were left untouched (the recovered file is byte-identical to the original)."
+msgstr ""
+
 msgid "Note: {n} additional unknown-pattern file(s) were not fingerprinted because of the per-run cap."
 msgstr ""
 
@@ -75,6 +78,9 @@ msgid "Output: {path}"
 msgstr ""
 
 msgid "Re-check verdict: {verdict}"
+msgstr ""
+
+msgid "Removed {e} stale reference(s) from {p} rebuilt part(s)."
 msgstr ""
 
 msgid "Removed {n} bytes of foreign data that followed the archive; the leading archive was kept unmodified."
@@ -111,6 +117,9 @@ msgid "Unknown pattern: {n} file(s) did not match any known corruption pattern."
 msgstr ""
 
 msgid "Unrepairable: no recoverable content was found."
+msgstr ""
+
+msgid "Unresolved references after repair: {n}"
 msgstr ""
 
 msgid "Value"
