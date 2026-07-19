@@ -374,3 +374,73 @@ def test_errors_take_priority_over_corrupted_in_exit_code(tmp_path: Path) -> Non
         blocked.chmod(0o755)
 
     assert exit_code == EXIT_ERROR
+
+
+# --- scan_paths() exclude ------------------------------------------------
+#
+# These call scan_module.scan_paths() directly: exclude is not yet wired
+# into the scan CLI (it exists for repair-all's aggregate-output
+# self-exclusion), so there is no ``pptrepair scan`` flag to drive it
+# through main() with.
+
+
+def test_scan_paths_exclude_removes_subtree_from_every_bucket(
+    tmp_path: Path,
+) -> None:
+    """exclude=[out] drops every out/ entry -- targets, temp and legacy
+    skips alike -- while the rest of the tree still scans normally."""
+    root = _mkroot(tmp_path)
+    _write(root, "kept.pptx", build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+    out_dir = root / "out"
+    out_dir.mkdir()
+    _write(out_dir, "excluded.pptx",
+          build_minimal_pptx(media_bytes=_MEDIA_BYTES, seed=2))
+    _write(out_dir, "~$excluded.pptx", b"office lock file")
+    _write(out_dir, "legacy.ppt", b"legacy binary format")
+
+    result = scan_module.scan_paths([root], exclude=[out_dir])
+
+    scanned_names = {outcome.path.name for outcome in result.outcomes}
+    assert "kept.pptx" in scanned_names
+    assert "excluded.pptx" not in scanned_names
+    assert result.walk.skipped_temp == []
+    assert result.walk.skipped_legacy == []
+
+
+def test_scan_paths_no_exclude_scans_the_full_tree(tmp_path: Path) -> None:
+    """Omitting exclude (the default ``()``) leaves behaviour unchanged:
+    every file under the root, including one under a subdirectory named
+    like a batch output folder, is still diagnosed."""
+    root = _mkroot(tmp_path)
+    _write(root, "kept.pptx", build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+    out_dir = root / "out"
+    out_dir.mkdir()
+    _write(out_dir, "not_excluded.pptx",
+          build_minimal_pptx(media_bytes=_MEDIA_BYTES, seed=2))
+
+    result = scan_module.scan_paths([root])
+
+    scanned_names = {outcome.path.name for outcome in result.outcomes}
+    assert scanned_names == {"kept.pptx", "not_excluded.pptx"}
+
+
+def test_scan_paths_exclude_resolves_relative_and_absolute_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A relative exclude path still matches an absolute scan root:
+    both sides are normalised through ``Path.resolve()`` before
+    comparison."""
+    root = _mkroot(tmp_path)
+    out_dir = root / "out"
+    out_dir.mkdir()
+    _write(out_dir, "excluded.pptx", build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+    _write(root, "kept.pptx",
+          build_minimal_pptx(media_bytes=_MEDIA_BYTES, seed=2))
+
+    monkeypatch.chdir(tmp_path)
+    result = scan_module.scan_paths(
+        [root.resolve()], exclude=[Path("root/out")])
+
+    scanned_names = {outcome.path.name for outcome in result.outcomes}
+    assert "kept.pptx" in scanned_names
+    assert "excluded.pptx" not in scanned_names

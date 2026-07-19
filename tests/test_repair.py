@@ -23,7 +23,7 @@ from fixtures import (append_foreign_tail, build_minimal_pptx, truncate,
 from pptrepair.census import from_central_directory, from_lfh_scan
 from pptrepair.classify import Diagnosis, Verdict, classify
 from pptrepair.cli import main
-from pptrepair.repair import repair_file
+from pptrepair.repair import predict_auto_mode, repair_file
 from pptrepair.scanner import scan_structure
 
 #: Shorthand for the capsys fixture type, to keep signatures short.
@@ -435,3 +435,150 @@ def test_interior_damage_rebuild_has_no_timing_or_structure_issues(
     assert outcome.recheck_dangling_refs == 0
     assert outcome.recheck_timing_issues == 0
     assert outcome.recheck_structure_issues == 0
+
+
+# --- 16. repair_file(diagnosis=...) matches the internally diagnosed run ----
+
+
+def _zip_namelist_and_crcs(path: Path) -> tuple[list[str], dict[str, int]]:
+    """Return ``(sorted namelist, {name: CRC})`` for the archive at *path*.
+
+    Used as a content-level fallback when comparing two rebuild
+    artifacts that are expected to be equivalent but not necessarily
+    byte-identical (e.g. differing only in non-deterministic zlib
+    output for the same input across separate runs).
+    """
+    with zipfile.ZipFile(path) as archive:
+        names = sorted(archive.namelist())
+        crcs = {info.filename: info.CRC for info in archive.infolist()}
+    return names, crcs
+
+
+def test_diagnosis_argument_matches_internal_diagnosis(tmp_path: Path) -> None:
+    """Passing a pre-computed ``diagnosis`` produces the same outcome
+    fields as letting :func:`repair_file` run its own initial diagnosis,
+    on a fixture that takes the rebuild path.
+
+    Rebuild determinism (two independent runs over the same input
+    producing byte-identical artifacts) is checked first; if that does
+    not hold on this machine, the artifact comparison falls back to
+    namelist + per-entry CRC equality instead of raw bytes.
+    """
+    broken = _rebuildable_truncated_pptx(num_slides=3)
+    determinism_path = _write(tmp_path, "determinism.pptx", broken)
+    target_path = _write(tmp_path, "broken.pptx", broken)
+
+    # Step 1: confirm rebuild is deterministic for this fixture before
+    # trusting a byte-for-byte comparison between the two variants below.
+    determinism_run_1 = repair_file(
+        determinism_path, output=tmp_path / "determinism1.repaired.pptx")
+    determinism_run_2 = repair_file(
+        determinism_path, output=tmp_path / "determinism2.repaired.pptx")
+    rebuild_is_deterministic = (
+        determinism_run_1.output_path.read_bytes()
+        == determinism_run_2.output_path.read_bytes())
+
+    # Step 2: compare (a) no diagnosis vs (b) a pre-computed diagnosis,
+    # each writing to its own tmp_path output.
+    diagnosis = _diagnose(target_path)
+    outcome_default = repair_file(
+        target_path, output=tmp_path / "default.repaired.pptx")
+    outcome_with_diagnosis = repair_file(
+        target_path, output=tmp_path / "with_diagnosis.repaired.pptx",
+        diagnosis=diagnosis)
+
+    compared_fields = (
+        "mode", "success", "recheck_verdict", "recheck_dangling_refs",
+        "recheck_timing_issues", "recheck_structure_issues",
+        "lost_slide_numbers", "lost_entries_total", "trimmed_bytes",
+        "warnings",
+    )
+    for field_name in compared_fields:
+        assert (getattr(outcome_default, field_name)
+                == getattr(outcome_with_diagnosis, field_name)), field_name
+
+    assert outcome_default.mode == "rebuild"
+    assert outcome_default.output_path is not None
+    assert outcome_with_diagnosis.output_path is not None
+
+    if rebuild_is_deterministic:
+        assert (outcome_default.output_path.read_bytes()
+                == outcome_with_diagnosis.output_path.read_bytes())
+    else:
+        assert (_zip_namelist_and_crcs(outcome_default.output_path)
+                == _zip_namelist_and_crcs(outcome_with_diagnosis.output_path))
+
+
+# --- 17. output_base derives the artifact path with the mode's suffix -------
+
+
+def test_output_base_and_output_together_raise_value_error(
+    tmp_path: Path,
+) -> None:
+    """Passing both output and output_base is a programming error."""
+    path = _write(tmp_path, "broken.pptx", _rebuildable_truncated_pptx())
+
+    with pytest.raises(ValueError):
+        repair_file(path, output=tmp_path / "x.pptx",
+                    output_base=tmp_path / "x")
+
+
+def test_output_base_rebuild_appends_repaired_suffix(tmp_path: Path) -> None:
+    """A rebuild driven by output_base lands on ``<base>.repaired.pptx``."""
+    path = _write(tmp_path, "broken.pptx", _rebuildable_truncated_pptx())
+    base = tmp_path / "aggregate" / "renamed"
+    base.parent.mkdir()
+
+    outcome = repair_file(path, output_base=base, diagnosis=_diagnose(path))
+
+    assert outcome.mode == "rebuild"
+    assert outcome.success is True
+    assert outcome.output_path == tmp_path / "aggregate" / "renamed.repaired.pptx"
+    assert outcome.output_path.is_file()
+    # The default next-to-source path is never used when output_base is set.
+    assert not (tmp_path / "broken.repaired.pptx").exists()
+
+
+def test_output_base_extract_appends_salvaged_suffix(tmp_path: Path) -> None:
+    """An extract driven by output_base lands on ``<base>.salvaged/``."""
+    path = _write(tmp_path, "broken.pptx", _extractable_head_zero_pptx())
+    base = tmp_path / "aggregate" / "renamed"
+    base.parent.mkdir()
+
+    outcome = repair_file(path, output_base=base, diagnosis=_diagnose(path))
+
+    assert outcome.mode == "extract"
+    assert outcome.success is True
+    assert outcome.output_path == tmp_path / "aggregate" / "renamed.salvaged"
+    assert outcome.output_path.is_dir()
+    assert not (tmp_path / "broken.salvaged").exists()
+
+
+# --- 18. predict_auto_mode matches the executed mode of repair_file ---------
+
+
+def test_predict_auto_mode_matches_executed_mode(tmp_path: Path) -> None:
+    """predict_auto_mode agrees with repair_file's executed mode on
+    fixtures with no trim -> salvage runtime fallback.
+
+    (The trim -> extract/rebuild fallback is deliberately not predicted,
+    per predict_auto_mode's contract, so no fallback fixture is used here.)
+    """
+    cases = {
+        "trunc.pptx": (_rebuildable_truncated_pptx(), "rebuild"),
+        "zero.pptx": (_extractable_head_zero_pptx(), "extract"),
+        "tail.pptx": (
+            append_foreign_tail(
+                build_minimal_pptx(num_slides=2, media_bytes=50_000),
+                131072),
+            "trim"),
+        "empty.pptx": (b"", "none"),
+    }
+    for name, (data, expected) in cases.items():
+        path = _write(tmp_path, name, data)
+        diagnosis = _diagnose(path)
+        assert predict_auto_mode(diagnosis) == expected, name
+        outcome = repair_file(
+            path, output_base=tmp_path / f"{path.stem}_out",
+            diagnosis=diagnosis)
+        assert outcome.mode == expected, name

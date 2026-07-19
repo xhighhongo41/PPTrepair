@@ -128,12 +128,46 @@ def diagnose_file(path: Path) -> tuple[Diagnosis | None, str | None]:
     return diagnosis, None
 
 
+def _apply_exclusions(walk: WalkResult, exclude: Sequence[Path]) -> WalkResult:
+    """Return a copy of *walk* with every path under *exclude* removed.
+
+    Applied to all five path buckets (``targets`` / ``skipped_legacy`` /
+    ``skipped_temp`` / ``skipped_cloud`` / ``download_targets``) plus
+    ``errors`` (matched on its path element). *walker* itself is never
+    touched; this only post-filters its output. Comparison resolves
+    both sides with ``Path.resolve()``, a best-effort symlink-following
+    normalisation, so an exclusion given as a relative path or through
+    a symlinked ancestor still matches.
+    """
+    resolved_exclude = {Path(entry).resolve() for entry in exclude}
+
+    def _is_excluded(path: Path) -> bool:
+        resolved = path.resolve()
+        if resolved in resolved_exclude:
+            return True
+        return any(ex in resolved.parents for ex in resolved_exclude)
+
+    def _filter(paths: list[Path]) -> list[Path]:
+        return [path for path in paths if not _is_excluded(path)]
+
+    return WalkResult(
+        targets=_filter(walk.targets),
+        skipped_legacy=_filter(walk.skipped_legacy),
+        skipped_temp=_filter(walk.skipped_temp),
+        skipped_cloud=_filter(walk.skipped_cloud),
+        download_targets=_filter(walk.download_targets),
+        errors=[(path, message) for path, message in walk.errors
+               if not _is_excluded(path)],
+    )
+
+
 def scan_paths(roots: Sequence[Path], *,
                report_dir: Path | None = None,
                force: bool = False,
                follow_symlinks: bool = False,
                allow_download: bool = False,
                include_filenames: bool = False,
+               exclude: Sequence[Path] = (),
                progress: Callable[[FileOutcome], None] | None = None,
                on_download: Callable[[Path], None] | None = None
                ) -> ScanResult:
@@ -148,6 +182,15 @@ def scan_paths(roots: Sequence[Path], *,
       the first fingerprint.
     * Discover targets via :func:`discover_targets` with
       *follow_symlinks* / *allow_download* passed through.
+    * *exclude*: subtrees to leave out of every discovery bucket (e.g.
+      a batch driver's own aggregate output directory, which would
+      otherwise be diagnosed as part of the very tree it is writing
+      into). Each entry is resolved with ``Path.resolve()`` — a
+      best-effort, symlink-following comparison — and a discovered
+      path is dropped when its own resolved form equals an excluded
+      entry or has one as an ancestor. Left empty (the default) this
+      is a no-op and :func:`discover_targets`'s result is used as-is,
+      so :func:`pptrepair.cli.run_scan` sees no behaviour change.
     * Diagnose targets in walk order with :func:`diagnose_file`; wrap
       each into a :class:`FileOutcome` and invoke *progress* with it
       (when given) right after, so the CLI can stream results.
@@ -178,6 +221,8 @@ def scan_paths(roots: Sequence[Path], *,
 
     walk = discover_targets(roots, follow_symlinks=follow_symlinks,
                             allow_download=allow_download)
+    if exclude:
+        walk = _apply_exclusions(walk, exclude)
     result = ScanResult(roots=[Path(root) for root in roots],
                         walk=walk, report_dir=report_dir)
 

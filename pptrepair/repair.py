@@ -87,8 +87,50 @@ def default_output_path(src: Path, mode: str) -> Path:
     return src.with_name(src.stem + EXTRACT_SUFFIX)
 
 
+def _resolve_output_path(src: Path, output: Path | None,
+                         output_base: Path | None, mode: str) -> Path:
+    """Resolve the artifact path for *mode* from the output overrides.
+
+    Precedence: an explicit *output* wins; otherwise, when *output_base*
+    is given, the mode's suffix (:data:`REBUILD_SUFFIX` for ``"rebuild"``,
+    :data:`EXTRACT_SUFFIX` otherwise) is appended to *output_base*'s own
+    name, so a batch driver's collision-resolved base name is honoured
+    and the trim -> extract fallback still lands on the right suffix;
+    failing both, :func:`default_output_path` is used. *mode* is
+    ``"rebuild"`` for both rebuild and trim (they share the
+    ``.repaired.pptx`` suffix) and ``"extract"`` otherwise.
+    """
+    if output is not None:
+        return output
+    if output_base is not None:
+        suffix = REBUILD_SUFFIX if mode == "rebuild" else EXTRACT_SUFFIX
+        return output_base.with_name(output_base.name + suffix)
+    return default_output_path(src, mode)
+
+
+def predict_auto_mode(diagnosis: Diagnosis) -> str:
+    """Predict the mode ``--mode auto`` would execute for *diagnosis*.
+
+    A thin wrapper that runs :func:`pptrepair.salvage.select_salvageable`
+    and delegates to :func:`_select_auto_mode`, returning one of
+    ``"none"`` / ``"trim"`` / ``"rebuild"`` / ``"extract"``. Intended for
+    a batch driver's dry-run planning, where the artifact suffix must be
+    shown before anything is written.
+
+    Note: the runtime ``trim`` -> salvage fallback (a trimmed archive
+    that does not itself re-check clean, see :func:`repair_file`) is *not*
+    predicted here; a ``"trim"`` result only reflects the mode
+    :func:`repair_file` will attempt first, which shares its
+    ``.repaired.pptx`` suffix with ``rebuild`` anyway.
+    """
+    salvaged, _warnings = select_salvageable(diagnosis)
+    return _select_auto_mode(diagnosis, salvaged)
+
+
 def repair_file(src: Path, output: Path | None = None, mode: str = "auto",
-                force: bool = False, lang: str = "en") -> RepairOutcome:
+                force: bool = False, lang: str = "en", *,
+                diagnosis: Diagnosis | None = None,
+                output_base: Path | None = None) -> RepairOutcome:
     """Diagnose *src* and produce the best possible repair artifact.
 
     Behaviour:
@@ -112,6 +154,14 @@ def repair_file(src: Path, output: Path | None = None, mode: str = "auto",
     * *output* defaults to :func:`default_output_path`. An existing
       output path raises :class:`OutputExistsError` unless *force* is
       true (an existing extract *directory* is likewise refused).
+    * *output_base*, when given, is a suffix-less base path from which
+      the artifact path is derived the moment the mode is settled:
+      ``output_base + REBUILD_SUFFIX`` for rebuild/trim,
+      ``output_base + EXTRACT_SUFFIX`` for extract (see
+      :func:`_resolve_output_path`). This lets a batch driver hand over
+      one base and get the correct suffix for whichever mode auto
+      selection lands on, including a trim -> extract fallback. Passing
+      both *output* and *output_base* raises :class:`ValueError`.
     * After a rebuild or a successful trim, the artifact is
       re-diagnosed with the check pipeline and the verdict recorded in
       ``recheck_verdict``, and separately re-checked with
@@ -134,8 +184,20 @@ def repair_file(src: Path, output: Path | None = None, mode: str = "auto",
       :func:`pptrepair.extract.extract_salvage` for the text files
       inside the recovery folder; the outcome object itself stays
       language-neutral.
+    * *diagnosis*, when given, replaces the initial ``_diagnose(src)``
+      call (the caller has already run the same pipeline, typically a
+      batch driver that scanned *src* moments earlier in the same
+      process). The caller is responsible for *diagnosis* matching
+      *src*'s current on-disk content; a file changed between the
+      external diagnosis and this call is not a supported scenario.
+      The post-rebuild/post-trim recheck always re-diagnoses the
+      produced artifact regardless of this argument.
     """
-    diagnosis = _diagnose(src)
+    if output is not None and output_base is not None:
+        raise ValueError("output and output_base are mutually exclusive")
+
+    if diagnosis is None:
+        diagnosis = _diagnose(src)
     salvaged, salvage_warnings = select_salvageable(diagnosis)
     lost_slide_numbers, lost_entries_total = _lost_entries(diagnosis)
 
@@ -160,8 +222,7 @@ def repair_file(src: Path, output: Path | None = None, mode: str = "auto",
         return outcome
 
     if chosen_mode == "trim":
-        output_path = (output if output is not None
-                       else default_output_path(src, "rebuild"))
+        output_path = _resolve_output_path(src, output, output_base, "rebuild")
         _ensure_output_available(output_path, "rebuild", force)
         if _run_trim(src, output_path, outcome):
             return outcome
@@ -179,8 +240,7 @@ def repair_file(src: Path, output: Path | None = None, mode: str = "auto",
             "nothing salvageable: no recovery folder was written")
         return outcome
 
-    output_path = (output if output is not None
-                   else default_output_path(src, chosen_mode))
+    output_path = _resolve_output_path(src, output, output_base, chosen_mode)
     _ensure_output_available(output_path, chosen_mode, force)
     outcome.mode = chosen_mode
     outcome.output_path = output_path
