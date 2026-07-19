@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from pptrepair.batch import BatchItem, BatchResult
 from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.i18n import get_translator
 from pptrepair.integrity import (DanglingRef, MediaMismatch, MissingStructure,
@@ -22,8 +23,13 @@ from pptrepair.integrity import (DanglingRef, MediaMismatch, MissingStructure,
                                  TimingIntegrityResult, TimingRef)
 from pptrepair.rebuild import RebuildResult
 from pptrepair.repair import RepairOutcome
-from pptrepair.report import (VERDICT_LABELS, render_json, render_repair_json,
-                              render_repair_text, render_text)
+from pptrepair.report import (VERDICT_LABELS, render_batch_json,
+                              render_batch_text, render_json,
+                              render_repair_json, render_repair_text,
+                              render_scan_json, render_text)
+from pptrepair.scan import FileOutcome, ScanResult
+from pptrepair.scanner import ZipStructure
+from pptrepair.walker import WalkResult
 
 #: The four v1.1.1 verdicts, mapped to their confirmed English wording.
 _NEW_VERDICT_LABELS = {
@@ -559,3 +565,242 @@ def test_render_json_reports_structure_integrity_missing_items() -> None:
              "required": "theme"},
         ],
     }
+
+
+# --- v1.2: render_batch_text / render_batch_json (repair-all summary) ----
+
+#: A CFB (encrypted/legacy) structure, for the "unrepairable_cfb" branch.
+_CFB_STRUCTURE = ZipStructure(size=8, head_kind="cfb", zero_runs=[],
+                              lfh_offsets=[], cd_sig_count=0, eocd=None)
+
+
+def _batch_outcome(path: str, verdict: Verdict,
+                   structure: ZipStructure | None = None) -> FileOutcome:
+    """Build a minimal :class:`FileOutcome` for batch-report tests."""
+    diagnosis = Diagnosis(path=Path(path), verdict=verdict,
+                          evidence=["synthetic evidence"], structure=structure)
+    return FileOutcome(path=Path(path), diagnosis=diagnosis)
+
+
+def _live_batch_result() -> BatchResult:
+    """Build a BatchResult exercising every render_batch_text/json branch.
+
+    One item per action: rebuild/trim/extract successes ("repaired"),
+    an encrypted/legacy CFB and a no-content EMPTY_FILE (both
+    "unrepairable"), a pre-existing artifact ("skipped_existing") and
+    one exception ("failed"), plus a collision-fallback warning.
+    """
+    rebuild_outcome = _batch_outcome("root/a.pptx", Verdict.TAIL_TRUNCATED)
+    trim_outcome = _batch_outcome("root/b.pptx", Verdict.TAIL_FOREIGN_DATA)
+    extract_outcome = _batch_outcome("root/c.pptx", Verdict.HEAD_ZERO_FILL)
+    cfb_outcome = _batch_outcome("root/d.pptx", Verdict.NOT_A_ZIP,
+                                 _CFB_STRUCTURE)
+    empty_outcome = _batch_outcome("root/e.pptx", Verdict.EMPTY_FILE)
+    skip_outcome = _batch_outcome("root/f.pptx", Verdict.TAIL_TRUNCATED)
+    fail_outcome = _batch_outcome("root/g.pptx", Verdict.TAIL_TRUNCATED)
+
+    items = [
+        BatchItem(
+            source=rebuild_outcome, planned_output=Path("out/a.repaired.pptx"),
+            action="repaired",
+            repair=RepairOutcome(
+                src=rebuild_outcome.path, diagnosis=rebuild_outcome.diagnosis,
+                mode="rebuild", success=True,
+                output_path=Path("out/a.repaired.pptx"),
+                recheck_verdict="normal", recheck_dangling_refs=0,
+                recheck_timing_issues=0, recheck_structure_issues=0),
+        ),
+        BatchItem(
+            source=trim_outcome, planned_output=Path("out/b.repaired.pptx"),
+            action="repaired",
+            repair=RepairOutcome(
+                src=trim_outcome.path, diagnosis=trim_outcome.diagnosis,
+                mode="trim", success=True,
+                output_path=Path("out/b.repaired.pptx"),
+                trimmed_bytes=1024, recheck_verdict="normal"),
+        ),
+        BatchItem(
+            source=extract_outcome, planned_output=Path("out/c.salvaged"),
+            action="repaired",
+            repair=RepairOutcome(
+                src=extract_outcome.path, diagnosis=extract_outcome.diagnosis,
+                mode="extract", success=True, output_path=Path("out/c.salvaged"),
+                lost_slide_numbers=[2], lost_entries_total=1),
+        ),
+        BatchItem(source=cfb_outcome, planned_output=None,
+                 action="unrepairable"),
+        BatchItem(
+            source=empty_outcome, planned_output=None, action="unrepairable",
+            repair=RepairOutcome(
+                src=empty_outcome.path, diagnosis=empty_outcome.diagnosis,
+                mode="none", success=False),
+        ),
+        BatchItem(source=skip_outcome, planned_output=Path("out/f.repaired.pptx"),
+                 action="skipped_existing"),
+        BatchItem(source=fail_outcome, planned_output=None, action="failed",
+                 error="RuntimeError: boom"),
+    ]
+    scan = ScanResult(
+        roots=[Path("root")], walk=WalkResult(),
+        outcomes=[item.source for item in items],
+    )
+    return BatchResult(
+        scan=scan, items=items, output_dir=Path("out"), in_place=False,
+        dry_run=False,
+        warnings=["output name collision under out: root/h.pptx falls back "
+                 "to base 'h.pptx' because 'h' is already taken by root/i.pptx"],
+    )
+
+
+def _dry_run_batch_result() -> BatchResult:
+    """Build a dry-run BatchResult with one planned item."""
+    planned_outcome = _batch_outcome("root/h.pptx", Verdict.TAIL_TRUNCATED)
+    items = [BatchItem(source=planned_outcome,
+                       planned_output=Path("out/h.repaired.pptx"),
+                       action="planned")]
+    scan = ScanResult(roots=[Path("root")], walk=WalkResult(),
+                      outcomes=[planned_outcome])
+    return BatchResult(scan=scan, items=items, output_dir=Path("out"),
+                       in_place=False, dry_run=True)
+
+
+def test_render_batch_text_reports_repaired_breakdown() -> None:
+    """The repair summary reports the repaired total and its mode breakdown."""
+    text = render_batch_text(_live_batch_result(), _TR)
+
+    assert "Repaired: 3 file(s)" in text
+    assert "  rebuild: 1" in text
+    assert "  trim: 1" in text
+    assert "  extract: 1" in text
+
+
+def test_render_batch_text_reports_unrepairable_breakdown() -> None:
+    """Unrepairable total plus the CFB and no-content sub-notes appear."""
+    text = render_batch_text(_live_batch_result(), _TR)
+
+    assert "Unrepairable: 2 file(s)" in text
+    assert "Encrypted or legacy Office file(s) (not attempted): 1" in text
+    assert "No content survives: 1 file(s)" in text
+
+
+def test_render_batch_text_reports_skipped_with_force_hint() -> None:
+    """A skipped-existing artifact is counted and paired with the --force hint."""
+    text = render_batch_text(_live_batch_result(), _TR)
+
+    assert "Skipped (output exists): 1 file(s)" in text
+    assert "Hint: pass --force to overwrite the existing output." in text
+
+
+def test_render_batch_text_reports_failed() -> None:
+    """A failed repair is counted in the summary."""
+    text = render_batch_text(_live_batch_result(), _TR)
+
+    assert "Failed: 1 file(s)" in text
+
+
+def test_render_batch_text_reports_warnings() -> None:
+    """Batch-level warnings (e.g. collision fallbacks) are listed verbatim."""
+    result = _live_batch_result()
+
+    text = render_batch_text(result, _TR)
+
+    assert "Warnings:" in text
+    assert result.warnings[0] in text
+
+
+def test_render_batch_text_omits_per_file_lines_by_default() -> None:
+    """include_files=False (the default) prints no per-file section."""
+    text = render_batch_text(_live_batch_result(), _TR)
+
+    assert "Repairs:" not in text
+    assert "root/a.pptx" not in text
+
+
+def test_render_batch_text_include_files_lists_every_item() -> None:
+    """include_files=True lists one line per item, including its error."""
+    result = _live_batch_result()
+
+    text = render_batch_text(result, _TR, include_files=True)
+
+    assert "Repairs:" in text
+    for item in result.items:
+        assert str(item.source.path) in text
+    assert "error=RuntimeError: boom" in text
+
+
+def test_render_batch_text_dry_run_shows_planned_and_notice() -> None:
+    """dry_run replaces the Repaired line with Planned plus a notice line."""
+    text = render_batch_text(_dry_run_batch_result(), _TR)
+
+    assert "Planned: 1 file(s)" in text
+    assert "dry run: nothing was written." in text
+    assert "Repaired:" not in text
+
+
+def test_render_batch_json_top_level_keys_and_counts() -> None:
+    """The top-level schema fields mirror the BatchResult they describe."""
+    result = _live_batch_result()
+
+    payload = json.loads(render_batch_json(result))
+
+    assert payload["schema_version"] == 1
+    assert payload["dry_run"] is False
+    assert payload["in_place"] is False
+    assert payload["output_dir"] == str(result.output_dir)
+    assert payload["counts"] == result.counts()
+    assert payload["unrepaired_remaining"] == result.unrepaired_remaining()
+    assert payload["warnings"] == result.warnings
+
+
+def test_render_batch_json_scan_matches_render_scan_json() -> None:
+    """The embedded "scan" object is exactly render_scan_json's own payload."""
+    result = _live_batch_result()
+
+    payload = json.loads(render_batch_json(result))
+
+    assert payload["scan"] == json.loads(render_scan_json(result.scan))
+
+
+def test_render_batch_json_repairs_array_reflects_each_item() -> None:
+    """Each repairs[] entry reports its item's action/mode/output/recheck."""
+    result = _live_batch_result()
+
+    repairs = json.loads(render_batch_json(result))["repairs"]
+
+    assert len(repairs) == len(result.items)
+
+    rebuild_entry = repairs[0]
+    assert rebuild_entry["path"] == "root/a.pptx"
+    assert rebuild_entry["verdict"] == Verdict.TAIL_TRUNCATED.value
+    assert rebuild_entry["action"] == "repaired"
+    assert rebuild_entry["mode"] == "rebuild"
+    assert rebuild_entry["output"] == "out/a.repaired.pptx"
+    assert rebuild_entry["recheck_verdict"] == "normal"
+    assert rebuild_entry["recheck_dangling_refs"] == 0
+
+    skipped_entry = repairs[5]
+    assert skipped_entry["action"] == "skipped_existing"
+    assert skipped_entry["mode"] is None
+    assert skipped_entry["output"] == "out/f.repaired.pptx"
+    assert skipped_entry["recheck_verdict"] is None
+    assert skipped_entry["lost_slide_numbers"] == []
+    assert skipped_entry["warnings"] == []
+
+    failed_entry = repairs[6]
+    assert failed_entry["action"] == "failed"
+    assert failed_entry["mode"] is None
+    assert failed_entry["output"] is None
+    assert failed_entry["error"] == "RuntimeError: boom"
+
+
+def test_render_batch_json_dry_run_planned_item_has_null_mode() -> None:
+    """A dry-run "planned" item reports mode=null (repair_file never ran)."""
+    result = _dry_run_batch_result()
+
+    payload = json.loads(render_batch_json(result))
+
+    assert payload["dry_run"] is True
+    planned_entry = payload["repairs"][0]
+    assert planned_entry["action"] == "planned"
+    assert planned_entry["mode"] is None
+    assert planned_entry["output"] == "out/h.repaired.pptx"

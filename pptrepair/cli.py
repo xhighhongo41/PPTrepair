@@ -1,16 +1,22 @@
 """Command-line interface.
 
 ``pptrepair check [--json] FILE [FILE ...]``
+``pptrepair repair-all (-o OUTDIR | --in-place) DIR [DIR ...]``
 
 Exit codes:
 
-* 0 — every examined file is an intact PowerPoint package
-* 1 — at least one file is corrupted (or not a ZIP at all)
+* 0 — every examined file is an intact PowerPoint package (``repair``/
+  ``repair-all``: every corrupted file found was successfully repaired)
+* 1 — at least one file is corrupted (or not a ZIP at all); for
+  ``repair``/``repair-all`` this means at least one corrupted file was
+  left unrepaired (unrepairable, an existing output skipped without
+  ``--force``, or a repair failure)
 * 2 — usage error, unreadable path, or unexpected internal error
 
 All inputs are opened read-only; this tool never writes to the files
-it examines (``scan --report`` writes only inside its report
-directory).
+it examines (``repair``/``repair-all`` write only their repair
+artifact(s); ``scan --report``/``repair-all --report`` write only
+inside their report directory).
 """
 
 from __future__ import annotations
@@ -20,6 +26,7 @@ import sys
 from pathlib import Path
 
 import pptrepair
+from pptrepair import batch as batch_module
 from pptrepair import i18n
 from pptrepair import repair as repair_module
 from pptrepair import scan as scan_module
@@ -28,7 +35,8 @@ from pptrepair.integrity import (RefIntegrityResult, StructureIntegrityResult,
                                  TimingIntegrityResult, inspect_references,
                                  inspect_structure, inspect_timing)
 from pptrepair.rebuild import RebuildError
-from pptrepair.report import (render_json, render_repair_json,
+from pptrepair.report import (render_batch_json, render_batch_text,
+                              render_json, render_repair_json,
                               render_repair_text, render_scan_json,
                               render_scan_text, render_text)
 
@@ -138,6 +146,67 @@ def build_parser() -> argparse.ArgumentParser:
                           "and may take long and use significant disk "
                           "space (default: skip them without downloading)"
                       ))
+
+    repair_all = subparsers.add_parser(
+        "repair-all",
+        help="recursively repair corrupted PowerPoint files under one or "
+             "more directories",
+        description=(
+            "Walk each DIR recursively, diagnose every .pptx/.pptm file "
+            "found (like scan), and repair every corrupted one, either "
+            "into an aggregate output directory that mirrors the input "
+            "tree or, with --in-place, next to its own source. Files are "
+            "opened read-only; only the produced artifacts (and, with "
+            "--report, the report directory) are written."
+        ),
+    )
+    repair_all.add_argument("roots", metavar="DIR", nargs="+",
+                            help="directory (or file) to scan and repair")
+    output_group = repair_all.add_mutually_exclusive_group(required=True)
+    output_group.add_argument(
+        "-o", "--output-dir", metavar="OUTDIR", default=None,
+        help="aggregate output directory; artifacts are written under it, "
+             "mirroring the input tree structure")
+    output_group.add_argument(
+        "--in-place", action="store_true",
+        help="write each artifact next to its own source file, like a "
+             "per-file `pptrepair repair` run")
+    repair_all.add_argument("--report", metavar="DIR", default=None,
+                            help=(
+                                "write scan_report.txt/json, "
+                                "repair_report.txt/json and, for unknown "
+                                "corruption patterns, shareable anonymous "
+                                "diagnostic fingerprints into DIR"
+                            ))
+    repair_all.add_argument("--force", action="store_true",
+                            help="overwrite existing artifacts, and reuse "
+                                 "an existing --report directory")
+    repair_all.add_argument("--all", action="store_true", dest="show_all",
+                            help="list every scanned file, not only "
+                                 "corrupted ones")
+    repair_all.add_argument("--dry-run", action="store_true",
+                            help="write nothing; only diagnose and show "
+                                 "the repair plan")
+    repair_all.add_argument("--lang", choices=i18n.SUPPORTED_LANGUAGES,
+                            default=i18n.DEFAULT_LANGUAGE,
+                            help="language of the human-readable output "
+                                 "(default: en)")
+    repair_all.add_argument("--json", action="store_true", dest="json_output",
+                            help="emit a JSON object instead of text output")
+    repair_all.add_argument("--follow-symlinks", action="store_true",
+                            help="follow symbolic links while walking "
+                                 "(default: ignore them)")
+    repair_all.add_argument("--include-filenames", action="store_true",
+                            help="include file basenames in diagnostic "
+                                 "fingerprints (default: anonymous)")
+    repair_all.add_argument("--allow-download", action="store_true",
+                            help=(
+                                "also read cloud-only placeholder files; "
+                                "this makes the sync client download their "
+                                "content and may take long and use "
+                                "significant disk space (default: skip "
+                                "them without downloading)"
+                            ))
     return parser
 
 
@@ -402,6 +471,158 @@ def run_scan(roots: list[str], report: str | None, force: bool,
     return EXIT_OK
 
 
+def run_repair_all(roots: list[str], output_dir: str | None, in_place: bool,
+                   report: str | None, force: bool, show_all: bool,
+                   dry_run: bool, lang: str, json_output: bool,
+                   follow_symlinks: bool, include_filenames: bool,
+                   allow_download: bool) -> int:
+    """Diagnose and repair directory trees, print the results, and return
+    an exit code.
+
+    Implementation requirements:
+
+    * In aggregate mode (``in_place`` is False), an *output_dir* that
+      already exists as a regular file (not a directory) is a usage
+      error: print ``pptrepair: error: ...`` to stderr and return 2
+      before anything is scanned. An existing *directory* is fine and
+      needs no ``--force`` (unlike ``--report``): per-artifact existence
+      is checked by :func:`pptrepair.batch.repair_paths` itself.
+    * Call :func:`pptrepair.batch.repair_paths` with the options mapped
+      through; :class:`pptrepair.repair.OutputExistsError` (an existing
+      ``--report`` dir without ``--force``) prints the error plus a
+      translated ``--force`` hint to stderr and returns 2, mirroring
+      ``repair``/``scan``.
+    * Text mode streams phase 1 exactly like ``run_scan``'s own
+      ``progress`` callback (corrupted files always, intact ones only
+      with *show_all*, pipeline errors to stderr) and additionally
+      streams one untranslated line per phase-2 :class:`BatchItem
+      <pptrepair.batch.BatchItem>` as it is produced: ``{path}: repaired
+      ({mode}) -> {output}`` when repaired, ``{path}: planned
+      ({output})`` when *dry_run* only predicted an artifact, ``{path}:
+      skipped (output exists)`` when an existing artifact blocked it
+      without ``--force``, ``pptrepair: error: {path}: {error}`` to
+      stderr when the repair raised, and ``{path}: {action}`` for every
+      other action (``unrepairable``). JSON mode passes no callback for
+      either phase and prints nothing while scanning/repairing.
+    * A translated ``Downloading cloud-only file: ...`` notice goes to
+      stderr (flushed) right before a placeholder target is read with
+      ``--allow-download``, exactly like ``run_scan``.
+    * Walk errors (nonexistent roots, unreadable directories) print one
+      ``pptrepair: error: {message}`` line each to stderr in both modes.
+    * After the run, text mode prints
+      :func:`render_batch_text(result, tr, include_files=False)
+      <pptrepair.report.render_batch_text>`; JSON mode prints
+      :func:`render_batch_json <pptrepair.report.render_batch_json>`.
+    * With ``--report`` and *not* ``dry_run``, additionally write, all
+      UTF-8 with a trailing newline: ``scan_report.txt``/``.json`` (the
+      phase-1 :class:`~pptrepair.scan.ScanResult`, ``include_files=True``)
+      and ``repair_report.txt``/``.json`` (the full batch result,
+      ``include_files=True``) into the report directory. Under
+      *dry_run*, nothing is written even when ``--report`` is given
+      (:func:`pptrepair.batch.repair_paths` itself never touches the
+      report directory in that case either).
+    * Exit code: 2 when ``result.had_errors()``, else 1 when
+      ``result.unrepaired_remaining() > 0`` (in *dry_run* this counts
+      everything that is not ``"repaired"`` or ``"planned"``), else 0.
+    """
+    tr = i18n.get_translator(lang)
+    output_dir_path = Path(output_dir) if output_dir is not None else None
+    report_dir = Path(report) if report is not None else None
+
+    if not in_place and output_dir_path is not None \
+            and output_dir_path.is_file():
+        print(f"pptrepair: error: {output_dir}: output path already "
+              "exists and is not a directory", file=sys.stderr)
+        return EXIT_ERROR
+
+    def _report_progress(outcome: scan_module.FileOutcome) -> None:
+        if outcome.error is not None:
+            # diagnose_file's error message already carries the path
+            # ("{path}: {reason}"); stream it as-is.
+            print(outcome.error, file=sys.stderr)
+            return
+        assert outcome.diagnosis is not None
+        if show_all or outcome.diagnosis.verdict != Verdict.NORMAL:
+            print(f"{outcome.path}: {outcome.diagnosis.verdict.value}")
+
+    def _announce_download(path: Path) -> None:
+        # Reading the placeholder blocks until the sync client has
+        # downloaded it, so flush the notice out first. stderr keeps
+        # the stdout verdict/JSON stream parseable.
+        print(tr("Downloading cloud-only file: {path}").format(path=path),
+              file=sys.stderr, flush=True)
+
+    def _repair_progress(item: batch_module.BatchItem) -> None:
+        # Plain, untranslated output, matching the phase-1 per-file
+        # stream's own convention (machine-facing path/action/mode
+        # values are never translated).
+        path = item.source.path
+        if item.action == "repaired":
+            mode = item.repair.mode if item.repair is not None else "-"
+            print(f"{path}: repaired ({mode}) -> {item.planned_output}")
+        elif item.action == "planned":
+            print(f"{path}: planned ({item.planned_output})")
+        elif item.action == "skipped_existing":
+            print(f"{path}: skipped (output exists)")
+        elif item.action == "failed":
+            print(f"pptrepair: error: {path}: {item.error}", file=sys.stderr)
+        else:
+            print(f"{path}: {item.action}")
+
+    try:
+        result = batch_module.repair_paths(
+            [Path(root) for root in roots],
+            output_dir=output_dir_path,
+            in_place=in_place,
+            report_dir=report_dir,
+            force=force,
+            dry_run=dry_run,
+            follow_symlinks=follow_symlinks,
+            allow_download=allow_download,
+            include_filenames=include_filenames,
+            lang=lang,
+            progress=None if json_output else _report_progress,
+            repair_progress=None if json_output else _repair_progress,
+            on_download=_announce_download,
+        )
+    except repair_module.OutputExistsError as exc:
+        print(f"pptrepair: error: {exc}", file=sys.stderr)
+        print(tr("Hint: pass --force to overwrite the existing output."),
+              file=sys.stderr)
+        return EXIT_ERROR
+
+    # Walk errors are not streamed by the progress callback; report them
+    # the way `scan` does so an exit-2 run never masquerades as clean.
+    for _path, message in result.scan.walk.errors:
+        print(f"pptrepair: error: {message}", file=sys.stderr)
+
+    if json_output:
+        print(render_batch_json(result))
+    else:
+        print(render_batch_text(result, tr, include_files=False))
+
+    if report_dir is not None and not dry_run:
+        scan_text_report = render_scan_text(
+            result.scan, tr, include_files=True)
+        (report_dir / "scan_report.txt").write_text(
+            scan_text_report + "\n", encoding="utf-8")
+        scan_json_report = render_scan_json(result.scan)
+        (report_dir / "scan_report.json").write_text(
+            scan_json_report + "\n", encoding="utf-8")
+        repair_text_report = render_batch_text(result, tr, include_files=True)
+        (report_dir / "repair_report.txt").write_text(
+            repair_text_report + "\n", encoding="utf-8")
+        repair_json_report = render_batch_json(result)
+        (report_dir / "repair_report.json").write_text(
+            repair_json_report + "\n", encoding="utf-8")
+
+    if result.had_errors():
+        return EXIT_ERROR
+    if result.unrepaired_remaining() > 0:
+        return EXIT_CORRUPT
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns the process exit code."""
     parser = build_parser()
@@ -415,5 +636,11 @@ def main(argv: list[str] | None = None) -> int:
         return run_scan(args.roots, args.report, args.force, args.show_all,
                         args.lang, args.json_output, args.follow_symlinks,
                         args.include_filenames, args.allow_download)
+    if args.command == "repair-all":
+        return run_repair_all(
+            args.roots, args.output_dir, args.in_place, args.report,
+            args.force, args.show_all, args.dry_run, args.lang,
+            args.json_output, args.follow_symlinks, args.include_filenames,
+            args.allow_download)
     parser.error(f"unknown command: {args.command}")
     return EXIT_ERROR

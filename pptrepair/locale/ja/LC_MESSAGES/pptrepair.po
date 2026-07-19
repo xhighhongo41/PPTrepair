@@ -164,3 +164,33 @@ msgstr "修復後の未解決参照数: {n}"
 
 msgid "Note: these unresolved references existed in the original archive and were left untouched (the recovered file is byte-identical to the original)."
 msgstr "注記: これらの未解決参照は元のアーカイブに最初から存在していたもので、変更を加えていません(復元ファイルは元のファイルとバイト単位で同一です)。"
+
+msgid "=== Repair summary ==="
+msgstr "=== 修復概要 ==="
+
+msgid "Repaired: {n} file(s)"
+msgstr "修復済み: {n} 件"
+
+msgid "Unrepairable: {n} file(s)"
+msgstr "修復不能: {n} 件"
+
+msgid "Encrypted or legacy Office file(s) (not attempted): {n}"
+msgstr "暗号化済み/レガシーOfficeファイル(未試行): {n} 件"
+
+msgid "No content survives: {n} file(s)"
+msgstr "内容が残っていません: {n} 件"
+
+msgid "Skipped (output exists): {n} file(s)"
+msgstr "スキップ(出力が既に存在): {n} 件"
+
+msgid "Failed: {n} file(s)"
+msgstr "失敗: {n} 件"
+
+msgid "Planned: {n} file(s)"
+msgstr "予定: {n} 件"
+
+msgid "dry run: nothing was written."
+msgstr "dry-run: 何も書き込んでいません。"
+
+msgid "Repairs:"
+msgstr "修復結果:"

@@ -164,3 +164,33 @@ msgstr "Références non résolues après la réparation : {n}"
 
 msgid "Note: these unresolved references existed in the original archive and were left untouched (the recovered file is byte-identical to the original)."
 msgstr "Remarque : ces références non résolues existaient déjà dans l'archive d'origine et n'ont pas été modifiées (le fichier récupéré est identique octet par octet à l'original)."
+
+msgid "=== Repair summary ==="
+msgstr "=== Résumé de la réparation ==="
+
+msgid "Repaired: {n} file(s)"
+msgstr "Réparés : {n} fichier(s)"
+
+msgid "Unrepairable: {n} file(s)"
+msgstr "Irréparables : {n} fichier(s)"
+
+msgid "Encrypted or legacy Office file(s) (not attempted): {n}"
+msgstr "Fichier(s) Office chiffré(s) ou d'un format ancien (non tentés) : {n}"
+
+msgid "No content survives: {n} file(s)"
+msgstr "Aucun contenu ne subsiste : {n} fichier(s)"
+
+msgid "Skipped (output exists): {n} file(s)"
+msgstr "Ignorés (la sortie existe déjà) : {n} fichier(s)"
+
+msgid "Failed: {n} file(s)"
+msgstr "Échoués : {n} fichier(s)"
+
+msgid "Planned: {n} file(s)"
+msgstr "Prévus : {n} fichier(s)"
+
+msgid "dry run: nothing was written."
+msgstr "dry-run : rien n'a été écrit."
+
+msgid "Repairs:"
+msgstr "Réparations :"

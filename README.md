@@ -141,6 +141,24 @@ Useful to know:
 * `--report DIR` writes `scan_report.txt`, machine-readable `scan_report.json`, and — for unknown corruption patterns — anonymous diagnostic fingerprints (see below). An existing report directory needs `--force`. `--lang` and `--json` work like in `repair`.
 * Exit codes: `0` — everything examined is intact, `1` — corruption found, `2` — some paths could not be examined.
 
+### Repairing whole folder trees at once
+
+```console
+$ pptrepair repair-all ~/OneDrive/Documents -o ~/repaired    # aggregate output
+$ pptrepair repair-all ~/slides --in-place                   # next to each source
+$ pptrepair repair-all ~/slides -o ~/repaired --dry-run      # plan only, write nothing
+```
+
+`repair-all` combines `scan` and `repair`: it walks each directory recursively (with the same cloud-placeholder safety as `scan`), then repairs every corrupted file it found, streaming one line per file and ending with a repair summary.
+
+* **Aggregate output (`-o OUTDIR`)** mirrors the input tree structure under `OUTDIR`, so nothing is ever written into the scanned folders — the safe choice for a live OneDrive tree. With several DIRs, each gets its own subdirectory under `OUTDIR` (named after the root, numbered when names clash).
+* **`--in-place`** writes each artifact next to its own source instead, like a per-file `pptrepair repair` run. Inside a synced folder the artifacts are synced too, and a later re-run will scan them as ordinary (intact) files.
+* Artifacts follow the single-file conventions: a rebuilt/trimmed `<name>.repaired.pptx` or a `<name>.salvaged/` recovery folder (with its `REPORT.txt`). An artifact that already exists is skipped — so an interrupted batch can simply be re-run — unless you pass `--force`. One file's failure never stops the rest.
+* Encrypted/legacy Office files are reported but never attempted; files with no surviving content (empty or fully zeroed) are honestly reported as unrepairable.
+* `--dry-run` diagnoses everything and prints the repair plan without writing anything at all (not even reports).
+* `--report DIR` writes `scan_report.txt`/`.json`, `repair_report.txt`/`.json` and anonymous diagnostic fingerprints for unknown patterns, like `scan --report`.
+* Exit codes: `0` — no corruption found, or every corrupted file was repaired; `1` — at least one corrupted file was left unrepaired (unrepairable, or skipped over an existing artifact); `2` — some paths could not be examined, or a repair failed with an error.
+
 ### Reporting unknown corruption patterns
 
 When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `not_a_zip` that is not an encrypted/legacy Office file), running it with `--report` writes one `diagnostics/<id>.diag.json` fingerprint per affected file (at most 20 per run). A fingerprint contains **structural information only** — byte offsets, an entropy profile, ZIP statistics and standardized OOXML part names — never your document's text, images, file name or path. The file's basename is included only if you opt in with `--include-filenames`.
@@ -148,6 +166,11 @@ When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `n
 If you hit an unknown pattern, please review the fingerprint file yourself and consider attaching it to a [new issue](https://github.com/xhighhongo41/PPTrepair/issues/new/choose) using the *Unknown corruption pattern report* template. These reports are what future repair strategies get built from.
 
 ## Changelog
+
+### ver 1.2 (2026-07-19)
+- Added the `pptrepair repair-all` command: recursively scans one or more directory trees and repairs every corrupted `.pptx` / `.pptm` found — either into an aggregate output directory that mirrors the input tree (`-o OUTDIR`, never writing into the scanned folders) or next to each source (`--in-place`). Streams per-file progress and ends with a repair summary; same cloud-placeholder safety as `scan`
+- `--dry-run` prints the full repair plan without writing anything; `--report DIR` saves `scan_report.txt`/`.json`, `repair_report.txt`/`.json` and anonymous diagnostic fingerprints for unknown patterns
+- Batches are resumable: existing artifacts are skipped unless `--force`, and one file's failure never stops the rest. Encrypted/legacy Office files are reported but not attempted
 
 ### ver 1.1.2 (2026-07-17)
 - Rebuilt presentations now open cleanly, with no PowerPoint repair prompt. Verified against a real-world corpus, `repair` now resolves all three prompt triggers it could leave behind: dangling relationship references in slide XML are removed (a video whose media stream was lost keeps its poster frame as a still picture), the animation/timing tree is reconciled with the shapes that lost their media or were removed, and a default Office theme is synthesized when the damage carried away a theme that a surviving slide master still references

@@ -8,4 +8,4 @@ are gone; ``pptrepair scan`` sweeps whole directory trees and collects
 shareable diagnostic fingerprints for unknown corruption patterns.
 """
 
-__version__ = "1.1.2"
+__version__ = "1.2.0"

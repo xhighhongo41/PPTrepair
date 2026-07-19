@@ -164,3 +164,33 @@ msgstr "복구 후 해결되지 않은 참조 수: {n}"
 
 msgid "Note: these unresolved references existed in the original archive and were left untouched (the recovered file is byte-identical to the original)."
 msgstr "참고: 이 해결되지 않은 참조는 원본 아카이브에 원래부터 있던 것으로, 손대지 않고 그대로 두었습니다(복구된 파일은 원본과 바이트 단위로 동일합니다)."
+
+msgid "=== Repair summary ==="
+msgstr "=== 복구 요약 ==="
+
+msgid "Repaired: {n} file(s)"
+msgstr "복구됨: {n}개"
+
+msgid "Unrepairable: {n} file(s)"
+msgstr "복구 불가: {n}개"
+
+msgid "Encrypted or legacy Office file(s) (not attempted): {n}"
+msgstr "암호화되었거나 레거시 Office 파일(시도하지 않음): {n}개"
+
+msgid "No content survives: {n} file(s)"
+msgstr "남아 있는 내용 없음: {n}개"
+
+msgid "Skipped (output exists): {n} file(s)"
+msgstr "건너뜀(출력이 이미 존재함): {n}개"
+
+msgid "Failed: {n} file(s)"
+msgstr "실패: {n}개"
+
+msgid "Planned: {n} file(s)"
+msgstr "예정: {n}개"
+
+msgid "dry run: nothing was written."
+msgstr "dry-run: 아무것도 기록하지 않았습니다."
+
+msgid "Repairs:"
+msgstr "복구 결과:"

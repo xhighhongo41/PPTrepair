@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING, Callable
 from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.scanner import ZipStructure
 
-if TYPE_CHECKING:  # avoid runtime import cycles with repair / scan
+if TYPE_CHECKING:  # avoid runtime import cycles with repair / scan / batch
+    from pptrepair.batch import BatchItem, BatchResult
     from pptrepair.integrity import (RefIntegrityResult,
                                      StructureIntegrityResult,
                                      TimingIntegrityResult)
@@ -483,6 +484,17 @@ def render_scan_text(result: "ScanResult", tr: Callable[[str], str],
       when ``fingerprints_skipped > 0`` — how many targets were not
       fingerprinted because of the per-run cap.
     """
+    return "\n".join(_scan_summary_lines(result, tr, include_files))
+
+
+def _scan_summary_lines(result: "ScanResult", tr: Callable[[str], str],
+                        include_files: bool) -> list[str]:
+    """Build the line list rendered by :func:`render_scan_text`.
+
+    Factored out so :func:`render_batch_text` can prepend the same scan
+    summary to its own repair summary without duplicating this logic;
+    see that function's docstring for how the two are combined.
+    """
     # Local import: pptrepair.scan does not import this module, so this
     # is not a true cycle, but it keeps report.py's module-level
     # imports free of scan/repair as established above.
@@ -560,7 +572,7 @@ def render_scan_text(result: "ScanResult", tr: Callable[[str], str],
                 "fingerprinted because of the per-run cap."
             ).format(n=result.fingerprints_skipped))
 
-    return "\n".join(lines)
+    return lines
 
 
 def _collect_errors(result: "ScanResult") -> list[tuple[Path, str]]:
@@ -603,6 +615,16 @@ def render_scan_json(result: "ScanResult") -> str:
 
     ``files`` covers every diagnosed file in walk order; ``errors``
     merges walk errors and per-file pipeline failures in that order.
+    """
+    return json.dumps(_scan_payload(result), indent=2)
+
+
+def _scan_payload(result: "ScanResult") -> dict:
+    """Build the payload dict serialized by :func:`render_scan_json`.
+
+    Factored out so :func:`render_batch_json` can embed it unchanged as
+    its ``"scan"`` key, without duplicating this dict construction or
+    perturbing :func:`render_scan_json`'s own output.
     """
     fingerprints_written = sum(
         1 for outcome in result.outcomes
@@ -647,4 +669,224 @@ def render_scan_json(result: "ScanResult") -> str:
         "report_dir": str(result.report_dir)
         if result.report_dir is not None else None,
     }
+    return payload
+
+
+def render_batch_text(result: "BatchResult", tr: Callable[[str], str],
+                      include_files: bool = False) -> str:
+    """Render a ``repair-all`` batch result as a human-readable report.
+
+    Used both for stdout and for ``repair_report.txt`` (with
+    *include_files* True, mirroring :func:`render_scan_text`'s own
+    ``scan_report.txt`` convention). Layout contract (labels go through
+    *tr*; verdict/action/mode codes, numbers and paths stay
+    locale-independent, matching the rest of this module):
+
+    * the phase-1 scan summary, exactly as
+      :func:`render_scan_text(result.scan, tr, include_files=False)
+      <render_scan_text>` would render it (the per-file corrupted list
+      is always omitted here since this function's own per-file section
+      already carries the verdict alongside the repair action);
+    * ``=== Repair summary ===``, then either (*dry_run*) a single
+      ``Planned: {n} file(s)`` line, or ``Repaired: {n} file(s)``
+      followed by one untranslated ``  {mode}: {n}`` line per non-zero
+      rebuild/trim/extract sub-tally;
+    * ``Unrepairable: {n} file(s)``, then -- each only when positive --
+      a translated count of the encrypted/legacy CFB files among them
+      and a translated count of those with no surviving content at all
+      (``EMPTY_FILE`` / ``FULL_ZERO_FILL``, see
+      :func:`render_repair_text`'s own "nothing survives" hint);
+    * when positive, ``Skipped (output exists): {n} file(s)`` plus the
+      same ``--force`` hint the single-file command prints on
+      :class:`~pptrepair.repair.OutputExistsError`;
+    * when positive, ``Failed: {n} file(s)``;
+    * *dry_run* only: a final ``dry run: nothing was written.`` line;
+    * ``result.warnings`` (collision-fallback notices etc.), one
+      ``  - {warning}`` per entry, under a translated ``Warnings:``
+      header, when non-empty;
+    * *include_files* only: a translated ``Repairs:`` header followed by
+      one line per :class:`~pptrepair.batch.BatchItem`, in batch order
+      (see :func:`_repair_item_line`).
+    """
+    lines = _scan_summary_lines(result.scan, tr, include_files=False)
+
+    lines.append(tr("=== Repair summary ==="))
+    counts = result.counts()
+
+    if result.dry_run:
+        lines.append(tr("Planned: {n} file(s)").format(n=counts["planned"]))
+    else:
+        lines.append(
+            tr("Repaired: {n} file(s)").format(n=counts["repaired"]))
+        for mode in ("rebuild", "trim", "extract"):
+            mode_count = counts[f"repaired_{mode}"]
+            if mode_count:
+                lines.append(f"  {mode}: {mode_count}")
+
+    lines.append(
+        tr("Unrepairable: {n} file(s)").format(n=counts["unrepairable"]))
+    if counts["unrepairable_cfb"]:
+        lines.append(tr(
+            "Encrypted or legacy Office file(s) (not attempted): {n}"
+        ).format(n=counts["unrepairable_cfb"]))
+    lost_content = _count_lost_content(result.items)
+    if lost_content:
+        lines.append(
+            tr("No content survives: {n} file(s)").format(n=lost_content))
+
+    if counts["skipped_existing"]:
+        lines.append(tr("Skipped (output exists): {n} file(s)").format(
+            n=counts["skipped_existing"]))
+        lines.append(
+            tr("Hint: pass --force to overwrite the existing output."))
+
+    if counts["failed"]:
+        lines.append(tr("Failed: {n} file(s)").format(n=counts["failed"]))
+
+    if result.dry_run:
+        lines.append(tr("dry run: nothing was written."))
+
+    if result.warnings:
+        lines.append(tr("Warnings:"))
+        lines.extend(f"  - {warning}" for warning in result.warnings)
+
+    if include_files:
+        lines.append(tr("Repairs:"))
+        lines.extend(_repair_item_line(item) for item in result.items)
+
+    return "\n".join(lines)
+
+
+def _count_lost_content(items: "list[BatchItem]") -> int:
+    """Count unrepairable items whose diagnosis promises no surviving content.
+
+    ``EMPTY_FILE`` and ``FULL_ZERO_FILL`` (see :mod:`pptrepair.classify`)
+    are the two verdicts where nothing is recoverable regardless of
+    repair strategy, matching :func:`render_repair_text`'s own
+    "nothing survives" hint for a single unrepairable outcome.
+    """
+    count = 0
+    for item in items:
+        if item.action != "unrepairable":
+            continue
+        diagnosis = item.source.diagnosis
+        if diagnosis is not None and diagnosis.verdict in (
+                Verdict.EMPTY_FILE, Verdict.FULL_ZERO_FILL):
+            count += 1
+    return count
+
+
+def _repair_item_line(item: "BatchItem") -> str:
+    """Render one :class:`~pptrepair.batch.BatchItem` as one report line.
+
+    The path, verdict code, action code and mode code are never
+    translated (machine-facing values, like verdict codes elsewhere in
+    this module); the artifact path is whichever of
+    ``item.planned_output`` was produced, predicted or found
+    pre-existing (None only when nothing could or would be written, and
+    rendered as ``-``). *mode* is likewise ``-`` when :func:`repair_file`
+    never ran for this item (skipped, CFB, failed or dry-run "planned").
+    """
+    diagnosis = item.source.diagnosis
+    assert diagnosis is not None  # corrupted() never yields a failed pipeline
+    mode = item.repair.mode if item.repair is not None else "-"
+    output = item.planned_output if item.planned_output is not None else "-"
+    line = (f"  - {item.source.path}: verdict={diagnosis.verdict.value} "
+           f"action={item.action} mode={mode} output={output}")
+    if item.error:
+        line += f" error={item.error}"
+    return line
+
+
+def render_batch_json(result: "BatchResult") -> str:
+    """Render a ``repair-all`` batch result as a language-neutral JSON object.
+
+    Schema (stable for tests)::
+
+        {
+          "schema_version": 1,
+          "dry_run": bool,
+          "in_place": bool,
+          "output_dir": str | null,      # None in --in-place mode
+          "scan": {...},                 # exactly render_scan_json's payload
+          "counts": {...},               # BatchResult.counts(), unchanged
+          "unrepaired_remaining": int,
+          "warnings": [str, ...],
+          "repairs": [
+            {
+              "path": str,
+              "verdict": str,            # Verdict.value
+              "action": str,             # BatchItem.action
+              "mode": str | null,        # null when repair_file never ran
+              "output": str | null,      # produced / predicted / existing
+              "recheck_verdict": str | null,
+              "recheck_dangling_refs": int | null,
+              "recheck_timing_issues": int | null,
+              "recheck_structure_issues": int | null,
+              "trimmed_bytes": int | null,
+              "lost_slide_numbers": [int, ...],
+              "lost_entries_total": int,
+              "warnings": [str, ...],
+              "error": str | null
+            },
+            ...
+          ]
+        }
+
+    ``scan`` embeds :func:`_scan_payload`'s dict verbatim, so it matches
+    :func:`render_scan_json`'s own top-level schema field for field.
+    ``repairs`` covers every corrupted file in batch order; for an item
+    whose repair was never executed (``skipped_existing``, ``failed``,
+    a CFB ``unrepairable``, or a dry-run ``planned``), every field that
+    comes from :class:`~pptrepair.repair.RepairOutcome` is None or an
+    empty list, per the key-by-key null noted above.
+    """
+    payload = {
+        "schema_version": 1,
+        "dry_run": result.dry_run,
+        "in_place": result.in_place,
+        "output_dir": str(result.output_dir)
+        if result.output_dir is not None else None,
+        "scan": _scan_payload(result.scan),
+        "counts": result.counts(),
+        "unrepaired_remaining": result.unrepaired_remaining(),
+        "warnings": list(result.warnings),
+        "repairs": [_batch_item_to_dict(item) for item in result.items],
+    }
     return json.dumps(payload, indent=2)
+
+
+def _batch_item_to_dict(item: "BatchItem") -> dict:
+    """Render one :class:`~pptrepair.batch.BatchItem` as its JSON-schema dict.
+
+    See :func:`render_batch_json` for the field-by-field schema; every
+    :class:`~pptrepair.repair.RepairOutcome`-derived field falls back to
+    None (or an empty list) when ``item.repair`` is None, i.e. the item
+    was never handed to :func:`~pptrepair.repair.repair_file`.
+    """
+    diagnosis = item.source.diagnosis
+    assert diagnosis is not None  # corrupted() never yields a failed pipeline
+    repair = item.repair
+    return {
+        "path": str(item.source.path),
+        "verdict": diagnosis.verdict.value,
+        "action": item.action,
+        "mode": repair.mode if repair is not None else None,
+        "output": str(item.planned_output)
+        if item.planned_output is not None else None,
+        "recheck_verdict":
+            repair.recheck_verdict if repair is not None else None,
+        "recheck_dangling_refs":
+            repair.recheck_dangling_refs if repair is not None else None,
+        "recheck_timing_issues":
+            repair.recheck_timing_issues if repair is not None else None,
+        "recheck_structure_issues":
+            repair.recheck_structure_issues if repair is not None else None,
+        "trimmed_bytes": repair.trimmed_bytes if repair is not None else None,
+        "lost_slide_numbers":
+            list(repair.lost_slide_numbers) if repair is not None else [],
+        "lost_entries_total":
+            repair.lost_entries_total if repair is not None else 0,
+        "warnings": list(repair.warnings) if repair is not None else [],
+        "error": item.error,
+    }

@@ -164,3 +164,33 @@ msgstr "修复后未解决的引用数: {n}"
 
 msgid "Note: these unresolved references existed in the original archive and were left untouched (the recovered file is byte-identical to the original)."
 msgstr "提示: 这些未解决的引用在原始压缩包中就已存在,未做改动(恢复的文件与原始文件逐字节相同)。"
+
+msgid "=== Repair summary ==="
+msgstr "=== 修复摘要 ==="
+
+msgid "Repaired: {n} file(s)"
+msgstr "已修复: {n} 个文件"
+
+msgid "Unrepairable: {n} file(s)"
+msgstr "无法修复: {n} 个文件"
+
+msgid "Encrypted or legacy Office file(s) (not attempted): {n}"
+msgstr "加密或旧版 Office 文件(未尝试修复): {n} 个"
+
+msgid "No content survives: {n} file(s)"
+msgstr "没有任何可恢复内容: {n} 个文件"
+
+msgid "Skipped (output exists): {n} file(s)"
+msgstr "已跳过(输出已存在): {n} 个文件"
+
+msgid "Failed: {n} file(s)"
+msgstr "失败: {n} 个文件"
+
+msgid "Planned: {n} file(s)"
+msgstr "计划: {n} 个文件"
+
+msgid "dry run: nothing was written."
+msgstr "dry-run: 未写入任何内容。"
+
+msgid "Repairs:"
+msgstr "修复结果:"
