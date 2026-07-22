@@ -795,6 +795,48 @@ def rebuild_with_entries(data: bytes, extra: dict[str, bytes] | None = None,
     return buffer.getvalue()
 
 
+def make_edited_version(data: bytes, *, replace: dict[str, bytes] | None = None,
+                        add: dict[str, bytes] | None = None,
+                        remove: list[str] | None = None) -> bytes:
+    """Build an edited copy of an existing archive.
+
+    Reads *data* as a ZIP and re-emits its entries in their original
+    order and compression method, applying up to three edits: *replace*
+    swaps in a new payload for an existing member, *remove* drops named
+    members entirely, and *add* appends new members afterwards
+    (``ZIP_DEFLATED``, except names under ``ppt/media/`` which are
+    written ``ZIP_STORED`` to mimic PowerPoint's own uncompressed media
+    parts). Used to synthesise a plausible "different version of the
+    same presentation" -- most parts unchanged, a handful edited -- for
+    same-origin scoring tests.
+
+    :param replace: mapping of existing member name to its new payload.
+    :param add: mapping of new member name to its payload.
+    :param remove: member names to drop entirely.
+    :return: the edited ZIP archive as bytes.
+    """
+    replace = dict(replace or {})
+    remove_set = set(remove or [])
+    items: list[tuple[str, bytes, int]] = []
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for info in zf.infolist():
+            name = info.filename
+            if name in remove_set:
+                continue
+            payload = replace.get(name, zf.read(name))
+            items.append((name, payload, info.compress_type))
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w") as zf:
+        for name, payload, compress_type in items:
+            zf.writestr(name, payload, compress_type=compress_type)
+        for name, payload in (add or {}).items():
+            compress_type = (zipfile.ZIP_STORED if name.startswith("ppt/media/")
+                             else zipfile.ZIP_DEFLATED)
+            zf.writestr(name, payload, compress_type=compress_type)
+    return buffer.getvalue()
+
+
 def zero_entry_data_tail(data: bytes, name: str,
                          keep_fraction: float = 0.6) -> bytes:
     """Zero the trailing part of one entry's compressed data.
