@@ -78,6 +78,30 @@ def _provenance(outcome, name: str):
     return None
 
 
+def _aligned_boundaries(start: int, end: int) -> list[int]:
+    """Return the 64 KiB-aligned offsets strictly inside ``[start, end)``.
+
+    Mirrors :func:`pptrepair.merge._crossover_boundaries` so the tests can
+    target the exact segments the crossover splice splits an entry into.
+    """
+    align = 65536
+    first = (start // align + 1) * align
+    return list(range(first, end, align))
+
+
+def _seg_chunk(split_points: list[int], index: int) -> tuple:
+    """Return a ``zero_range`` op zeroing 4000 bytes inside segment *index*.
+
+    The zeroed span sits near the middle of the segment, safely past any
+    local file header and inside the compressed payload, so it corrupts
+    that one 64 KiB-aligned segment while leaving its neighbours intact.
+    """
+    lo = split_points[index]
+    hi = split_points[index + 1]
+    mid = (lo + hi) // 2
+    return ("zero_range", mid - 2000, mid + 2000)
+
+
 def test_complementary_copies_restore_full(tmp_path: Path) -> None:
     """Two copies broken in non-overlapping ranges restore byte-identically.
 
@@ -285,3 +309,119 @@ def test_failed_leaves_no_file(tmp_path: Path) -> None:
     assert outcome.guarantee == "failed"
     assert outcome.output_path is None
     assert not out_path.exists()
+
+
+def test_crossover_restores_full(tmp_path: Path) -> None:
+    """A single 64 KiB copy switch inside one entry restores the file whole.
+
+    The large media entry spans several 64 KiB boundaries. Copy A breaks
+    the segment before the first boundary while copy B breaks the segment
+    after the last one, so no single copy carries the media whole; the
+    crossover splice takes the head from B and the tail from A across the
+    first boundary, reproducing the original file byte-for-byte with a
+    two-segment provenance.
+    """
+    data = build_minimal_pptx(num_slides=3, media_bytes=280_000)
+    start, end = _entry_interval(data, "ppt/media/image1.png")
+    boundaries = _aligned_boundaries(start, end)
+    assert len(boundaries) >= 1
+    copy_a, copy_b = make_corrupted_copies(data, [
+        [("zero_range", boundaries[0] - 4000, boundaries[0])],
+        [("zero_range", boundaries[-1], min(boundaries[-1] + 4000, end))],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+
+    outcome = merge_restore([path_a, path_b], output=tmp_path / "out.pptx")
+
+    prov = _provenance(outcome, "ppt/media/image1.png")
+    assert prov.method == "crossover"
+    assert prov.sources is not None
+    assert len(prov.sources) == 2
+    assert outcome.guarantee == "full"
+    assert outcome.output_path is not None
+    assert outcome.output_path.read_bytes() == data
+
+
+def test_crossover_two_switch_shortfall_is_missing(tmp_path: Path) -> None:
+    """Alternating damage needing three switches exceeds the crossover limit.
+
+    Copy A breaks the even media segments (S0, S2) and copy B the odd ones
+    (S1, S3), so each segment survives in exactly one copy and recovery
+    would need the sequence B, A, B, A -- three copy switches, one more
+    than the crossover's two-switch cap. The entry therefore stays
+    missing (no attempt-cap note, the search space is exhausted) and the
+    rebuild fallback yields a partial output.
+    """
+    data = build_minimal_pptx(num_slides=3, media_bytes=280_000)
+    start, end = _entry_interval(data, "ppt/media/image1.png")
+    boundaries = _aligned_boundaries(start, end)
+    assert len(boundaries) >= 3
+    split_points = [start, *boundaries, end]
+    copy_a, copy_b = make_corrupted_copies(data, [
+        [_seg_chunk(split_points, 0), _seg_chunk(split_points, 2)],
+        [_seg_chunk(split_points, 1), _seg_chunk(split_points, 3)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+
+    outcome = merge_restore([path_a, path_b], output=tmp_path / "out.pptx")
+
+    prov = _provenance(outcome, "ppt/media/image1.png")
+    assert prov.method == "missing"
+    assert prov.sources is None
+    assert outcome.guarantee == "partial"
+    assert outcome.output_path is not None
+    assert outcome.output_path.exists()
+    assert not any("attempt cap" in note for note in outcome.notes)
+
+
+def test_crossover_attempt_cap_noted(tmp_path: Path, monkeypatch) -> None:
+    """Hitting the crossover attempt cap is recorded as a note.
+
+    The material is the recoverable case of
+    :func:`test_crossover_restores_full`, but the per-entry cap is lowered
+    to a single combination so the search is cut off before it reaches the
+    winning one. The entry then falls through to missing and the run
+    records the attempt-cap note.
+    """
+    monkeypatch.setattr(merge_module, "MAX_CROSSOVER_ATTEMPTS", 1)
+    data = build_minimal_pptx(num_slides=3, media_bytes=280_000)
+    start, end = _entry_interval(data, "ppt/media/image1.png")
+    boundaries = _aligned_boundaries(start, end)
+    copy_a, copy_b = make_corrupted_copies(data, [
+        [("zero_range", boundaries[0] - 4000, boundaries[0])],
+        [("zero_range", boundaries[-1], min(boundaries[-1] + 4000, end))],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+
+    outcome = merge_restore([path_a, path_b], output=tmp_path / "out.pptx")
+
+    assert any("hit the attempt cap" in note for note in outcome.notes)
+
+
+def test_crossover_skipped_without_boundary(tmp_path: Path) -> None:
+    """A small entry with no interior 64 KiB boundary is never crossed over.
+
+    Both copies break a small slide entry that fits inside one 64 KiB
+    block, so its range holds no absolute alignment boundary to switch at.
+    The crossover is not attempted, the entry is reported missing (with no
+    attempt-cap note), and the rebuild fallback handles the rest.
+    """
+    data = build_minimal_pptx(num_slides=3, media_bytes=60_000)
+    start, end = _entry_interval(data, "ppt/slides/slide2.xml")
+    assert not _aligned_boundaries(start, end)
+    ds, de = _entry_data_span(data, "ppt/slides/slide2.xml")
+    copy_a, copy_b = make_corrupted_copies(data, [
+        [("zero_range", ds, de)],
+        [("zero_range", ds + 4, de)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+
+    outcome = merge_restore([path_a, path_b], output=tmp_path / "out.pptx")
+
+    prov = _provenance(outcome, "ppt/slides/slide2.xml")
+    assert prov.method == "missing"
+    assert not any("attempt cap" in note for note in outcome.notes)

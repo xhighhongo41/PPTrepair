@@ -18,7 +18,9 @@ The pipeline is:
    to splice from (``auto`` tier, plus ``candidate`` on request);
 3. pick a reference central directory (the readable-CD copy with the
    highest local-file-header survival) and splice each entry's byte range
-   out of the first copy that reproduces its recorded CRC-32;
+   out of the first copy that reproduces its recorded CRC-32; when no
+   single copy survives an entry whole, try to piece it together across
+   the 64 KiB corruption boundaries from several copies (*crossover*);
 4. when every entry is recovered and the ranges tile the whole file, the
    output is byte-identical to the original (``guarantee="full"``);
    otherwise the gaps are filled from the target and the result is
@@ -40,10 +42,12 @@ is opened read-only.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import struct
 import tempfile
 import zipfile
 import zlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -81,6 +85,15 @@ _METHOD_DEFLATE = 8
 #: Zip64 record; treated here as an unusable (untrustworthy) offset.
 _ZIP64_SENTINEL = 0xFFFFFFFF
 
+#: 64 KiB: the empirically observed granularity of OneDrive corruption,
+#: used as the file-absolute alignment at which a crossover splice may
+#: switch which copy an entry's bytes are taken from.
+CROSSOVER_ALIGN = 65536
+
+#: Per-entry cap on the number of copy-switch combinations a crossover
+#: search will try before giving up.
+MAX_CROSSOVER_ATTEMPTS = 4096
+
 
 @dataclass
 class EntryProvenance:
@@ -89,8 +102,12 @@ class EntryProvenance:
     name: str
     source: Path | None
     """The copy the entry was adopted from, or None when it could not be
-    recovered from any copy."""
-    method: str  # "direct" | "missing"
+    recovered from any copy. For a ``crossover`` adoption this is the copy
+    that supplied the first segment (``sources[0]``)."""
+    method: str  # "direct" | "crossover" | "missing"
+    sources: tuple[Path, ...] | None = None
+    """For a ``crossover`` adoption, the copy each spliced segment was
+    taken from, in order; None for every other method."""
 
 
 @dataclass
@@ -307,12 +324,26 @@ def _run_splice(
     adopted: dict[str, tuple[tuple[int, int], bytes, bytes]] = {}
     for entry, interval in zip(entries, intervals):
         picked = _adopt_entry(entry, interval, copy_paths, copy_bytes)
-        if picked is None:
-            provenances.append(EntryProvenance(entry.name, None, "missing"))
-        else:
+        if picked is not None:
             source, segment, raw = picked
             adopted[entry.name] = (interval, segment, raw)
             provenances.append(EntryProvenance(entry.name, source, "direct"))
+            continue
+        # No single copy survives the entry whole: try switching copies
+        # at the 64 KiB corruption boundaries inside its range.
+        crossed = _crossover_entry(entry, interval, copy_paths, copy_bytes)
+        if crossed is not None:
+            sources, segment, raw = crossed
+            adopted[entry.name] = (interval, segment, raw)
+            provenances.append(
+                EntryProvenance(entry.name, sources[0], "crossover",
+                                sources=sources))
+            continue
+        if _crossover_capped(interval, copy_paths, copy_bytes):
+            notes.append(
+                f"crossover search for {entry.name} hit the attempt cap "
+                f"({MAX_CROSSOVER_ATTEMPTS})")
+        provenances.append(EntryProvenance(entry.name, None, "missing"))
 
     if any(prov.method == "missing" for prov in provenances):
         # Some entry survived in no copy: hand the recovered ones to the
@@ -406,23 +437,148 @@ def _adopt_entry(entry: _RefEntry, interval: tuple[int, int],
         if end > len(data):
             continue
         segment = data[start:end]
-        parsed = _parse_lfh(segment, 0)
-        if parsed is None:
-            continue
-        _method, name, name_len, extra_len = parsed
-        if name != entry.name:
-            continue
-        data_offset = _LFH_FIXED_SIZE + name_len + extra_len
-        comp = segment[data_offset:data_offset + entry.comp_size]
-        if len(comp) < entry.comp_size:
-            continue
-        raw = _safe_decompress(comp, entry.compress_type)
-        if raw is None:
-            continue
-        if (zlib.crc32(raw) & 0xFFFFFFFF) != entry.crc:
-            continue
-        return path, segment, raw
+        raw = _validate_entry_segment(segment, entry)
+        if raw is not None:
+            return path, segment, raw
     return None
+
+
+def _validate_entry_segment(segment: bytes,
+                            entry: _RefEntry) -> bytes | None:
+    """Return *segment*'s payload when it is a whole, valid copy of *entry*.
+
+    *segment* must begin with a local file header naming *entry* whose
+    compressed payload decompresses to the CRC-32 the reference central
+    directory recorded. Returns the decompressed payload on success, or
+    None when the header, the compressed length, the decompression or the
+    CRC-32 does not match. Shared by :func:`_adopt_entry` (a single-copy
+    range) and :func:`_crossover_entry` (a range spliced across copies).
+    """
+    parsed = _parse_lfh(segment, 0)
+    if parsed is None:
+        return None
+    _method, name, name_len, extra_len = parsed
+    if name != entry.name:
+        return None
+    data_offset = _LFH_FIXED_SIZE + name_len + extra_len
+    comp = segment[data_offset:data_offset + entry.comp_size]
+    if len(comp) < entry.comp_size:
+        return None
+    raw = _safe_decompress(comp, entry.compress_type)
+    if raw is None:
+        return None
+    if (zlib.crc32(raw) & 0xFFFFFFFF) != entry.crc:
+        return None
+    return raw
+
+
+def _crossover_entry(
+        entry: _RefEntry, interval: tuple[int, int],
+        copy_paths: list[Path], copy_bytes: dict[Path, bytes]
+) -> tuple[tuple[Path, ...], bytes, bytes] | None:
+    """Recover *entry* by switching copies at 64 KiB corruption boundaries.
+
+    Used when :func:`_adopt_entry` found no single copy that reproduces
+    *entry* verbatim. The range is split at the file-absolute 64 KiB
+    boundaries inside it (corruption is aligned to absolute file
+    positions), and the copies are switched at those boundaries -- at most
+    twice, i.e. up to three consecutive runs -- until a spliced
+    reconstruction reproduces the recorded CRC-32. Candidates are tried
+    deterministically (one switch before two; switch positions ascending;
+    each run's copy in *copy_paths* order; adjacent runs always from
+    different copies) and the search stops after
+    :data:`MAX_CROSSOVER_ATTEMPTS` combinations.
+
+    Returns ``(sources, spliced range bytes, decompressed payload)`` on
+    success, where *sources* names the copy each run was taken from in
+    order; None when no combination qualifies, the attempt cap was
+    reached, or the range cannot be crossed over (fewer than two copies
+    reach its end, or it holds no interior 64 KiB boundary).
+    """
+    start, end = interval
+    candidates = [path for path in copy_paths
+                  if len(copy_bytes[path]) >= end]
+    if len(candidates) < 2:
+        return None
+    boundaries = _crossover_boundaries(start, end)
+    if not boundaries:
+        return None
+    split_points = [start, *boundaries, end]
+
+    attempts = 0
+    for cuts, run_copies in _iter_crossover_assignments(
+            len(boundaries), candidates):
+        if attempts >= MAX_CROSSOVER_ATTEMPTS:
+            return None
+        attempts += 1
+        # Concatenate each run's byte range from the copy assigned to it.
+        segment = b"".join(
+            copy_bytes[run_copies[run]][
+                split_points[cuts[run]]:split_points[cuts[run + 1]]]
+            for run in range(len(run_copies)))
+        raw = _validate_entry_segment(segment, entry)
+        if raw is not None:
+            return tuple(run_copies), segment, raw
+    return None
+
+
+def _crossover_boundaries(start: int, end: int) -> list[int]:
+    """Return the 64 KiB-aligned offsets strictly inside ``[start, end)``.
+
+    The split points are multiples of :data:`CROSSOVER_ALIGN`
+    (``k * 65536``) that fall strictly between *start* and *end*. An empty
+    list means the range cannot be crossed over.
+    """
+    first = (start // CROSSOVER_ALIGN + 1) * CROSSOVER_ALIGN
+    return list(range(first, end, CROSSOVER_ALIGN))
+
+
+def _iter_crossover_assignments(
+        num_boundaries: int, candidates: list[Path]
+) -> Iterator[tuple[tuple[int, ...], tuple[Path, ...]]]:
+    """Yield every crossover run assignment in deterministic order.
+
+    An assignment is ``(cuts, run_copies)``: *cuts* are the split-point
+    indices bounding each run (``0`` and ``num_boundaries + 1`` always the
+    outer ends, the switch positions in between), and *run_copies* names
+    the copy supplying each run. Assignments are produced with one switch
+    before two, switch positions ascending, run copies in *candidates*
+    order, and adjacent runs always from different copies.
+    """
+    for num_switches in (1, 2):
+        for positions in itertools.combinations(
+                range(1, num_boundaries + 1), num_switches):
+            cuts = (0, *positions, num_boundaries + 1)
+            for run_copies in itertools.product(
+                    candidates, repeat=num_switches + 1):
+                if all(run_copies[i] != run_copies[i + 1]
+                       for i in range(num_switches)):
+                    yield cuts, run_copies
+
+
+def _crossover_capped(interval: tuple[int, int], copy_paths: list[Path],
+                      copy_bytes: dict[Path, bytes]) -> bool:
+    """Return True when *interval*'s crossover search space exceeds the cap.
+
+    The combinations counted here are exactly the ones
+    :func:`_crossover_entry` enumerates, so a True result means that
+    function stopped early at :data:`MAX_CROSSOVER_ATTEMPTS` rather than
+    ruling every combination out. The generator only builds cheap index
+    tuples, so counting past the cap costs no byte copying.
+    """
+    start, end = interval
+    candidates = [path for path in copy_paths
+                  if len(copy_bytes[path]) >= end]
+    boundaries = _crossover_boundaries(start, end)
+    if len(candidates) < 2 or not boundaries:
+        return False
+    count = 0
+    for _assignment in _iter_crossover_assignments(len(boundaries),
+                                                   candidates):
+        count += 1
+        if count > MAX_CROSSOVER_ATTEMPTS:
+            return True
+    return False
 
 
 def _parse_lfh(data: bytes, offset: int) -> tuple[int, str, int, int] | None:
