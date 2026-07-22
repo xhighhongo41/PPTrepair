@@ -15,7 +15,8 @@ The pipeline is:
    scan -> census -> classify pipeline (:func:`pptrepair.scan.diagnose_file`);
 2. score each non-target source against the target for a shared origin
    (:func:`pptrepair.origin.score_origin`) and keep only the copies safe
-   to splice from (``auto`` tier, plus ``candidate`` on request);
+   to splice from (``auto`` tier, plus ``candidate`` on request), while
+   collecting ``lineage``-tier sources as entry-level donors on request;
 3. pick a reference central directory (the readable-CD copy with the
    highest local-file-header survival) and splice each entry's byte range
    out of the first copy that reproduces its recorded CRC-32; when no
@@ -33,15 +34,29 @@ over: the union of every CRC-valid local-file-header entry across the
 copies is rebuilt into a fresh package, capped at ``"partial"`` since no
 reference layout exists to guarantee byte identity.
 
-Same-origin scoring only *selects* candidates; the safety of every
-adopted byte range is decided by its per-entry CRC-32, so loosening the
-score thresholds never risks adopting foreign bytes. Every source file
-is opened read-only.
+A ``lineage``-tier source -- a *different saved version* of the same
+document rather than a copy of the same save -- cannot be spliced (its
+byte layout differs), but is used, on request (*allow_lineage*), as an
+entry-level *donor*. When the reference central directory records an
+entry's CRC-32 (the oracle), a donor's same-named entry is adopted only
+when its recorded ``(CRC-32, uncompressed size)`` matches and its bytes
+reproduce that CRC-32, so the content is provably the original
+(``method="donor"``). In degraded mode no such oracle survives, so a
+donor entry is adopted on its own recorded CRC-32 alone
+(``method="donor_unverified"``); adopting even one such entry caps the
+run at the ``"hybrid"`` guarantee -- structurally rebuilt and
+part-verified, but not proven byte-identical to the original.
+
+Same-origin scoring only *selects* candidates and donors; the safety of
+every adopted byte range is decided by its per-entry CRC-32, so
+loosening the score thresholds never risks adopting foreign bytes. Every
+source file is opened read-only.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
 import itertools
 import struct
 import tempfile
@@ -51,7 +66,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from pptrepair.census import categorize, from_central_directory
+from pptrepair.census import EntryResult, categorize, from_central_directory
 from pptrepair.classify import Diagnosis
 from pptrepair.integrity import (inspect_references, inspect_structure,
                                  inspect_timing)
@@ -101,13 +116,16 @@ class EntryProvenance:
 
     name: str
     source: Path | None
-    """The copy the entry was adopted from, or None when it could not be
-    recovered from any copy. For a ``crossover`` adoption this is the copy
-    that supplied the first segment (``sources[0]``)."""
-    method: str  # "direct" | "crossover" | "missing"
+    """The copy or donor the entry was adopted from, or None when it
+    could not be recovered from any source. For a ``crossover`` adoption
+    this is the copy that supplied the first segment (``sources[0]``); for
+    a ``donor`` / ``donor_unverified`` adoption it is the donor file."""
+    method: str  # "direct" | "crossover" | "donor" | "donor_unverified"
+    #                | "missing"
     sources: tuple[Path, ...] | None = None
     """For a ``crossover`` adoption, the copy each spliced segment was
-    taken from, in order; None for every other method."""
+    taken from, in order; None for every other method (a ``donor`` entry
+    comes whole from ``source``)."""
 
 
 @dataclass
@@ -115,7 +133,11 @@ class MergeOutcome:
     """Language-neutral result of one :func:`merge_restore` run."""
 
     output_path: Path | None
-    guarantee: str  # "full" | "partial" | "failed"
+    guarantee: str  # "full" | "partial" | "hybrid" | "failed"
+    """``"hybrid"`` marks a rebuilt output into which at least one
+    ``donor_unverified`` entry was adopted: part-verified against the
+    donor's own CRC-32 but, lacking a reference oracle, not proven
+    byte-identical to the original."""
     provenances: list[EntryProvenance]
     scores: list[OriginScore]
     """Same-origin score of each scored non-target source, in source
@@ -138,13 +160,20 @@ def merge_restore(
     the module docstring for the full pipeline and the ``full`` /
     ``partial`` / ``failed`` guarantee levels.
 
+    When *allow_lineage* is set, ``lineage``-tier sources (different saved
+    versions of the same document) are used as entry-level donors for any
+    entry no copy could supply: with the reference central directory as an
+    oracle a donor entry is adopted only when it reproduces the recorded
+    CRC-32 (``method="donor"``, guarantee unchanged), while in degraded
+    mode it is adopted on the donor's own CRC-32 alone
+    (``method="donor_unverified"``), which downgrades the run to
+    ``"hybrid"``. Without the flag a ``lineage``-tier source is only noted
+    as unused.
+
     *output* defaults to ``<target-stem>.merged.pptx`` next to the target;
     an existing path raises :class:`pptrepair.repair.OutputExistsError`
-    unless *force*. A ``failed`` run leaves no file behind.
-
-    *allow_lineage* and *lang* are accepted for signature parity with the
-    later lineage-donor and CLI stages; this stage ignores them beyond
-    recording that a ``lineage``-tier source was left unused.
+    unless *force*. A ``failed`` run leaves no file behind. *lang* is
+    accepted for signature parity with the CLI stage and otherwise unused.
 
     :raises ValueError: when fewer than two sources are given, or any
         source is not an existing file.
@@ -170,8 +199,9 @@ def merge_restore(
         notes.append(
             f"target {target.name} could not be diagnosed: {target_error}")
 
-    usable = _select_usable_sources(
-        sources[1:], target, target_diag, allow_candidate, scores, notes)
+    usable, donor_specs = _select_usable_sources(
+        sources[1:], target, target_diag, allow_candidate, allow_lineage,
+        scores, notes)
 
     copies: list[tuple[Path, Diagnosis]] = []
     if target_diag is not None:
@@ -199,9 +229,10 @@ def merge_restore(
             cd_copies, key=lambda item: _lfh_survival(item[1]))
         result = _run_splice(
             ref_path, copy_bytes[ref_path], copy_paths, copy_bytes,
-            target, output_path, notes)
+            target, output_path, donor_specs, notes)
     if result is None:
-        result = _run_degraded(copies, copy_bytes, output_path, notes)
+        result = _run_degraded(
+            copies, copy_bytes, donor_specs, output_path, notes)
 
     out_path, guarantee, provenances = result
     return MergeOutcome(out_path, guarantee, provenances, scores, notes)
@@ -209,17 +240,25 @@ def merge_restore(
 
 def _select_usable_sources(
         others: list[Path], target: Path, target_diag: Diagnosis | None,
-        allow_candidate: bool, scores: list[OriginScore],
-        notes: list[str]) -> list[tuple[Path, Diagnosis]]:
-    """Diagnose and score each non-target source, keeping the splice-safe.
+        allow_candidate: bool, allow_lineage: bool, scores: list[OriginScore],
+        notes: list[str]
+) -> tuple[list[tuple[Path, Diagnosis]],
+           list[tuple[Path, Diagnosis, OriginScore]]]:
+    """Diagnose and score each non-target source, sorting them by role.
 
     Appends one score per successfully diagnosed source to *scores* (in
     source order) and one explanatory line to *notes* for every source
-    excluded. Returns the ``(path, diagnosis)`` pairs cleared for
-    splicing: ``auto`` tier always, ``candidate`` only when
-    *allow_candidate*.
+    excluded or held back. Returns ``(copies, donors)``:
+
+    * *copies* are the ``(path, diagnosis)`` pairs cleared for byte
+      splicing -- ``auto`` tier always, ``candidate`` only when
+      *allow_candidate*;
+    * *donors* are the ``(path, diagnosis, score)`` triples of
+      ``lineage``-tier sources kept as entry-level donors, only when
+      *allow_lineage* is set (otherwise each is noted as unused).
     """
-    usable: list[tuple[Path, Diagnosis]] = []
+    copies: list[tuple[Path, Diagnosis]] = []
+    donors: list[tuple[Path, Diagnosis, OriginScore]] = []
     for src in others:
         diag, error = diagnose_file(src)
         if diag is None:
@@ -234,22 +273,25 @@ def _select_usable_sources(
         score = score_origin(target_diag, diag)
         scores.append(score)
         if score.tier == "auto":
-            usable.append((src, diag))
+            copies.append((src, diag))
         elif score.tier == "candidate":
             if allow_candidate:
-                usable.append((src, diag))
+                copies.append((src, diag))
             else:
                 notes.append(
                     f"candidate-tier source {src.name} not used "
                     "(pass allow_candidate to include it)")
         elif score.tier == "lineage":
-            notes.append(
-                f"lineage-tier source {src.name} not used "
-                "(not implemented yet)")
+            if allow_lineage:
+                donors.append((src, diag, score))
+            else:
+                notes.append(
+                    f"lineage-tier source {src.name} not used "
+                    "(pass allow_lineage to include it)")
         else:
             notes.append(
                 f"rejected-tier source {src.name} not used (not same origin)")
-    return usable
+    return copies, donors
 
 
 def _lfh_survival(diag: Diagnosis) -> float:
@@ -288,6 +330,103 @@ def _note_identical_copies(copies: list[tuple[Path, Diagnosis]],
                 notes.append(f"identical copies: no merge gain from {names}")
 
 
+class _DonorSource:
+    """Enumerate and read the verified entries of one lineage donor.
+
+    A lineage donor is a *different saved version* of the same document:
+    its byte layout differs, so it cannot be spliced, but an entry it
+    still shares unchanged with the original is a usable part supply. This
+    thin wrapper exposes only what the donor-rescue stages need -- the
+    donor's recorded per-entry ``(CRC-32, uncompressed size)`` and a
+    CRC-verified read of one entry's payload -- reading from a readable
+    central directory when the donor has one and from its CRC-valid
+    local-file-header scan otherwise. The two-method surface is
+    deliberately minimal so a later in-archive donor (a version kept
+    inside a ``.zip``/``.tar``) can be dropped in behind it unchanged.
+    """
+
+    def __init__(self, path: Path, diagnosis: Diagnosis, data: bytes) -> None:
+        self.path = path
+        self._data = data
+        # Prefer the central directory: it records every indexed entry's
+        # CRC-32 and uncompressed size directly. Fall back to the
+        # CRC-valid local-file-header scan when no central directory
+        # survives (a degraded donor).
+        self._use_cd = (
+            diagnosis.cd_census is not None
+            and diagnosis.cd_census.method == "central_directory")
+        self._lfh_by_name: dict[str, EntryResult] = {}
+        if not self._use_cd and diagnosis.lfh_census is not None:
+            for entry in diagnosis.lfh_census.entries:
+                if (entry.ok and entry.crc is not None
+                        and entry.comp_size is not None
+                        and entry.name not in self._lfh_by_name):
+                    self._lfh_by_name[entry.name] = entry
+
+    def recorded(self) -> dict[str, tuple[int | None, int | None]]:
+        """Return ``{name: (recorded crc, recorded uncompressed size)}``.
+
+        Taken from the central directory when the donor has a readable
+        one, otherwise from its CRC-valid local-file-header entries. These
+        are the values the donor *records*, not proof its data is intact
+        -- that is confirmed by :meth:`read`.
+        """
+        recorded: dict[str, tuple[int | None, int | None]] = {}
+        if self._use_cd:
+            try:
+                with zipfile.ZipFile(io.BytesIO(self._data)) as archive:
+                    for info in archive.infolist():
+                        recorded[info.filename] = (
+                            info.CRC & 0xFFFFFFFF, info.file_size)
+            except Exception:
+                return {}
+            return recorded
+        for name, entry in self._lfh_by_name.items():
+            recorded[name] = (entry.crc, entry.file_size)
+        return recorded
+
+    def read(self, name: str) -> bytes | None:
+        """Return *name*'s payload when it passes the donor's own CRC-32.
+
+        None when the entry is absent, unreadable, or fails its recorded
+        CRC-32. The central-directory path leans on :mod:`zipfile`, which
+        raises on a CRC mismatch; the scan path re-reads the local file
+        header at its recorded offset via :func:`_read_lfh_entry`.
+        """
+        if self._use_cd:
+            try:
+                with zipfile.ZipFile(io.BytesIO(self._data)) as archive:
+                    return archive.read(name)
+            except Exception:
+                return None
+        entry = self._lfh_by_name.get(name)
+        if entry is None or entry.comp_size is None or entry.crc is None:
+            return None
+        recovered = _read_lfh_entry(
+            self._data, entry.header_offset, entry.comp_size, entry.crc)
+        if recovered is None:
+            return None
+        return recovered[1]
+
+
+def _build_donors(
+        donor_specs: list[tuple[Path, Diagnosis, OriginScore]]
+) -> list[_DonorSource]:
+    """Read each lineage donor and wrap it, in priority order.
+
+    Donors are ordered by descending lineage score, ties broken by
+    descending media ratio, so the closest version is tried first. Each
+    donor's bytes are read here rather than up front, so a full splice
+    (which never reaches a rescue stage) pays no donor read cost.
+    """
+    ordered = sorted(
+        donor_specs,
+        key=lambda spec: (spec[2].lineage_score, spec[2].media_ratio),
+        reverse=True)
+    return [_DonorSource(path, diag, path.read_bytes())
+            for path, diag, _score in ordered]
+
+
 @dataclass
 class _RefEntry:
     """One entry as recorded by the reference central directory."""
@@ -303,13 +442,17 @@ class _RefEntry:
 def _run_splice(
         ref_path: Path, ref_bytes: bytes, copy_paths: list[Path],
         copy_bytes: dict[Path, bytes], target: Path, output_path: Path,
+        donor_specs: list[tuple[Path, Diagnosis, OriginScore]],
         notes: list[str]
 ) -> tuple[Path | None, str, list[EntryProvenance]] | None:
     """Splice each entry's byte range from the first CRC-valid copy.
 
-    Returns ``(output_path, guarantee, provenances)`` on success, or None
-    to signal that the reference central directory is untrustworthy and
-    the caller should fall back to the degraded (LFH-union) mode.
+    Any entry no copy can supply is offered to the lineage donors in
+    *donor_specs* before the rebuild fallback (see
+    :func:`_rescue_missing_via_donors`). Returns
+    ``(output_path, guarantee, provenances)`` on success, or None to
+    signal that the reference central directory is untrustworthy and the
+    caller should fall back to the degraded (LFH-union) mode.
     """
     layout = _reference_layout(ref_path, ref_bytes)
     if layout is None:
@@ -346,16 +489,77 @@ def _run_splice(
         provenances.append(EntryProvenance(entry.name, None, "missing"))
 
     if any(prov.method == "missing" for prov in provenances):
-        # Some entry survived in no copy: hand the recovered ones to the
+        # Some entry survived in no copy. Before the rebuild fallback, try
+        # to rescue the still-missing entries from lineage donors: the
+        # reference central directory records each entry's CRC-32, so a
+        # donor's same-named entry is adopted only when it reproduces that
+        # exact value (a donor-side edit is never mixed in).
+        donor_payloads = _rescue_missing_via_donors(
+            entries, provenances, donor_specs)
+        # Hand every recovered entry -- spliced or donor-supplied -- to the
         # ordinary rebuild pipeline, which prunes the dangling references.
-        items = [(entry.name, adopted[entry.name][2], entry.compress_type)
-                 for entry in entries if entry.name in adopted]
+        items: list[tuple[str, bytes, int]] = []
+        for entry in entries:
+            if entry.name in adopted:
+                items.append(
+                    (entry.name, adopted[entry.name][2], entry.compress_type))
+            elif entry.name in donor_payloads:
+                items.append(
+                    (entry.name, donor_payloads[entry.name],
+                     entry.compress_type))
         guarantee, out = _rebuild_from_entries(items, output_path, notes)
         return out, guarantee, provenances
 
     return _write_full_output(
         ref_bytes, cd_start, entries, intervals, adopted, target,
         copy_bytes, output_path, provenances, notes)
+
+
+def _rescue_missing_via_donors(
+        entries: list[_RefEntry], provenances: list[EntryProvenance],
+        donor_specs: list[tuple[Path, Diagnosis, OriginScore]]
+) -> dict[str, bytes]:
+    """Adopt still-missing entries from lineage donors, oracle-checked.
+
+    For every entry the splice left missing, each donor (in priority
+    order) is asked for a same-named entry whose recorded
+    ``(CRC-32, uncompressed size)`` equals the reference central
+    directory's; its payload is then read and re-verified against that
+    CRC-32 before being accepted (``method="donor"``). A name-only match
+    with a different CRC-32 is a donor-side edit and is never adopted, so
+    the reference oracle rules out an unverified adoption here. Mutates
+    the matching provenances in place (first donor wins) and returns
+    ``{name: payload}`` for each rescued entry.
+    """
+    missing_names = {prov.name for prov in provenances
+                     if prov.method == "missing"}
+    if not missing_names or not donor_specs:
+        return {}
+    # Donors are read only now that a rescue is actually needed.
+    donors = [(donor, donor.recorded())
+              for donor in _build_donors(donor_specs)]
+    prov_by_name = {prov.name: prov for prov in provenances}
+    rescued: dict[str, bytes] = {}
+    for entry in entries:
+        if entry.name not in missing_names:
+            continue
+        for donor, recorded in donors:
+            pair = recorded.get(entry.name)
+            if pair is None or pair != (entry.crc, entry.file_size):
+                continue
+            payload = donor.read(entry.name)
+            if payload is None:
+                continue
+            # Belt-and-braces: confirm the read bytes against the oracle
+            # CRC-32 even though the donor already CRC-checked them.
+            if (zlib.crc32(payload) & 0xFFFFFFFF) != entry.crc:
+                continue
+            prov = prov_by_name[entry.name]
+            prov.method = "donor"
+            prov.source = donor.path
+            rescued[entry.name] = payload
+            break
+    return rescued
 
 
 def _reference_layout(
@@ -697,15 +901,19 @@ def _selfcheck_zip(path: Path) -> bool:
 
 
 def _run_degraded(copies: list[tuple[Path, Diagnosis]],
-                  copy_bytes: dict[Path, bytes], output_path: Path,
-                  notes: list[str]
+                  copy_bytes: dict[Path, bytes],
+                  donor_specs: list[tuple[Path, Diagnosis, OriginScore]],
+                  output_path: Path, notes: list[str]
                   ) -> tuple[Path | None, str, list[EntryProvenance]]:
     """Rebuild from the union of CRC-valid LFH entries across the copies.
 
     Used when no copy carries a readable central directory. The first
-    CRC-valid copy of each entry name wins (target first), and the result
-    is capped at ``partial`` since there is no reference layout to
-    guarantee byte identity.
+    CRC-valid copy of each entry name wins (target first). Lineage donors
+    then supply any name the union lacks; with no reference layout there
+    is no oracle to prove a donor entry equals the original, so each is
+    adopted on the donor's own CRC-32 alone (``method="donor_unverified"``)
+    and lifts the guarantee from ``partial`` to ``hybrid``. The union is
+    capped at ``partial`` for the same lack of a reference layout.
     """
     notes.append(
         "no copy has a usable central directory; using degraded "
@@ -732,9 +940,46 @@ def _run_degraded(copies: list[tuple[Path, Diagnosis]],
             order.append(entry.name)
             provenances.append(EntryProvenance(entry.name, path, "direct"))
 
+    unverified = _rescue_union_via_donors(
+        union, order, provenances, donor_specs)
+
     items = [(name, union[name][0], union[name][1]) for name in order]
     guarantee, out = _rebuild_from_entries(items, output_path, notes)
+    if guarantee == "partial" and unverified:
+        guarantee = "hybrid"
     return out, guarantee, provenances
+
+
+def _rescue_union_via_donors(
+        union: dict[str, tuple[bytes, int]], order: list[str],
+        provenances: list[EntryProvenance],
+        donor_specs: list[tuple[Path, Diagnosis, OriginScore]]) -> bool:
+    """Add donor entries absent from the degraded *union*, unverified.
+
+    Without a reference central directory the set of *lost* names is
+    itself unknown, so every donor entry not already in the union is
+    tried (first donor wins); the payload is trusted on the donor's own
+    CRC-32 via :meth:`_DonorSource.read`. Any resulting over-inclusion is
+    harmless -- the rebuild's dangling-reference cleanup prunes parts the
+    package does not reference. Mutates *union*, *order* and *provenances*
+    in place and returns True when at least one donor entry was adopted.
+    """
+    if not donor_specs:
+        return False
+    unverified = False
+    for donor in _build_donors(donor_specs):
+        for name in donor.recorded():
+            if name in union:
+                continue
+            payload = donor.read(name)
+            if payload is None:
+                continue
+            union[name] = (payload, _METHOD_DEFLATE)
+            order.append(name)
+            provenances.append(
+                EntryProvenance(name, donor.path, "donor_unverified"))
+            unverified = True
+    return unverified
 
 
 def _read_lfh_entry(data: bytes, header_offset: int, comp_size: int,

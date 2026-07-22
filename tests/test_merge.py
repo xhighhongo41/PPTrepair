@@ -17,7 +17,8 @@ from pathlib import Path
 import pytest
 
 import fixtures
-from fixtures import build_minimal_pptx, find_eocd, make_corrupted_copies
+from fixtures import (build_minimal_jpeg, build_minimal_pptx, find_eocd,
+                      make_corrupted_copies, make_edited_version)
 
 from pptrepair import merge as merge_module
 from pptrepair.merge import merge_restore
@@ -100,6 +101,44 @@ def _seg_chunk(split_points: list[int], index: int) -> tuple:
     hi = split_points[index + 1]
     mid = (lo + hi) // 2
     return ("zero_range", mid - 2000, mid + 2000)
+
+
+def _read_member(data: bytes, name: str) -> bytes:
+    """Return member *name*'s decompressed bytes from archive *data*."""
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        return archive.read(name)
+
+
+def _lineage_versions(media_bytes: int = 60_000, *, add_jpeg: bool = True,
+                      seed: int = 0) -> tuple[bytes, bytes]:
+    """Return an original archive and a lineage version of it.
+
+    The original is a minimal deck (optionally with an extra stored JPEG
+    media part); the version replaces ``slide1`` with a longer body so the
+    two differ in size while every media part stays byte-identical -- the
+    shape :func:`pptrepair.origin.score_origin` recognises as a
+    ``lineage`` donor rather than a same-save copy.
+    """
+    base = build_minimal_pptx(num_slides=3, media_bytes=media_bytes, seed=seed)
+    if add_jpeg:
+        original = make_edited_version(
+            base,
+            add={"ppt/media/image1.jpeg": build_minimal_jpeg(pad_to=9000)})
+    else:
+        original = base
+    new_slide = (
+        b"<p:sld><p:cSld><p:spTree><p:nvGrpSpPr/><p:grpSpPr/><p:sp>"
+        b"<p:txBody><a:p><a:r><a:t>Edited slide body for the lineage "
+        b"version, padded so the archive size clearly differs.</a:t>"
+        b"</a:r></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+    )
+    version = make_edited_version(
+        original, replace={"ppt/slides/slide1.xml": new_slide})
+    if len(version) == len(original):
+        version = make_edited_version(
+            original, replace={"ppt/slides/slide1.xml": new_slide + b"X" * 64})
+    assert len(version) != len(original)
+    return original, version
 
 
 def test_complementary_copies_restore_full(tmp_path: Path) -> None:
@@ -425,3 +464,166 @@ def test_crossover_skipped_without_boundary(tmp_path: Path) -> None:
     prov = _provenance(outcome, "ppt/slides/slide2.xml")
     assert prov.method == "missing"
     assert not any("attempt cap" in note for note in outcome.notes)
+
+
+def test_lineage_donor_supplies_missing_entry(tmp_path: Path) -> None:
+    """An entry broken in every copy is rescued from a lineage donor.
+
+    Two identical copies both destroy the shared media part, so the
+    splice cannot recover it; a lineage donor (a different saved version
+    that never edited that part) carries it with the reference CD's
+    recorded CRC-32, so it is adopted as an oracle-verified ``donor``
+    entry and the rebuilt output holds it byte-for-byte.
+    """
+    original, donor = _lineage_versions()
+    name = "ppt/media/image1.jpeg"
+    start, end = _entry_interval(original, name)
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("zero_range", start, end)],
+        [("zero_range", start, end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    prov = _provenance(outcome, name)
+    assert prov.method == "donor"
+    assert prov.source == path_donor
+    assert prov.sources is None
+    assert outcome.guarantee == "partial"
+    assert outcome.output_path is not None
+    assert _read_member(outcome.output_path.read_bytes(), name) == \
+        _read_member(original, name)
+
+
+def test_lineage_donor_skips_edited_entry(tmp_path: Path) -> None:
+    """A donor's edited entry is never mixed into the restoration.
+
+    The entry broken in every copy is the very slide the donor edited, so
+    the donor's copy carries a different CRC-32 than the reference central
+    directory recorded. It is therefore rejected: the entry stays missing
+    and, if the rebuilt package lists it at all, its bytes never match the
+    donor's edited version.
+    """
+    original, donor = _lineage_versions()
+    name = "ppt/slides/slide1.xml"  # the slide the donor edited
+    start, end = _entry_interval(original, name)
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("zero_range", start, end)],
+        [("zero_range", start, end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    assert _provenance(outcome, name).method == "missing"
+    assert not any(
+        prov.method in ("donor", "donor_unverified")
+        for prov in outcome.provenances)
+    assert outcome.output_path is not None
+    out_bytes = outcome.output_path.read_bytes()
+    with zipfile.ZipFile(io.BytesIO(out_bytes)) as archive:
+        present = name in set(archive.namelist())
+    if present:
+        assert _read_member(out_bytes, name) != _read_member(donor, name)
+
+
+def test_degraded_lineage_donor_is_hybrid(tmp_path: Path) -> None:
+    """Degraded mode adopts donor entries unverified, capped at hybrid.
+
+    Both copies are truncated inside the media part, so the central
+    directory and every tail part are lost and no reference oracle
+    survives. A lineage donor supplies the truncated media and the missing
+    tail parts on its own CRC-32 alone (``donor_unverified``), which
+    downgrades the run to ``hybrid`` while still producing a self-checking
+    archive.
+    """
+    original, donor = _lineage_versions(media_bytes=60_000, add_jpeg=False)
+    media_start, media_end = _entry_interval(original, "ppt/media/image1.png")
+    cut = (media_start + media_end) // 2
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("truncate", cut)],
+        [("truncate", cut)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    assert any(prov.method == "donor_unverified"
+               for prov in outcome.provenances)
+    assert outcome.guarantee == "hybrid"
+    assert outcome.output_path is not None
+    with zipfile.ZipFile(outcome.output_path) as archive:
+        assert archive.testzip() is None
+
+
+def test_lineage_donor_gated_off(tmp_path: Path) -> None:
+    """Without allow_lineage a lineage source is noted, never used.
+
+    The same material as :func:`test_lineage_donor_supplies_missing_entry`
+    but with the flag left off: the broken media stays missing, no donor
+    provenance appears, and the run records the lineage source as unused.
+    """
+    original, donor = _lineage_versions()
+    name = "ppt/media/image1.jpeg"
+    start, end = _entry_interval(original, name)
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("zero_range", start, end)],
+        [("zero_range", start, end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx")
+
+    assert _provenance(outcome, name).method == "missing"
+    assert not any(
+        prov.method in ("donor", "donor_unverified")
+        for prov in outcome.provenances)
+    assert any("pass allow_lineage to include it" in note
+               for note in outcome.notes)
+
+
+def test_lineage_donor_unused_on_full_restore(tmp_path: Path) -> None:
+    """A full splice restore never touches an available lineage donor.
+
+    Complementary copies (one breaks the media, the other slide1) restore
+    the original byte-for-byte, so no entry is ever missing; the lineage
+    donor supplied alongside them is left entirely unused and the
+    guarantee stays ``full``.
+    """
+    original, donor = _lineage_versions(media_bytes=200_000, add_jpeg=False)
+    media_start, media_end = _entry_interval(original, "ppt/media/image1.png")
+    slide_start, slide_end = _entry_interval(original, "ppt/slides/slide1.xml")
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("zero_range", media_start, media_end)],
+        [("zero_range", slide_start, slide_end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    assert outcome.guarantee == "full"
+    assert outcome.output_path is not None
+    assert outcome.output_path.read_bytes() == original
+    assert not any(
+        prov.method in ("donor", "donor_unverified")
+        for prov in outcome.provenances)
