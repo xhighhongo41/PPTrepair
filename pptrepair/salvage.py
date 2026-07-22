@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import BinaryIO, Iterator
 
 from pptrepair.census import EntryResult
-from pptrepair.classify import Diagnosis, Verdict
+from pptrepair.classify import Diagnosis, Verdict, cd_matched_ok_entries
 
 #: Chunk size for streaming entry payloads.
 STREAM_CHUNK_SIZE = 1024 * 1024
@@ -81,6 +81,11 @@ def select_salvageable(
       first, so this LFH-based fallback only matters if that fails).
     * ``HEAD_ZERO_FILL`` / ``HEAD_FOREIGN_DATA`` / ``INTERIOR_DAMAGE`` —
       readable entries of the central-directory census.
+    * ``FOREIGN_ZIP_OVERWRITE`` / ``SCATTERED_OVERWRITE`` — union:
+      readable CD entries first, then CRC-valid LFH entries the central
+      directory also indexes (:func:`pptrepair.classify.cd_matched_ok_entries`),
+      so a fragment of the *foreign* ZIP archive that overwrote part of
+      the file can never be selected for recovery.
     * ``OTHER_CORRUPT`` — union: readable CD entries first, then
       CRC-valid LFH-only entries whose names are not already taken.
     * ``NORMAL`` / ``NOT_A_ZIP`` / ``EMPTY_FILE`` / ``FULL_ZERO_FILL`` —
@@ -105,6 +110,12 @@ def select_salvageable(
     elif verdict in (Verdict.HEAD_ZERO_FILL, Verdict.HEAD_FOREIGN_DATA,
                      Verdict.INTERIOR_DAMAGE):
         candidates = _cd_candidates(diagnosis.cd_census)
+    elif verdict in (Verdict.FOREIGN_ZIP_OVERWRITE,
+                     Verdict.SCATTERED_OVERWRITE):
+        # CD entries first, then only LFH entries the central directory
+        # corroborates, so a foreign ZIP fragment is never recovered.
+        candidates = (_cd_candidates(diagnosis.cd_census)
+                      + _matched_lfh_candidates(diagnosis))
     else:  # OTHER_CORRUPT: CD first, then LFH-only names.
         candidates = (_cd_candidates(diagnosis.cd_census)
                       + _lfh_candidates(diagnosis.lfh_census))
@@ -125,6 +136,21 @@ def _lfh_candidates(census) -> list[SalvagedEntry]:
         return []
     return [SalvagedEntry(e.name, e.category, "lfh", e)
             for e in census.ok_entries()]
+
+
+def _matched_lfh_candidates(diagnosis: Diagnosis) -> list[SalvagedEntry]:
+    """Return LFH candidates the central directory also indexes.
+
+    Only CRC-valid local file header entries whose ``(name, header
+    offset)`` the central directory lists are eligible (see
+    :func:`pptrepair.classify.cd_matched_ok_entries`), so a foreign ZIP
+    fragment sharing the damaged file's byte range is never a salvage
+    candidate. Empty when the LFH census is unavailable.
+    """
+    if diagnosis.lfh_census is None:
+        return []
+    matched = cd_matched_ok_entries(diagnosis.cd_census, diagnosis.lfh_census)
+    return [SalvagedEntry(e.name, e.category, "lfh", e) for e in matched]
 
 
 def _rank(candidate: SalvagedEntry) -> tuple[int, int]:

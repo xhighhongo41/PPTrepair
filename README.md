@@ -159,6 +159,34 @@ $ pptrepair repair-all ~/slides -o ~/repaired --dry-run      # plan only, write 
 * `--report DIR` writes `scan_report.txt`/`.json`, `repair_report.txt`/`.json` and anonymous diagnostic fingerprints for unknown patterns, like `scan --report`.
 * Exit codes: `0` — no corruption found, or every corrupted file was repaired; `1` — at least one corrupted file was left unrepaired (unrepairable, or skipped over an existing artifact); `2` — some paths could not be examined, or a repair failed with an error.
 
+### Salvaging parts of unrepairable files
+
+```console
+$ pptrepair salvage hopeless.pptx              # rescue whatever survives
+$ pptrepair salvage hopeless.pptx -o rescued   # explicit output folder
+```
+
+When a file is too damaged even for `repair` — for instance when a huge leading block was overwritten in place — `salvage` pulls out whatever content still survives, without ever modifying the input. It writes a `<name>.rescued/` folder containing:
+
+* `entries/` — every package part that can still be read back intact (verified against its stored checksum);
+* `carved/` — JPEG/PNG images recovered straight from the raw bytes by signature carving. This works even when the ZIP structure is gone entirely — it can even pull images out of the foreign data that overwrote the file, which is why the report marks carved images' provenance as unknown;
+* `partial_xml/` — the readable leading part of damaged XML parts, decompressed up to the first broken byte;
+* `rescued_text.txt` — best-effort text recovered from surviving and partially recovered slide XML;
+* `salvage_report.json` — a machine-readable inventory of everything above.
+
+`--lang`, `--json` and `--force` work like in `repair`. Exit codes: `0` — something was rescued (or the file was already intact), `1` — nothing could be rescued, `2` — usage or I/O error.
+
+### Restore candidates from intact twins
+
+OneDrive-style chunk corruption overwrites bytes in place and preserves the file size, so an intact copy of the same presentation elsewhere in the scanned tree — a stray copy, an old export, a sync-conflict sibling — is often the fastest full restore. The reports written by `scan --report` list, under every corrupted file, intact files that share its name and/or exact byte size:
+
+```
+  - Projects/deck1.pptx: head_foreign_data
+  restore candidate: Archive/deck1.pptx (same name and size)
+```
+
+`scan_report.json` carries the same data under `twin_candidates` (with a `high` / `medium` / `low` confidence per candidate), and `repair-all` reports list candidates for every file left unrepaired; its `repair_report.json` `schema_version` is now 2. PPTrepair only points at candidates — verify their content before replacing anything by hand.
+
 ### Reporting unknown corruption patterns
 
 When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `not_a_zip` that is not an encrypted/legacy Office file), running it with `--report` writes one `diagnostics/<id>.diag.json` fingerprint per affected file (at most 20 per run). A fingerprint contains **structural information only** — byte offsets, an entropy profile, ZIP statistics and standardized OOXML part names — never your document's text, images, file name or path. The file's basename is included only if you opt in with `--include-filenames`.
@@ -166,6 +194,11 @@ When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `n
 If you hit an unknown pattern, please review the fingerprint file yourself and consider attaching it to a [new issue](https://github.com/xhighhongo41/PPTrepair/issues/new/choose) using the *Unknown corruption pattern report* template. These reports are what future repair strategies get built from.
 
 ## Changelog
+
+### ver 1.2.1 (2026-07-22)
+- New `pptrepair salvage` command rescues content from files too damaged to repair: intact package entries, JPEG/PNG images carved from the raw bytes (even out of the foreign data that overwrote the file), the readable leading part of damaged XML, best-effort text, and a machine-readable `salvage_report.json`
+- `scan --report` and `repair-all` reports now list **restore candidates**: intact files elsewhere in the scanned tree that share a corrupted file's name and/or exact byte size (this kind of corruption preserves file size, so such a twin is often a full restore). `repair_report.json` `schema_version` is now 2
+- Better classification of massive head overwrites: real-world specimens showed the overwriting data can itself contain CRC-valid fragments of *another* ZIP archive, which fooled the `head_foreign_data` detector into `other_corrupt`. The detector now cross-checks scanned entries against the central directory, names the foreign fragments in its evidence, and two new fallback verdicts (`foreign_zip_overwrite`, `scattered_overwrite`) classify related damage that is not confined to the head
 
 ### ver 1.2 (2026-07-19)
 - Added the `pptrepair repair-all` command: recursively scans one or more directory trees and repairs every corrupted `.pptx` / `.pptm` found — either into an aggregate output directory that mirrors the input tree (`-o OUTDIR`, never writing into the scanned folders) or next to each source (`--in-place`). Streams per-file progress and ends with a repair summary; same cloud-placeholder safety as `scan`

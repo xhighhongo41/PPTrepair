@@ -26,7 +26,7 @@ from pptrepair.repair import RepairOutcome
 from pptrepair.report import (VERDICT_LABELS, render_batch_json,
                               render_batch_text, render_json,
                               render_repair_json, render_repair_text,
-                              render_scan_json, render_text)
+                              render_scan_json, render_scan_text, render_text)
 from pptrepair.scan import FileOutcome, ScanResult
 from pptrepair.scanner import ZipStructure
 from pptrepair.walker import WalkResult
@@ -743,7 +743,7 @@ def test_render_batch_json_top_level_keys_and_counts() -> None:
 
     payload = json.loads(render_batch_json(result))
 
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["dry_run"] is False
     assert payload["in_place"] is False
     assert payload["output_dir"] == str(result.output_dir)
@@ -804,3 +804,135 @@ def test_render_batch_json_dry_run_planned_item_has_null_mode() -> None:
     assert planned_entry["action"] == "planned"
     assert planned_entry["mode"] is None
     assert planned_entry["output"] == "out/h.repaired.pptx"
+
+
+# --- v1.2.1: twin-restoration candidates in scan / repair-all reports ----
+
+
+def _twin_structure(size: int) -> ZipStructure:
+    """Build a minimal :class:`ZipStructure` carrying only *size*."""
+    return ZipStructure(size=size, head_kind="zip", zero_runs=[],
+                        lfh_offsets=[], cd_sig_count=0, eocd=None)
+
+
+def _twin_outcome(path: str, verdict: Verdict,
+                  size: int | None) -> FileOutcome:
+    """Build a :class:`FileOutcome` whose diagnosis carries only *size*."""
+    structure = _twin_structure(size) if size is not None else None
+    diagnosis = Diagnosis(path=Path(path), verdict=verdict, structure=structure)
+    return FileOutcome(path=Path(path), diagnosis=diagnosis)
+
+
+def _twin_scan_result(outcomes: list[FileOutcome]) -> ScanResult:
+    """Build a minimal :class:`ScanResult` wrapping *outcomes*."""
+    return ScanResult(roots=[Path("root")], walk=WalkResult(), outcomes=outcomes)
+
+
+def test_scan_text_lists_a_high_confidence_restore_candidate() -> None:
+    """A corrupted file's line is immediately followed by a same-name,
+    same-size normal twin, reported as a high-confidence candidate."""
+    broken = _twin_outcome("root/a.pptx", Verdict.TAIL_TRUNCATED, 1000)
+    twin = _twin_outcome("root/backup/a.pptx", Verdict.NORMAL, 1000)
+    result = _twin_scan_result([broken, twin])
+
+    text = render_scan_text(result, _TR, include_files=True)
+
+    assert (
+        "restore candidate: root/backup/a.pptx (same name and size)" in text
+    )
+
+
+def test_scan_json_reports_twin_candidates_for_a_corrupted_file() -> None:
+    """The corrupted file's per-file entry carries a twin_candidates list
+    with the expected path/confidence/size."""
+    broken = _twin_outcome("root/a.pptx", Verdict.TAIL_TRUNCATED, 1000)
+    twin = _twin_outcome("root/backup/a.pptx", Verdict.NORMAL, 1000)
+    result = _twin_scan_result([broken, twin])
+
+    payload = json.loads(render_scan_json(result))
+
+    entry = next(f for f in payload["files"] if f["path"] == "root/a.pptx")
+    assert entry["twin_candidates"] == [
+        {"path": "root/backup/a.pptx", "confidence": "high", "size": 1000},
+    ]
+
+
+def test_scan_report_omits_candidates_when_none_exist() -> None:
+    """A corrupted file with no matching twin gets neither a text line
+    nor a twin_candidates key in its JSON entry."""
+    broken = _twin_outcome("root/a.pptx", Verdict.TAIL_TRUNCATED, 1000)
+    result = _twin_scan_result([broken])
+
+    text = render_scan_text(result, _TR, include_files=True)
+    payload = json.loads(render_scan_json(result))
+
+    assert "restore candidate" not in text
+    assert "twin_candidates" not in payload["files"][0]
+
+
+def test_scan_report_never_lists_candidates_for_a_normal_file_itself() -> None:
+    """Only corrupted files carry a twin_candidates section; the normal
+    file that IS the candidate has none of its own."""
+    broken = _twin_outcome("root/a.pptx", Verdict.TAIL_TRUNCATED, 1000)
+    twin = _twin_outcome("root/backup/a.pptx", Verdict.NORMAL, 1000)
+    result = _twin_scan_result([broken, twin])
+
+    payload = json.loads(render_scan_json(result))
+
+    normal_entry = next(
+        f for f in payload["files"] if f["path"] == "root/backup/a.pptx")
+    assert "twin_candidates" not in normal_entry
+
+
+def test_scan_text_collapses_extra_candidates_into_a_count_line() -> None:
+    """More than 3 candidates: only 3 are listed individually, the rest
+    collapse into a single "+n more" line."""
+    broken = _twin_outcome("root/a.pptx", Verdict.TAIL_TRUNCATED, 1000)
+    twins = [
+        _twin_outcome(f"root/backup{i}/a.pptx", Verdict.NORMAL, 1000)
+        for i in range(5)
+    ]
+    result = _twin_scan_result([broken, *twins])
+
+    text = render_scan_text(result, _TR, include_files=True)
+
+    assert text.count("restore candidate:") == 3
+    assert "(+2 more restore candidates)" in text
+
+
+def test_batch_json_schema_version_is_2_and_lists_twin_candidates() -> None:
+    """render_batch_json bumps schema_version to 2 and attaches
+    twin_candidates to an unrepairable item with a matching twin."""
+    broken = _twin_outcome("root/a.pptx", Verdict.TAIL_TRUNCATED, 1000)
+    twin = _twin_outcome("root/backup/a.pptx", Verdict.NORMAL, 1000)
+    scan = _twin_scan_result([broken, twin])
+    items = [BatchItem(source=broken, planned_output=None,
+                       action="unrepairable")]
+    result = BatchResult(scan=scan, items=items, output_dir=Path("out"),
+                         in_place=False, dry_run=False)
+
+    payload = json.loads(render_batch_json(result))
+
+    assert payload["schema_version"] == 2
+    repair_entry = payload["repairs"][0]
+    assert repair_entry["twin_candidates"] == [
+        {"path": "root/backup/a.pptx", "confidence": "high", "size": 1000},
+    ]
+
+
+def test_batch_text_lists_restore_candidate_for_unrepairable_item() -> None:
+    """include_files=True's per-item Repairs: section shows the restore
+    candidate line right after an unrepairable item's own line."""
+    broken = _twin_outcome("root/a.pptx", Verdict.TAIL_TRUNCATED, 1000)
+    twin = _twin_outcome("root/backup/a.pptx", Verdict.NORMAL, 1000)
+    scan = _twin_scan_result([broken, twin])
+    items = [BatchItem(source=broken, planned_output=None,
+                       action="unrepairable")]
+    result = BatchResult(scan=scan, items=items, output_dir=Path("out"),
+                         in_place=False, dry_run=False)
+
+    text = render_batch_text(result, _TR, include_files=True)
+
+    assert (
+        "restore candidate: root/backup/a.pptx (same name and size)" in text
+    )

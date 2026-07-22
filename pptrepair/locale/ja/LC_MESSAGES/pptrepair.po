@@ -194,3 +194,49 @@ msgstr "dry-run: 何も書き込んでいません。"
 
 msgid "Repairs:"
 msgstr "修復結果:"
+
+msgid "corrupted: overwritten with fragments of another ZIP archive"
+msgstr "破損: 別のZIPアーカイブの断片で上書きされています"
+
+msgid "corrupted: archive body largely overwritten in place"
+msgstr "破損: アーカイブ本体の大部分がその場で上書きされています"
+
+msgid "=== Salvage summary ==="
+msgstr "=== レスキュー概要 ==="
+
+msgid "Nothing to salvage: the file is already an intact PowerPoint package."
+msgstr "救出は不要です: このファイルは無傷のPowerPointパッケージです。"
+
+msgid "Entries recovered: {n}"
+msgstr "復元エントリ: {n} 件"
+
+msgid "Images carved: {n}"
+msgstr "カービング画像: {n} 件"
+
+msgid "Partial XML parts: {n}"
+msgstr "部分復号XML: {n} 件"
+
+msgid "Text lines recovered: {n}"
+msgstr "復元テキスト行数: {n} 行"
+
+msgid "Note: carved images may contain unrelated data that overwrote the file."
+msgstr "注記: カービングで取り出した画像には、ファイルを上書きした無関係なデータが含まれている場合があります。"
+
+msgid "Nothing could be salvaged from this file."
+msgstr "このファイルからは何も救出できませんでした。"
+
+msgid "  restore candidate: {path} ({reason})"
+msgstr "  復元候補: {path}（{reason}）"
+
+msgid "  (+{n} more restore candidates)"
+msgstr "  (他 {n} 件の復元候補)"
+
+msgid "same name and size"
+msgstr "同名・同サイズ"
+
+msgid "same size only"
+msgstr "同サイズのみ"
+
+msgid "same name only"
+msgstr "同名のみ"
+

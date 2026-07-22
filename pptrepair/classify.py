@@ -21,6 +21,16 @@ project's investigation of real OneDrive-corrupted presentations:
 * ``TAIL_FOREIGN_DATA``  — a complete archive is followed by a large
   region of unindexed foreign data hiding the EOCD from ordinary
   readers.
+* ``FOREIGN_ZIP_OVERWRITE`` — part of the archive body was overwritten
+  by fragments of an *unrelated* ZIP archive; the intruding fragments'
+  own local file headers survive the scan as CRC-valid entries whose
+  names the central directory never listed. Distinct from
+  ``HEAD_FOREIGN_DATA`` (a head-confined super-variant of which does
+  contain such fragments): this fallback catches foreign-ZIP damage that
+  is *not* limited to the leading region.
+* ``SCATTERED_OVERWRITE`` — the end-of-central-directory record and the
+  central directory survive intact, yet almost none of the local entries
+  do: the archive body was largely overwritten in place.
 
 Unknown damage deliberately falls back to ``OTHER_CORRUPT`` rather than
 being forced into a known pattern.
@@ -32,7 +42,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from pptrepair.census import CensusResult
+from pptrepair.census import CensusResult, EntryResult
 from pptrepair.scanner import ZipStructure, alignment_of
 
 #: Minimum number of CRC-valid scanned entries at offsets unknown to the
@@ -53,6 +63,20 @@ ALL_ZERO_RATIO = 0.99
 #: cannot open the archive directly.
 TAIL_JUNK_MIN = 65557
 
+#: Minimum number of entries the central directory must index before a
+#: SCATTERED_OVERWRITE verdict is considered, so a tiny archive with a
+#: couple of damaged entries is never swept up as "largely overwritten".
+SCATTERED_MIN_CD_ENTRIES = 20
+
+#: Fraction of indexed entries whose local file header must *still*
+#: survive, below which the body counts as largely overwritten in place
+#: (SCATTERED_OVERWRITE).
+SCATTERED_LFH_SURVIVAL_MAX = 0.10
+
+#: Maximum number of foreign ZIP fragment names listed inline in
+#: evidence before the remainder is summarised as a count.
+_FOREIGN_FRAGMENT_SAMPLE = 5
+
 
 class Verdict(Enum):
     """Classification outcome for one file."""
@@ -68,6 +92,8 @@ class Verdict(Enum):
     FULL_ZERO_FILL = "full_zero_fill"
     INTERIOR_DAMAGE = "interior_damage"
     TAIL_FOREIGN_DATA = "tail_foreign_data"
+    FOREIGN_ZIP_OVERWRITE = "foreign_zip_overwrite"
+    SCATTERED_OVERWRITE = "scattered_overwrite"
 
 
 @dataclass
@@ -125,13 +151,20 @@ def classify(path: Path, structure: ZipStructure,
           every CD entry starting inside it unreadable
           -> HEAD_ZERO_FILL;
        c. head_kind in ("other", "zeros"), every CD entry starting
-          before the first CRC-valid scanned entry unreadable, and no
-          unreadable CD entry starts at or after that offset (damage
-          confined to the head) -> HEAD_FOREIGN_DATA;
+          before the first CRC-valid scanned entry *the central
+          directory also indexes* unreadable, and no unreadable CD entry
+          starts at or after that offset (damage confined to the head)
+          -> HEAD_FOREIGN_DATA;
        d. head_kind == "zip", the EOCD is internally consistent and at
           least one CD entry is readable -> INTERIOR_DAMAGE (head and
           central directory intact, only entry data damaged);
-       e. otherwise -> OTHER_CORRUPT.
+       e. at least one CRC-valid scanned entry whose name the central
+          directory never listed (a fragment of an unrelated ZIP)
+          -> FOREIGN_ZIP_OVERWRITE;
+       f. a consistent EOCD, >= SCATTERED_MIN_CD_ENTRIES indexed entries
+          and a surviving local-file-header fraction below
+          SCATTERED_LFH_SURVIVAL_MAX -> SCATTERED_OVERWRITE;
+       g. otherwise -> OTHER_CORRUPT.
 
     Chunk-boundary alignment (256 KiB / 1 MiB) of damage borders is
     reported as *evidence* but is never a requirement, so unknown
@@ -310,6 +343,14 @@ def _decide_partial_cd(structure: ZipStructure, cd_census: CensusResult,
     if interior_damage is not None:
         return interior_damage
 
+    foreign_zip = _check_foreign_zip_overwrite(structure, cd_census, lfh_census)
+    if foreign_zip is not None:
+        return foreign_zip
+
+    scattered = _check_scattered_overwrite(structure, cd_census)
+    if scattered is not None:
+        return scattered
+
     return Verdict.OTHER_CORRUPT, [
         f"{cd_census.ok_count()} of {cd_census.total()} central directory "
         "entries are readable",
@@ -362,6 +403,61 @@ def _check_head_zero_fill(structure: ZipStructure,
     return Verdict.HEAD_ZERO_FILL, evidence
 
 
+def cd_matched_ok_entries(cd_census: CensusResult | None,
+                          lfh_census: CensusResult) -> list[EntryResult]:
+    """Return CRC-valid LFH entries the central directory also indexes.
+
+    An entry qualifies only when *both* its name and its header offset
+    match some entry in *cd_census*, so a foreign ZIP fragment that
+    happens to occupy the damaged file's byte range (its offset unknown
+    to the central directory) — or a same-named part written at a
+    different offset — can never be mistaken for one of the archive's
+    own entries. Returns an empty list when *cd_census* is None (there is
+    no central directory to corroborate the scan against).
+    """
+    if cd_census is None:
+        return []
+    cd_keys = {(entry.name, entry.header_offset)
+               for entry in cd_census.entries}
+    return [
+        entry for entry in lfh_census.ok_entries()
+        if (entry.name, entry.header_offset) in cd_keys
+    ]
+
+
+def _foreign_fragment_entries(cd_census: CensusResult | None,
+                              lfh_census: CensusResult) -> list[EntryResult]:
+    """Return CRC-valid LFH entries whose names the CD never listed.
+
+    These are the fingerprint of an unrelated ZIP archive overwriting
+    part of the file: genuine, CRC-valid local entries that belong to a
+    *different* archive. Returns an empty list when *cd_census* is None
+    (no central directory to tell own entries from foreign ones).
+    """
+    if cd_census is None:
+        return []
+    cd_names = {entry.name for entry in cd_census.entries}
+    return [
+        entry for entry in lfh_census.ok_entries()
+        if entry.name not in cd_names
+    ]
+
+
+def _foreign_fragment_names_line(fragments: list[EntryResult]) -> str:
+    """Format a one-line summary of foreign ZIP fragment names.
+
+    Lists up to :data:`_FOREIGN_FRAGMENT_SAMPLE` names verbatim; any
+    remainder is reported as a count.
+    """
+    shown = fragments[:_FOREIGN_FRAGMENT_SAMPLE]
+    names = ", ".join(repr(entry.name) for entry in shown)
+    line = f"foreign archive fragments found by scanning: {names}"
+    extra = len(fragments) - _FOREIGN_FRAGMENT_SAMPLE
+    if extra > 0:
+        line += f" (+{extra} more)"
+    return line
+
+
 def _check_head_foreign_data(
         structure: ZipStructure, cd_census: CensusResult,
         lfh_census: CensusResult) -> tuple[Verdict, list[str]] | None:
@@ -374,13 +470,22 @@ def _check_head_foreign_data(
     unreadable CD entry has to start before the first CRC-valid scanned
     entry, otherwise scattered corruption elsewhere in the file could be
     mistaken for this pattern.
+
+    The "first CRC-valid scanned entry" is taken only from entries the
+    central directory also indexes (:func:`cd_matched_ok_entries`), so a
+    CRC-valid fragment of an *unrelated* ZIP archive embedded in the
+    foreign head cannot pull the boundary earlier and defeat the
+    head-confinement check (the real-world super-variant where a driver
+    package's ZIP fragments overwrote the leading megabytes). When such
+    foreign fragments are present, their names are added to the evidence
+    as a corruption signature.
     """
     if structure.head_kind not in ("other", "zeros"):
         return None
-    ok_entries = lfh_census.ok_entries()
-    if not ok_entries:
+    matched = cd_matched_ok_entries(cd_census, lfh_census)
+    if not matched:
         return None
-    first_ok = min(entry.header_offset for entry in ok_entries)
+    first_ok = min(entry.header_offset for entry in matched)
     affected = [
         entry for entry in cd_census.entries
         if entry.header_offset < first_ok
@@ -396,6 +501,9 @@ def _check_head_foreign_data(
         f"{len(affected)} central directory entries before that offset "
         "are all unreadable",
     ]
+    fragments = _foreign_fragment_entries(cd_census, lfh_census)
+    if fragments:
+        evidence.append(_foreign_fragment_names_line(fragments))
     return Verdict.HEAD_FOREIGN_DATA, evidence
 
 
@@ -427,6 +535,82 @@ def _check_interior_damage(
             line += f", end {note}"
         evidence.append(line)
     return Verdict.INTERIOR_DAMAGE, evidence
+
+
+def _check_foreign_zip_overwrite(
+        structure: ZipStructure, cd_census: CensusResult,
+        lfh_census: CensusResult) -> tuple[Verdict, list[str]] | None:
+    """Rule 6e: fragments of an unrelated ZIP overwrote part of the file.
+
+    Fires when the local-file-header scan turns up at least one CRC-valid
+    entry whose name the central directory never listed (see
+    :func:`_foreign_fragment_entries`): a genuine entry that belongs to a
+    *different* archive whose bytes landed inside this file. Only reached
+    once the head-confined :func:`_check_head_foreign_data` pattern has
+    been ruled out, so this catches foreign-ZIP damage that is *not*
+    limited to the leading region.
+
+    Requires the same damaged-head precondition as rule 6c
+    (``head_kind in ("other", "zeros")``): an in-place foreign overwrite
+    corrupts the leading region, so a file that still starts with a valid
+    local file header is version-mix/interior territory and is left to
+    the OTHER_CORRUPT fallback rather than being mislabelled a foreign
+    overwrite (which also keeps a sub-threshold version mix — fewer than
+    :data:`VERSION_MIX_MIN_MISMATCHES` CD-unknown CRC-valid entries — out
+    of this bucket).
+    """
+    if structure.head_kind not in ("other", "zeros"):
+        return None
+    fragments = _foreign_fragment_entries(cd_census, lfh_census)
+    if not fragments:
+        return None
+    evidence = [
+        f"{len(fragments)} CRC-valid scanned entries belong to an "
+        "unrelated ZIP archive (names not listed in the central "
+        "directory)",
+    ]
+    for entry in fragments[:_FOREIGN_FRAGMENT_SAMPLE]:
+        evidence.append(
+            f"foreign fragment {entry.name!r} at offset "
+            f"{entry.header_offset}")
+    extra = len(fragments) - _FOREIGN_FRAGMENT_SAMPLE
+    if extra > 0:
+        evidence.append(f"... and {extra} more foreign fragment(s)")
+    evidence.append(
+        "part of the archive was overwritten with fragments of an "
+        "unrelated ZIP archive")
+    return Verdict.FOREIGN_ZIP_OVERWRITE, evidence
+
+
+def _check_scattered_overwrite(
+        structure: ZipStructure,
+        cd_census: CensusResult) -> tuple[Verdict, list[str]] | None:
+    """Rule 6f: the archive body was largely overwritten in place.
+
+    The end-of-central-directory record and the central directory
+    survive intact, yet almost none of the local file headers do: fewer
+    than :data:`SCATTERED_LFH_SURVIVAL_MAX` of the indexed entries still
+    have a recognisable local header. Requires a consistent EOCD and at
+    least :data:`SCATTERED_MIN_CD_ENTRIES` indexed entries, so a small
+    archive with a couple of damaged entries is not swept up.
+    """
+    eocd = structure.eocd
+    if eocd is None or not eocd.is_consistent:
+        return None
+    total = cd_census.total()
+    if total < SCATTERED_MIN_CD_ENTRIES:
+        return None
+    lfh_survivors = len(structure.lfh_offsets)
+    survival = lfh_survivors / total
+    if survival >= SCATTERED_LFH_SURVIVAL_MAX:
+        return None
+    evidence = [
+        f"only {lfh_survivors} local file header(s) survive for {total} "
+        f"central directory entries ({survival:.1%})",
+        "the central directory and EOCD are intact, but the archive body "
+        "was overwritten in place",
+    ]
+    return Verdict.SCATTERED_OVERWRITE, evidence
 
 
 def _build_salvage_summary(
