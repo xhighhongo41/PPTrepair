@@ -195,6 +195,9 @@ If you hit an unknown pattern, please review the fingerprint file yourself and c
 
 ## Changelog
 
+### ver 1.2.1.1 (2026-07-22)
+- Fixed `pptrepair --version` (and the `tool_version` field of diagnostic fingerprints) still reporting 1.2.0: the package version string had not been bumped in the 1.2.1 release. No functional changes
+
 ### ver 1.2.1 (2026-07-22)
 - New `pptrepair salvage` command rescues content from files too damaged to repair: intact package entries, JPEG/PNG images carved from the raw bytes (even out of the foreign data that overwrote the file), the readable leading part of damaged XML, best-effort text, and a machine-readable `salvage_report.json`
 - `scan --report` and `repair-all` reports now list **restore candidates**: intact files elsewhere in the scanned tree that share a corrupted file's name and/or exact byte size (this kind of corruption preserves file size, so such a twin is often a full restore). `repair_report.json` `schema_version` is now 2
