@@ -194,3 +194,49 @@ msgstr "dry-run: 未写入任何内容。"
 
 msgid "Repairs:"
 msgstr "修复结果:"
+
+msgid "corrupted: overwritten with fragments of another ZIP archive"
+msgstr "损坏: 被另一个ZIP压缩包的碎片覆盖"
+
+msgid "corrupted: archive body largely overwritten in place"
+msgstr "损坏: 压缩包主体大部分被就地覆盖"
+
+msgid "=== Salvage summary ==="
+msgstr "=== 抢救摘要 ==="
+
+msgid "Nothing to salvage: the file is already an intact PowerPoint package."
+msgstr "无需抢救: 该文件已是完好的 PowerPoint 包。"
+
+msgid "Entries recovered: {n}"
+msgstr "已恢复条目: {n} 个"
+
+msgid "Images carved: {n}"
+msgstr "雕刻图像: {n} 个"
+
+msgid "Partial XML parts: {n}"
+msgstr "部分解码 XML: {n} 个"
+
+msgid "Text lines recovered: {n}"
+msgstr "已恢复文本行数: {n} 行"
+
+msgid "Note: carved images may contain unrelated data that overwrote the file."
+msgstr "注意: 雕刻得到的图像可能包含覆盖该文件的无关数据。"
+
+msgid "Nothing could be salvaged from this file."
+msgstr "无法从该文件中抢救出任何内容。"
+
+msgid "  restore candidate: {path} ({reason})"
+msgstr "  恢复候选: {path}（{reason}）"
+
+msgid "  (+{n} more restore candidates)"
+msgstr "  (另有 {n} 个恢复候选)"
+
+msgid "same name and size"
+msgstr "同名同大小"
+
+msgid "same size only"
+msgstr "仅大小相同"
+
+msgid "same name only"
+msgstr "仅同名"
+

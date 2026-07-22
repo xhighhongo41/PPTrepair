@@ -17,8 +17,11 @@ import zipfile
 import zlib
 from pathlib import Path
 
-from fixtures import (append_foreign_tail, build_minimal_pptx, foreign_prefix,
-                      version_mix, zero_interior_entry, zero_prefix)
+from fixtures import (append_foreign_tail, build_foreign_zip,
+                      build_minimal_pptx, find_eocd, foreign_prefix,
+                      header_offset, lfh_offsets, overlay_foreign_zip_head,
+                      version_mix, zero_interior_entry, zero_prefix,
+                      zero_range)
 
 from pptrepair import __version__
 from pptrepair.census import from_central_directory, from_lfh_scan
@@ -183,6 +186,50 @@ def test_tail_foreign_data_is_not_a_fingerprint_target(tmp_path: Path) -> None:
     diag = _diagnose(path)
 
     assert diag.verdict == Verdict.TAIL_FOREIGN_DATA
+    assert is_fingerprint_target(diag) is False
+
+
+#: Foreign, CRC-valid entries whose names the .pptx central directory
+#: never lists (imitating a driver-package ZIP overwriting the file).
+_FOREIGN_ENTRIES = {
+    "DTT/drivers/x64/DptfPolicyCritical.dll": b"critical policy driver " * 40,
+    "DTT/drivers/x64/DptfPolicyPassive.dll": b"passive policy driver " * 40,
+    "DTT/drivers/x64/DptfPolicyLpm.dll": b"lpm policy driver blob " * 40,
+}
+
+
+def test_foreign_zip_overwrite_is_not_a_fingerprint_target(
+    tmp_path: Path,
+) -> None:
+    """(j) A foreign-ZIP overwrite (FOREIGN_ZIP_OVERWRITE) is a known
+    pattern, not a target."""
+    data = build_minimal_pptx(num_slides=3, media_bytes=100_000)
+    boundary = header_offset(data, "ppt/presProps.xml")
+    corrupted = overlay_foreign_zip_head(
+        data, boundary, build_foreign_zip(_FOREIGN_ENTRIES))
+    tail = [off for off in lfh_offsets(corrupted) if off >= boundary]
+    corrupted = zero_range(corrupted, tail[1], tail[2])
+    path = _write(tmp_path, "foreign_zip.pptx", corrupted)
+
+    diag = _diagnose(path)
+
+    assert diag.verdict == Verdict.FOREIGN_ZIP_OVERWRITE
+    assert is_fingerprint_target(diag) is False
+
+
+def test_scattered_overwrite_is_not_a_fingerprint_target(
+    tmp_path: Path,
+) -> None:
+    """(k) An in-place body overwrite (SCATTERED_OVERWRITE) is a known
+    pattern, not a target."""
+    data = build_minimal_pptx(num_slides=25, media_bytes=4096)
+    cd_offset, _cd_size, _eocd_offset = find_eocd(data)
+    path = _write(tmp_path, "scattered.pptx",
+                  foreign_prefix(data, cd_offset, seed=5))
+
+    diag = _diagnose(path)
+
+    assert diag.verdict == Verdict.SCATTERED_OVERWRITE
     assert is_fingerprint_target(diag) is False
 
 

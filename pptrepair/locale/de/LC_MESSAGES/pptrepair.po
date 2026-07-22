@@ -194,3 +194,49 @@ msgstr "dry-run: Es wurde nichts geschrieben."
 
 msgid "Repairs:"
 msgstr "Reparaturen:"
+
+msgid "corrupted: overwritten with fragments of another ZIP archive"
+msgstr "beschädigt: mit Fragmenten eines anderen ZIP-Archivs überschrieben"
+
+msgid "corrupted: archive body largely overwritten in place"
+msgstr "beschädigt: Archivkörper größtenteils an Ort und Stelle überschrieben"
+
+msgid "=== Salvage summary ==="
+msgstr "=== Rettungs-Zusammenfassung ==="
+
+msgid "Nothing to salvage: the file is already an intact PowerPoint package."
+msgstr "Nichts zu retten: Die Datei ist bereits ein intaktes PowerPoint-Paket."
+
+msgid "Entries recovered: {n}"
+msgstr "Wiederhergestellte Einträge: {n}"
+
+msgid "Images carved: {n}"
+msgstr "Ausgeschnittene Bilder: {n}"
+
+msgid "Partial XML parts: {n}"
+msgstr "Teilweise dekodierte XML-Teile: {n}"
+
+msgid "Text lines recovered: {n}"
+msgstr "Wiederhergestellte Textzeilen: {n}"
+
+msgid "Note: carved images may contain unrelated data that overwrote the file."
+msgstr "Hinweis: Ausgeschnittene Bilder können fremde Daten enthalten, die die Datei überschrieben haben."
+
+msgid "Nothing could be salvaged from this file."
+msgstr "Aus dieser Datei konnte nichts gerettet werden."
+
+msgid "  restore candidate: {path} ({reason})"
+msgstr "  Wiederherstellungskandidat: {path} ({reason})"
+
+msgid "  (+{n} more restore candidates)"
+msgstr "  (+{n} weitere Wiederherstellungskandidaten)"
+
+msgid "same name and size"
+msgstr "gleicher Name und gleiche Größe"
+
+msgid "same size only"
+msgstr "nur gleiche Größe"
+
+msgid "same name only"
+msgstr "nur gleicher Name"
+

@@ -22,13 +22,16 @@ inside their report directory).
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
+from typing import Callable
 
 import pptrepair
 from pptrepair import batch as batch_module
 from pptrepair import i18n
 from pptrepair import repair as repair_module
+from pptrepair import rescue as rescue_module
 from pptrepair import scan as scan_module
 from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.integrity import (RefIntegrityResult, StructureIntegrityResult,
@@ -103,6 +106,31 @@ def build_parser() -> argparse.ArgumentParser:
                              "(default: en)")
     repair.add_argument("--json", action="store_true", dest="json_output",
                         help="emit a JSON object instead of a text report")
+
+    salvage = subparsers.add_parser(
+        "salvage",
+        help="rescue readable content from an unrepairable file",
+        description=(
+            "Pull whatever content still survives out of a badly damaged "
+            "FILE: readable package entries, images carved from the raw "
+            "bytes, partially decoded XML and best-effort text. The "
+            "input file itself is never modified."
+        ),
+    )
+    salvage.add_argument("file", metavar="FILE",
+                         help="corrupted .pptx file to salvage")
+    salvage.add_argument("-o", "--output", metavar="OUTDIR", default=None,
+                         help=("output folder (default: <name>.rescued/ "
+                               "next to FILE)"))
+    salvage.add_argument("--force", action="store_true",
+                         help="reuse an existing output folder")
+    salvage.add_argument("--lang", choices=i18n.SUPPORTED_LANGUAGES,
+                         default=i18n.DEFAULT_LANGUAGE,
+                         help="language of the human-readable summary "
+                              "(default: en)")
+    salvage.add_argument("--json", action="store_true", dest="json_output",
+                         help="emit the salvage report as JSON instead of "
+                              "a text summary")
 
     scan = subparsers.add_parser(
         "scan",
@@ -366,6 +394,91 @@ def run_repair(file: str, output: str | None, mode: str, force: bool,
             report_path.write_text(text, encoding="utf-8")
 
     return EXIT_OK if outcome.success else EXIT_CORRUPT
+
+
+def run_salvage(file: str, output: str | None, force: bool, lang: str,
+                json_output: bool) -> int:
+    """Rescue surviving content from one file and return an exit code.
+
+    Implementation requirements:
+
+    * Validate the input path like ``run_repair`` (stderr + exit 2 on a
+      missing/non-regular file); catch unexpected pipeline exceptions the
+      same way.
+    * Call :func:`pptrepair.rescue.rescue_file`;
+      :class:`pptrepair.repair.OutputExistsError` prints a translated
+      hint to use ``--force`` and returns 2.
+    * A ``NORMAL`` verdict prints a translated "nothing to salvage"
+      notice (no output folder was created) and returns 0.
+    * Otherwise print :func:`_render_salvage_summary` with the *lang*
+      translator, or the report JSON when *json_output* is set.
+    * Exit code: 0 when at least one item was rescued (or the input was
+      already intact), 1 when nothing could be rescued, 2 on usage/IO
+      errors.
+    """
+    path = Path(file)
+    if not path.exists():
+        print(f"pptrepair: error: {file}: no such file", file=sys.stderr)
+        return EXIT_ERROR
+    if not path.is_file():
+        print(f"pptrepair: error: {file}: not a regular file",
+              file=sys.stderr)
+        return EXIT_ERROR
+
+    tr = i18n.get_translator(lang)
+    output_path = Path(output) if output is not None else None
+
+    try:
+        result = rescue_module.rescue_file(
+            path, output_path, force=force, lang=lang)
+    except repair_module.OutputExistsError as exc:
+        print(f"pptrepair: error: {exc}", file=sys.stderr)
+        print(tr("Hint: pass --force to overwrite the existing output."),
+              file=sys.stderr)
+        return EXIT_ERROR
+    except Exception as exc:
+        # Any other pipeline failure (bad input, I/O error) is reported
+        # the way run_check/run_repair report one.
+        print(f"pptrepair: error: {file}: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return EXIT_ERROR
+
+    if result.verdict == Verdict.NORMAL:
+        if json_output:
+            print(json.dumps(result.report, indent=2, ensure_ascii=False))
+        else:
+            print(tr("Nothing to salvage: the file is already an intact "
+                     "PowerPoint package."))
+        return EXIT_OK
+
+    if json_output:
+        print(json.dumps(result.report, indent=2, ensure_ascii=False))
+    else:
+        print(_render_salvage_summary(result, tr))
+
+    return EXIT_OK if result.rescued_count() > 0 else EXIT_CORRUPT
+
+
+def _render_salvage_summary(result: rescue_module.RescueResult,
+                            tr: Callable[[str], str]) -> str:
+    """Render the human-readable per-stage summary of a rescue run."""
+    lines = [tr("=== Salvage summary ===")]
+    if result.output_dir is not None:
+        lines.append(tr("Output: {path}").format(path=result.output_dir))
+    lines.append(tr("Entries recovered: {n}").format(n=result.entries_saved))
+    lines.append(tr("Images carved: {n}").format(n=result.carved_images))
+    lines.append(tr("Partial XML parts: {n}").format(n=result.partial_xml))
+    lines.append(
+        tr("Text lines recovered: {n}").format(n=result.text_lines))
+    if result.carved_images > 0:
+        lines.append(tr("Note: carved images may contain unrelated data "
+                        "that overwrote the file."))
+    if result.rescued_count() == 0:
+        lines.append(tr("Nothing could be salvaged from this file."))
+    if result.warnings:
+        lines.append(tr("Warnings:"))
+        lines.extend(f"  {warning}" for warning in result.warnings)
+    return "\n".join(lines)
 
 
 def run_scan(roots: list[str], report: str | None, force: bool,
@@ -632,6 +745,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "repair":
         return run_repair(args.file, args.output, args.mode, args.force,
                           args.lang, args.json_output)
+    if args.command == "salvage":
+        return run_salvage(args.file, args.output, args.force, args.lang,
+                           args.json_output)
     if args.command == "scan":
         return run_scan(args.roots, args.report, args.force, args.show_all,
                         args.lang, args.json_output, args.follow_symlinks,

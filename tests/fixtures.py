@@ -15,6 +15,7 @@ import io
 import random
 import struct
 import zipfile
+import zlib
 
 #: struct format of the fixed 22-byte EOCD record (including signature).
 _EOCD_STRUCT = "<IHHHHIIH"
@@ -452,6 +453,82 @@ def append_foreign_tail(data: bytes, length: int, seed: int = 1) -> bytes:
     return data + bytes(tail)
 
 
+def build_foreign_zip(entries: dict[str, bytes]) -> bytes:
+    """Build a standalone ZIP that mimics an *unrelated* archive.
+
+    Used to reproduce the real corruption in which fragments of a
+    different ZIP (e.g. a Windows driver package) overwrote the head of
+    a .pptx. Every member is deflate-compressed with a valid CRC, so a
+    local file header scan of the resulting bytes accepts each as a
+    genuine, CRC-valid entry whose name is unknown to the .pptx central
+    directory.
+
+    :param entries: mapping of member name to contents, written in dict
+        iteration order.
+    :return: the complete foreign ZIP archive as bytes.
+    """
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w",
+                         compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, payload in entries.items():
+            zf.writestr(name, payload)
+    return buffer.getvalue()
+
+
+def overlay_foreign_zip_head(data: bytes, boundary: int, foreign_zip: bytes,
+                             insert_at: int = 4096, seed: int = 3) -> bytes:
+    """Overwrite ``data[:boundary]`` with foreign, non-ZIP-headed bytes
+    that embed *foreign_zip* verbatim starting at *insert_at*.
+
+    Reproduces the ``HEAD_FOREIGN_DATA`` super-variant seen in real
+    OneDrive corruption: the leading region is replaced by a synthetic
+    stream whose first bytes are *not* a ZIP signature (so the scanner
+    reports head kind ``"other"``), yet which contains, deeper inside,
+    the intact local file headers of an unrelated ZIP archive. Those
+    foreign headers survive a local-file-header scan as CRC-valid
+    entries the .pptx central directory never listed. The bytes from
+    *boundary* onward (the surviving tail entries plus the central
+    directory and EOCD) are left untouched.
+
+    :param boundary: end (exclusive) of the overwritten region; should
+        be the header offset of a surviving tail entry so no entry
+        straddles the seam.
+    :param foreign_zip: the unrelated archive's bytes (see
+        :func:`build_foreign_zip`).
+    :param insert_at: offset within the overwritten region at which the
+        foreign archive is embedded; must be strictly positive so the
+        head itself stays non-ZIP filler.
+    :param seed: seed for the deterministic non-ZIP filler bytes.
+    :raises ValueError: when the foreign archive does not fit before
+        *boundary*, or *insert_at* is not strictly positive.
+    """
+    if boundary > len(data):
+        raise ValueError("boundary lies beyond the end of the data")
+    if insert_at < 1 or insert_at + len(foreign_zip) > boundary:
+        raise ValueError("foreign archive does not fit before the boundary")
+    region = bytearray(random.Random(seed).randbytes(boundary))
+
+    # Scrub every accidental "PK" so the only ZIP signatures left in the
+    # head region are the foreign archive's own, inserted below.
+    pk = b"PK"
+    search_from = 0
+    while True:
+        idx = region.find(pk, search_from)
+        if idx == -1:
+            break
+        region[idx] = 0x00
+        search_from = idx + 1
+
+    # Force a non-zero, non-ZIP head so the scanner reports head_kind
+    # "other" rather than "zip" or "zeros".
+    region[0:4] = b"\x01\x02\x03\x04"
+
+    # Embed the intact foreign archive after some non-ZIP filler; done
+    # after scrubbing so the foreign headers' own "PK" bytes survive.
+    region[insert_at:insert_at + len(foreign_zip)] = foreign_zip
+    return bytes(region) + data[boundary:]
+
+
 def truncate(data: bytes, length: int) -> bytes:
     """Cut *data* down to its first *length* bytes.
 
@@ -485,6 +562,26 @@ def find_eocd(data: bytes) -> tuple[int, int, int]:
     cd_size = fields[5]
     cd_offset = fields[6]
     return (cd_offset, cd_size, eocd_offset)
+
+
+def lfh_offsets(data: bytes) -> list[int]:
+    """Return every local-file-header (``PK\\x03\\x04``) offset in *data*.
+
+    Offsets are returned in ascending order; used by tests that need to
+    target a specific surviving entry by position.
+    """
+    offsets: list[int] = []
+    idx = data.find(_LFH_SIG)
+    while idx != -1:
+        offsets.append(idx)
+        idx = data.find(_LFH_SIG, idx + 1)
+    return offsets
+
+
+def header_offset(data: bytes, name: str) -> int:
+    """Return the local-file-header offset of member *name* in *data*."""
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        return zf.getinfo(name).header_offset
 
 
 def zero_interior_entry(data: bytes, skip: int = 2) -> bytes:
@@ -601,3 +698,121 @@ def build_zip_with_data_descriptors(entries: dict[str, bytes]) -> bytes:
         for name, data in entries.items():
             zf.writestr(name, data)
     return buffer.getvalue()
+
+
+def build_minimal_jpeg(pad_to: int = 9000) -> bytes:
+    """Build a syntactically valid, walkable JPEG bitstream.
+
+    The marker sequence (SOI, a zero-filled COM used for padding, APP0,
+    DQT, SOF0, SOS with a short 0xFF-free entropy stream, EOI) is
+    complete enough for a structural JPEG walker to trace from start to
+    end. The entropy data deliberately contains no ``0xFF`` byte so no
+    byte-stuffing is needed, and the COM padding contains no ``PK``
+    sequence, so the image can be embedded in foreign data without
+    forging a stray ZIP signature.
+
+    :param pad_to: minimum total size in bytes (padded via the COM
+        segment); defaults above the carver's 8 KiB floor.
+    :return: the complete JPEG as bytes.
+    """
+    soi = b"\xff\xd8"
+    app0 = (b"\xff\xe0" + struct.pack(">H", 16)
+            + b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+    dqt = b"\xff\xdb" + struct.pack(">H", 67) + b"\x00" + bytes(range(1, 65))
+    sof = (b"\xff\xc0" + struct.pack(">H", 17) + b"\x08"
+           + struct.pack(">HH", 1, 1) + b"\x03"
+           + b"\x01\x11\x00\x02\x11\x00\x03\x11\x00")
+    sos = (b"\xff\xda" + struct.pack(">H", 12) + b"\x03"
+           + b"\x01\x00\x02\x11\x03\x11" + b"\x00\x3f\x00")
+    entropy = b"\x11\x22\x33\x44\x55\x66\x77\x00"
+    eoi = b"\xff\xd9"
+    tail = app0 + dqt + sof + sos + entropy + eoi
+
+    pad_payload = max(0, pad_to - len(soi) - len(tail) - 4)
+    com = b"\xff\xfe" + struct.pack(">H", pad_payload + 2) + b"\x00" * pad_payload
+    return soi + com + tail
+
+
+def build_minimal_png(pad_to: int = 9000) -> bytes:
+    """Build a syntactically valid, walkable PNG bitstream.
+
+    Emits the 8-byte signature followed by IHDR, a zero-filled tEXt
+    chunk used for padding, IDAT and IEND, every chunk carrying a correct
+    CRC so a structural PNG walker traces cleanly to IEND.
+
+    :param pad_to: minimum total size in bytes (padded via the tEXt
+        chunk); defaults above the carver's 8 KiB floor.
+    :return: the complete PNG as bytes.
+    """
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+    idat = _png_chunk(b"IDAT", zlib.compress(b"\x00\xff\xff\xff"))
+    iend = _png_chunk(b"IEND", b"")
+
+    fixed = len(sig) + len(ihdr) + len(idat) + len(iend)
+    pad_payload = max(0, pad_to - fixed - 12)  # 12 = chunk length+type+CRC
+    text = _png_chunk(b"tEXt", b"\x00" * pad_payload)
+    return sig + ihdr + text + idat + iend
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    """Return one PNG chunk (length + type + data + CRC-32)."""
+    crc = zlib.crc32(chunk_type + data) & 0xFFFFFFFF
+    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(
+        ">I", crc)
+
+
+def rebuild_with_entries(data: bytes, extra: dict[str, bytes] | None = None,
+                         stored: set[str] = frozenset()) -> bytes:
+    """Rebuild the archive *data*, replacing/adding entries.
+
+    Every original entry is re-emitted in order; a name present in
+    *extra* replaces that entry's payload, and any remaining *extra*
+    names are appended as new entries. Names listed in *stored* are
+    written uncompressed (``ZIP_STORED``), so their raw payload appears
+    verbatim in the resulting bytes -- handy for exercising the image
+    carver against a stored media part.
+
+    :param extra: mapping of member name to replacement/added payload.
+    :param stored: names to write without compression.
+    :return: the rebuilt ZIP archive as bytes.
+    """
+    pending = dict(extra or {})
+    items: list[tuple[str, bytes]] = []
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for info in zf.infolist():
+            name = info.filename
+            payload = pending.pop(name) if name in pending else zf.read(name)
+            items.append((name, payload))
+    items.extend(pending.items())
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w") as zf:
+        for name, payload in items:
+            compress = (zipfile.ZIP_STORED if name in stored
+                        else zipfile.ZIP_DEFLATED)
+            zf.writestr(name, payload, compress_type=compress)
+    return buffer.getvalue()
+
+
+def zero_entry_data_tail(data: bytes, name: str,
+                         keep_fraction: float = 0.6) -> bytes:
+    """Zero the trailing part of one entry's compressed data.
+
+    Keeps the local file header and the leading *keep_fraction* of the
+    entry's compressed payload intact, zeroing the rest. The result
+    mimics interior data damage whose local header survives, so the
+    entry's deflate stream still decodes a readable prefix before
+    breaking -- the exact case partial-XML recovery targets.
+
+    :param name: member whose data tail is zeroed.
+    :param keep_fraction: fraction of the compressed payload to preserve.
+    :return: the damaged archive bytes (length unchanged).
+    """
+    offset = header_offset(data, name)
+    (_sig, _ver, _flags, _method, _mtime, _mdate, _crc, comp_size,
+     _uncomp, name_len, extra_len) = struct.unpack(
+        "<IHHHHHIIIHH", data[offset:offset + 30])
+    data_start = offset + 30 + name_len + extra_len
+    keep = int(comp_size * keep_fraction)
+    return zero_range(data, data_start + keep, data_start + comp_size)

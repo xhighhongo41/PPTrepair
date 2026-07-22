@@ -18,12 +18,18 @@ from pathlib import Path
 
 import pytest
 from fixtures import (
+    build_foreign_zip,
     build_minimal_pptx,
     build_zip_with_data_descriptors,
     find_eocd,
+    foreign_prefix,
+    header_offset,
+    lfh_offsets,
+    overlay_foreign_zip_head,
     truncate,
     version_mix,
     zero_prefix,
+    zero_range,
 )
 
 from pptrepair.census import (
@@ -302,6 +308,63 @@ def test_duplicate_resolution_prefers_cd_then_latest_offset() -> None:
         "duplicate entry name 'lfh_only.xml': kept offset 7000, "
         "dropped offset 6000" in warnings
     )
+
+
+# --- source selection: foreign-ZIP / scattered overwrite -------------------
+
+#: Foreign, CRC-valid entries imitating the driver-package ZIP fragments
+#: found overwriting a real corrupted .pptx (names unknown to its CD).
+_FOREIGN_ENTRIES = {
+    "DTT/drivers/x64/DptfPolicyCritical.dll": b"critical policy driver " * 40,
+    "DTT/drivers/x64/DptfPolicyPassive.dll": b"passive policy driver " * 40,
+    "DTT/drivers/x64/DptfPolicyLpm.dll": b"lpm policy driver blob " * 40,
+}
+
+
+def test_select_foreign_zip_overwrite_excludes_foreign_names(
+    tmp_path: Path,
+) -> None:
+    """FOREIGN_ZIP_OVERWRITE salvage takes CD entries plus only the
+    CD-corroborated LFH entries; a foreign ZIP fragment is never picked."""
+    data = build_minimal_pptx(num_slides=3, media_bytes=100_000)
+    boundary = header_offset(data, "ppt/presProps.xml")
+    foreign_zip = build_foreign_zip(_FOREIGN_ENTRIES)
+    corrupted = overlay_foreign_zip_head(data, boundary, foreign_zip)
+    tail = [off for off in lfh_offsets(corrupted) if off >= boundary]
+    corrupted = zero_range(corrupted, tail[1], tail[2])
+    path = _write(tmp_path, "fz.pptx", corrupted)
+
+    diagnosis = _diagnose(path)
+    assert diagnosis.verdict == Verdict.FOREIGN_ZIP_OVERWRITE
+
+    entries, _warnings = select_salvageable(diagnosis)
+
+    names = {e.name for e in entries}
+    assert entries
+    # No foreign fragment leaks into the salvage set...
+    assert not any(name.startswith("DTT/") for name in names)
+    # ...and every selected entry is one the central directory indexes.
+    assert diagnosis.cd_census is not None
+    cd_names = {e.name for e in diagnosis.cd_census.entries}
+    assert names <= cd_names
+
+
+def test_select_scattered_overwrite_stays_within_central_directory(
+    tmp_path: Path,
+) -> None:
+    """SCATTERED_OVERWRITE never selects an entry the CD does not list."""
+    data = build_minimal_pptx(num_slides=25, media_bytes=4096)
+    cd_offset, _cd_size, _eocd_offset = find_eocd(data)
+    path = _write(tmp_path, "sc.pptx", foreign_prefix(data, cd_offset, seed=5))
+
+    diagnosis = _diagnose(path)
+    assert diagnosis.verdict == Verdict.SCATTERED_OVERWRITE
+
+    entries, _warnings = select_salvageable(diagnosis)
+
+    assert diagnosis.cd_census is not None
+    cd_names = {e.name for e in diagnosis.cd_census.entries}
+    assert {e.name for e in entries} <= cd_names
 
 
 def test_select_normal_and_not_a_zip_are_empty() -> None:

@@ -194,3 +194,49 @@ msgstr "dry-run: 아무것도 기록하지 않았습니다."
 
 msgid "Repairs:"
 msgstr "복구 결과:"
+
+msgid "corrupted: overwritten with fragments of another ZIP archive"
+msgstr "손상됨: 다른 ZIP 아카이브의 조각으로 덮어써졌습니다"
+
+msgid "corrupted: archive body largely overwritten in place"
+msgstr "손상됨: 아카이브 본문의 대부분이 제자리에서 덮어써졌습니다"
+
+msgid "=== Salvage summary ==="
+msgstr "=== 복구 요약 ==="
+
+msgid "Nothing to salvage: the file is already an intact PowerPoint package."
+msgstr "복구할 내용 없음: 이 파일은 이미 온전한 PowerPoint 패키지입니다."
+
+msgid "Entries recovered: {n}"
+msgstr "복구된 항목: {n}개"
+
+msgid "Images carved: {n}"
+msgstr "카빙한 이미지: {n}개"
+
+msgid "Partial XML parts: {n}"
+msgstr "부분 복호화 XML: {n}개"
+
+msgid "Text lines recovered: {n}"
+msgstr "복구된 텍스트 줄 수: {n}줄"
+
+msgid "Note: carved images may contain unrelated data that overwrote the file."
+msgstr "참고: 카빙으로 얻은 이미지에는 파일을 덮어쓴 무관한 데이터가 포함되어 있을 수 있습니다."
+
+msgid "Nothing could be salvaged from this file."
+msgstr "이 파일에서는 아무것도 복구할 수 없었습니다."
+
+msgid "  restore candidate: {path} ({reason})"
+msgstr "  복구 후보: {path} ({reason})"
+
+msgid "  (+{n} more restore candidates)"
+msgstr "  (+{n}개의 복구 후보 더 있음)"
+
+msgid "same name and size"
+msgstr "이름과 크기 동일"
+
+msgid "same size only"
+msgstr "크기만 동일"
+
+msgid "same name only"
+msgstr "이름만 동일"
+

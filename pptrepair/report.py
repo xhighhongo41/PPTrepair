@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Sequence
 
 from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.scanner import ZipStructure
+from pptrepair.twin import TwinCandidate, build_twin_index, find_twin_candidates
 
 if TYPE_CHECKING:  # avoid runtime import cycles with repair / scan / batch
     from pptrepair.batch import BatchItem, BatchResult
@@ -15,7 +16,7 @@ if TYPE_CHECKING:  # avoid runtime import cycles with repair / scan / batch
                                      StructureIntegrityResult,
                                      TimingIntegrityResult)
     from pptrepair.repair import RepairOutcome
-    from pptrepair.scan import ScanResult
+    from pptrepair.scan import FileOutcome, ScanResult
 
 #: URL offered to users who hit an unknown corruption pattern.
 ISSUE_URL = "https://github.com/xhighhongo41/PPTrepair/issues/new/choose"
@@ -37,7 +38,97 @@ VERDICT_LABELS: dict[Verdict, str] = {
         "corrupted: interior region damaged, archive index intact",
     Verdict.TAIL_FOREIGN_DATA:
         "corrupted: intact archive followed by foreign data",
+    Verdict.FOREIGN_ZIP_OVERWRITE:
+        "corrupted: overwritten with fragments of another ZIP archive",
+    Verdict.SCATTERED_OVERWRITE:
+        "corrupted: archive body largely overwritten in place",
 }
+
+#: Number of twin-restoration candidates listed individually per file in
+#: a text report before the remainder collapses into one "+n more" line.
+_TWIN_CANDIDATES_DISPLAY_LIMIT = 3
+
+
+def _twin_reason_label(confidence: str, tr: Callable[[str], str]) -> str:
+    """Return the translated one-line reason for a twin candidate's confidence.
+
+    Each branch calls ``tr()`` with a literal string, matching every
+    other translatable string in this module, so the message extractor
+    (:mod:`tools.extract_messages`, driven by static AST analysis) can
+    find it without a dedicated dynamic-message table.
+    """
+    if confidence == "high":
+        return tr("same name and size")
+    if confidence == "medium":
+        return tr("same size only")
+    return tr("same name only")
+
+
+def _twin_candidates_map(
+    outcomes: "Sequence[FileOutcome]",
+) -> dict[Path, list[TwinCandidate]]:
+    """Map each corrupted file's path to its twin-restoration candidates.
+
+    Builds one :class:`~pptrepair.twin.TwinIndex` from *outcomes* (see
+    :func:`~pptrepair.twin.build_twin_index`) and queries it, via
+    :func:`~pptrepair.twin.find_twin_candidates`, for every outcome
+    whose verdict is not :attr:`Verdict.NORMAL` (an outcome with no
+    ``diagnosis`` -- a failed pipeline -- is skipped). The queried size
+    is ``diagnosis.structure.size``, or None when ``structure`` is
+    None. Only paths with at least one candidate are kept in the
+    returned mapping.
+    """
+    index = build_twin_index(outcomes)
+    candidates_map: dict[Path, list[TwinCandidate]] = {}
+    for outcome in outcomes:
+        diagnosis = outcome.diagnosis
+        if diagnosis is None or diagnosis.verdict == Verdict.NORMAL:
+            continue
+        size = (
+            diagnosis.structure.size if diagnosis.structure is not None
+            else None
+        )
+        candidates = find_twin_candidates(outcome.path, size, index)
+        if candidates:
+            candidates_map[outcome.path] = candidates
+    return candidates_map
+
+
+def _twin_candidate_text_lines(
+    path: Path, twin_map: dict[Path, list[TwinCandidate]],
+    tr: Callable[[str], str],
+) -> list[str]:
+    """Render the indented twin-candidate lines that follow *path*'s own
+    line in a text report.
+
+    Up to :data:`_TWIN_CANDIDATES_DISPLAY_LIMIT` candidates are listed
+    individually, each as a translated ``restore candidate: <path>
+    (<reason>)`` line; any remaining candidates collapse into a single
+    translated ``(+<n> more restore candidates)`` line. Returns an
+    empty list when *path* has no entry in *twin_map*.
+    """
+    candidates = twin_map.get(path, [])
+    shown = candidates[:_TWIN_CANDIDATES_DISPLAY_LIMIT]
+    lines = [
+        tr("  restore candidate: {path} ({reason})").format(
+            path=candidate.path,
+            reason=_twin_reason_label(candidate.confidence, tr))
+        for candidate in shown
+    ]
+    remaining = len(candidates) - len(shown)
+    if remaining > 0:
+        lines.append(
+            tr("  (+{n} more restore candidates)").format(n=remaining))
+    return lines
+
+
+def _twin_candidates_to_json(candidates: list[TwinCandidate]) -> list[dict]:
+    """Render *candidates* as the JSON-schema list for a "twin_candidates" key."""
+    return [
+        {"path": str(candidate.path), "confidence": candidate.confidence,
+         "size": candidate.size}
+        for candidate in candidates
+    ]
 
 
 def render_text(diagnosis: Diagnosis,
@@ -470,9 +561,11 @@ def render_scan_text(result: "ScanResult", tr: Callable[[str], str],
       (not OneDrive corruption);
     * non-zero skip counters: legacy .ppt, Office temp files;
     * ``include_files`` only: a ``Corrupted files:`` section listing
-      ``  - {path}: {verdict}`` per corrupted outcome, and an
-      ``Errors:`` section listing walk errors and per-file pipeline
-      errors as ``  - {path}: {message}``;
+      ``  - {path}: {verdict}`` per corrupted outcome, each immediately
+      followed by that file's twin-restoration candidates, when any
+      (see :func:`_twin_candidate_text_lines`), and an ``Errors:``
+      section listing walk errors and per-file pipeline errors as
+      ``  - {path}: {message}``;
     * **always** when cloud placeholders were skipped (never omitted,
       even on an all-normal scan): ``Not examined: {n} cloud-only
       file(s) were skipped without downloading.`` plus the hint to
@@ -530,10 +623,12 @@ def _scan_summary_lines(result: "ScanResult", tr: Callable[[str], str],
         corrupted = result.corrupted()
         if corrupted:
             lines.append(tr("Corrupted files:"))
-            lines.extend(
-                f"  - {outcome.path}: {outcome.diagnosis.verdict.value}"
-                for outcome in corrupted
-            )
+            twin_map = _twin_candidates_map(result.outcomes)
+            for outcome in corrupted:
+                lines.append(
+                    f"  - {outcome.path}: {outcome.diagnosis.verdict.value}")
+                lines.extend(
+                    _twin_candidate_text_lines(outcome.path, twin_map, tr))
 
         errors = _collect_errors(result)
         if errors:
@@ -605,7 +700,11 @@ def render_scan_json(result: "ScanResult") -> str:
           },
           "files": [{"path": str, "verdict": str, "label": str,
                       "salvage": {...} | null,
-                      "fingerprint": str | null}, ...],
+                      "fingerprint": str | null,
+                      "twin_candidates": [    # present only when >= 1
+                        {"path": str, "confidence": "high" | "medium"
+                                                     | "low", "size": int}
+                      ]}, ...],
           "skipped_cloud": [str, ...],
           "skipped_legacy": [str, ...],
           "skipped_temp": [str, ...],
@@ -631,6 +730,7 @@ def _scan_payload(result: "ScanResult") -> dict:
         if outcome.fingerprint_path is not None
     )
     errors = _collect_errors(result)
+    twin_map = _twin_candidates_map(result.outcomes)
 
     payload = {
         "roots": [str(root) for root in result.roots],
@@ -649,14 +749,7 @@ def _scan_payload(result: "ScanResult") -> dict:
             "fingerprints_skipped": result.fingerprints_skipped,
         },
         "files": [
-            {
-                "path": str(outcome.path),
-                "verdict": outcome.diagnosis.verdict.value,
-                "label": VERDICT_LABELS[outcome.diagnosis.verdict],
-                "salvage": outcome.diagnosis.salvage_summary or None,
-                "fingerprint": str(outcome.fingerprint_path)
-                if outcome.fingerprint_path is not None else None,
-            }
+            _scan_file_entry(outcome, twin_map)
             for outcome in result.outcomes if outcome.diagnosis is not None
         ],
         "skipped_cloud": [str(path) for path in result.walk.skipped_cloud],
@@ -670,6 +763,30 @@ def _scan_payload(result: "ScanResult") -> dict:
         if result.report_dir is not None else None,
     }
     return payload
+
+
+def _scan_file_entry(
+    outcome: "FileOutcome", twin_map: dict[Path, list[TwinCandidate]],
+) -> dict:
+    """Render one diagnosed file's entry in :func:`_scan_payload`'s ``files`` list.
+
+    ``twin_candidates`` is added only when ``outcome.path`` has at
+    least one entry in *twin_map*; a file with none carries no such
+    key at all (see :func:`render_scan_json`'s schema).
+    """
+    assert outcome.diagnosis is not None  # caller filters this out
+    entry = {
+        "path": str(outcome.path),
+        "verdict": outcome.diagnosis.verdict.value,
+        "label": VERDICT_LABELS[outcome.diagnosis.verdict],
+        "salvage": outcome.diagnosis.salvage_summary or None,
+        "fingerprint": str(outcome.fingerprint_path)
+        if outcome.fingerprint_path is not None else None,
+    }
+    candidates = twin_map.get(outcome.path)
+    if candidates:
+        entry["twin_candidates"] = _twin_candidates_to_json(candidates)
+    return entry
 
 
 def render_batch_text(result: "BatchResult", tr: Callable[[str], str],
@@ -706,7 +823,12 @@ def render_batch_text(result: "BatchResult", tr: Callable[[str], str],
       header, when non-empty;
     * *include_files* only: a translated ``Repairs:`` header followed by
       one line per :class:`~pptrepair.batch.BatchItem`, in batch order
-      (see :func:`_repair_item_line`).
+      (see :func:`_repair_item_line`); an ``"unrepairable"``/``"failed"``
+      item's line is immediately followed by that file's
+      twin-restoration candidates, when any (see
+      :func:`_twin_candidate_text_lines`), using the twin index built
+      from ``result.scan.outcomes`` (every diagnosed file, not just the
+      corrupted ones this batch attempted to repair).
     """
     lines = _scan_summary_lines(result.scan, tr, include_files=False)
 
@@ -752,7 +874,13 @@ def render_batch_text(result: "BatchResult", tr: Callable[[str], str],
 
     if include_files:
         lines.append(tr("Repairs:"))
-        lines.extend(_repair_item_line(item) for item in result.items)
+        twin_map = _twin_candidates_map(result.scan.outcomes)
+        for item in result.items:
+            lines.append(_repair_item_line(item))
+            if item.action in ("unrepairable", "failed"):
+                lines.extend(
+                    _twin_candidate_text_lines(
+                        item.source.path, twin_map, tr))
 
     return "\n".join(lines)
 
@@ -804,7 +932,7 @@ def render_batch_json(result: "BatchResult") -> str:
     Schema (stable for tests)::
 
         {
-          "schema_version": 1,
+          "schema_version": 2,
           "dry_run": bool,
           "in_place": bool,
           "output_dir": str | null,      # None in --in-place mode
@@ -827,7 +955,11 @@ def render_batch_json(result: "BatchResult") -> str:
               "lost_slide_numbers": [int, ...],
               "lost_entries_total": int,
               "warnings": [str, ...],
-              "error": str | null
+              "error": str | null,
+              "twin_candidates": [        # "unrepairable"/"failed" only,
+                {"path": str, "confidence": "high" | "medium" | "low",  # present only when >= 1
+                 "size": int}
+              ]
             },
             ...
           ]
@@ -839,10 +971,12 @@ def render_batch_json(result: "BatchResult") -> str:
     whose repair was never executed (``skipped_existing``, ``failed``,
     a CFB ``unrepairable``, or a dry-run ``planned``), every field that
     comes from :class:`~pptrepair.repair.RepairOutcome` is None or an
-    empty list, per the key-by-key null noted above.
+    empty list, per the key-by-key null noted above. ``schema_version``
+    became 2 when ``twin_candidates`` was added.
     """
+    twin_map = _twin_candidates_map(result.scan.outcomes)
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "dry_run": result.dry_run,
         "in_place": result.in_place,
         "output_dir": str(result.output_dir)
@@ -851,23 +985,31 @@ def render_batch_json(result: "BatchResult") -> str:
         "counts": result.counts(),
         "unrepaired_remaining": result.unrepaired_remaining(),
         "warnings": list(result.warnings),
-        "repairs": [_batch_item_to_dict(item) for item in result.items],
+        "repairs": [
+            _batch_item_to_dict(item, twin_map) for item in result.items
+        ],
     }
     return json.dumps(payload, indent=2)
 
 
-def _batch_item_to_dict(item: "BatchItem") -> dict:
+def _batch_item_to_dict(
+    item: "BatchItem", twin_map: dict[Path, list[TwinCandidate]],
+) -> dict:
     """Render one :class:`~pptrepair.batch.BatchItem` as its JSON-schema dict.
 
     See :func:`render_batch_json` for the field-by-field schema; every
     :class:`~pptrepair.repair.RepairOutcome`-derived field falls back to
     None (or an empty list) when ``item.repair`` is None, i.e. the item
     was never handed to :func:`~pptrepair.repair.repair_file`.
+    ``twin_candidates`` is added, mirroring
+    :func:`render_batch_text`'s own restore-candidate lines, only for
+    an ``"unrepairable"``/``"failed"`` item whose source path has at
+    least one candidate in *twin_map*.
     """
     diagnosis = item.source.diagnosis
     assert diagnosis is not None  # corrupted() never yields a failed pipeline
     repair = item.repair
-    return {
+    entry = {
         "path": str(item.source.path),
         "verdict": diagnosis.verdict.value,
         "action": item.action,
@@ -890,3 +1032,8 @@ def _batch_item_to_dict(item: "BatchItem") -> dict:
         "warnings": list(repair.warnings) if repair is not None else [],
         "error": item.error,
     }
+    if item.action in ("unrepairable", "failed"):
+        candidates = twin_map.get(item.source.path)
+        if candidates:
+            entry["twin_candidates"] = _twin_candidates_to_json(candidates)
+    return entry

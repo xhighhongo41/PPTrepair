@@ -2,6 +2,12 @@ msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 
+msgid "  (+{n} more restore candidates)"
+msgstr ""
+
+msgid "  restore candidate: {path} ({reason})"
+msgstr ""
+
 msgid "=== Repair summary ==="
 msgstr ""
 
@@ -192,4 +198,13 @@ msgid "intact PowerPoint package"
 msgstr ""
 
 msgid "not a ZIP-based file"
+msgstr ""
+
+msgid "same name and size"
+msgstr ""
+
+msgid "same name only"
+msgstr ""
+
+msgid "same size only"
 msgstr ""
