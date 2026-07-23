@@ -187,6 +187,26 @@ OneDrive-style chunk corruption overwrites bytes in place and preserves the file
 
 `scan_report.json` carries the same data under `twin_candidates` (with a `high` / `medium` / `low` confidence per candidate), and `repair-all` reports list candidates for every file left unrepaired; its `repair_report.json` `schema_version` is now 2. PPTrepair only points at candidates — verify their content before replacing anything by hand.
 
+### Merging several corrupted copies into one restored file
+
+```console
+$ pptrepair merge main.pptx conflict-copy.pptx            # two or more copies
+$ pptrepair merge main.pptx copy2.pptx old-version.pptx --yes
+```
+
+OneDrive corruption often leaves several differently-damaged copies of the same presentation behind — the working file plus a sync-conflict copy, for example. `merge` reconstructs one file from all of them: the first argument is the file being restored, every further argument is a possible donor. Each archive entry is taken from whichever copy still reproduces the CRC-32 checksum the file's own index recorded for it, so a wrong byte can never be adopted silently; when no single copy holds an entry whole, the pieces are recombined across the 64 KiB boundaries at which this corruption operates.
+
+Sources are vetted before use. An exact same-size copy is used automatically when its index matches closely; a same-size copy with a weaker match, or a *different version* of the same presentation (recognised mainly by byte-identical embedded media), is only used after an interactive confirmation that shows the evidence (`--allow-candidate` / `--yes` skip the prompts, e.g. for scripts).
+
+The result reports its guarantee level:
+
+* `full` — every entry verified; the output is **byte-identical to the original file**;
+* `partial` — everything that could be verified was restored and repackaged; nothing unverified was included;
+* `hybrid` — some parts were filled in from a different version of the presentation and are *not* guaranteed to match the lost original (a warning lists them);
+* `failed` — nothing usable could be reconstructed (exit code 1).
+
+`scan --report` and `repair-all` reports point out merge opportunities: corrupted files sharing an exact byte size are listed as a merge group with a ready-to-run command, and likely other versions appear as `lineage_candidates` with their similarity score. `repair_report.json` `schema_version` is now 3.
+
 ### Reporting unknown corruption patterns
 
 When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `not_a_zip` that is not an encrypted/legacy Office file), running it with `--report` writes one `diagnostics/<id>.diag.json` fingerprint per affected file (at most 20 per run). A fingerprint contains **structural information only** — byte offsets, an entropy profile, ZIP statistics and standardized OOXML part names — never your document's text, images, file name or path. The file's basename is included only if you opt in with `--include-filenames`.
@@ -194,6 +214,11 @@ When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `n
 If you hit an unknown pattern, please review the fingerprint file yourself and consider attaching it to a [new issue](https://github.com/xhighhongo41/PPTrepair/issues/new/choose) using the *Unknown corruption pattern report* template. These reports are what future repair strategies get built from.
 
 ## Changelog
+
+### ver 1.3 (2026-07-23)
+- New `pptrepair merge` command reconstructs one restored file from any number of differently-damaged copies of the same presentation. Every adopted byte range is verified against the CRC-32 recorded by the file's own index (`full` results are byte-identical to the original — proven against a real intact twin), entries surviving in no copy whole are recombined across the 64 KiB corruption boundaries, and *different versions* of the same presentation can donate parts after an interactive confirmation (`hybrid` results clearly mark what came from another version)
+- `scan --report` / `repair-all` reports now list merge groups (same-size corrupted files with a ready-to-run `merge` command) and lineage candidates (likely other versions of a corrupted file, scored by shared embedded media). `repair_report.json` `schema_version` is now 3
+- Package version is now defined in one place (`pptrepair.__version__`) via setuptools dynamic metadata
 
 ### ver 1.2.1.1 (2026-07-22)
 - Fixed `pptrepair --version` (and the `tool_version` field of diagnostic fingerprints) still reporting 1.2.0: the package version string had not been bumped in the 1.2.1 release. No functional changes
