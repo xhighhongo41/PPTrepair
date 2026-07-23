@@ -303,3 +303,24 @@ msgstr "  別バージョン候補: {path}（スコア {score}）"
 msgid "The merge target cannot be a file inside an archive: {path}. Extract it to a plain file and pass that instead."
 msgstr "マージ対象にアーカイブ内のファイルを指定することはできません: {path}。展開してファイルとして指定してください。"
 
+msgid "Evidence:"
+msgstr "根拠:"
+
+msgid "Salvageable: {entries_ok}/{entries_total} entries, {slides_ok}/{slides_total} slides"
+msgstr "復元可能: エントリ {entries_total} 件中 {entries_ok} 件、スライド {slides_total} 枚中 {slides_ok} 枚"
+
+msgid "Reference integrity: {n} unresolved reference(s) in {m} part(s)"
+msgstr "参照整合性: 未解決の参照 {n} 件（{m} パート）"
+
+msgid "PowerPoint may offer a one-time repair on first open."
+msgstr "初回起動時にPowerPointが一度限りの修復を提案する場合があります。"
+
+msgid "Timing integrity: {n} inconsistent reference(s) in {m} part(s)"
+msgstr "タイミング整合性: 不整合な参照 {n} 件（{m} パート）"
+
+msgid "Structure integrity: {n} required relationship(s) missing"
+msgstr "構造整合性: 必須リレーションシップの欠落 {n} 件"
+
+msgid "no {required} relationship"
+msgstr "{required}リレーションシップなし"
+

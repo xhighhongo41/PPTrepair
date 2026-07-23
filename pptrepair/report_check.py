@@ -7,7 +7,7 @@ small; see :mod:`pptrepair.cli_single` for the caller.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from pptrepair.classify import Diagnosis
 from pptrepair.report_common import VERDICT_LABELS
@@ -19,10 +19,16 @@ if TYPE_CHECKING:  # avoid runtime import cycles with integrity
                                      TimingIntegrityResult)
 
 
+def _no_translation(message: str) -> str:
+    """Return *message* unchanged (default translator for ``render_text``)."""
+    return message
+
+
 def render_text(diagnosis: Diagnosis,
                ref_integrity: "RefIntegrityResult | None" = None,
                timing: "TimingIntegrityResult | None" = None,
-               structure: "StructureIntegrityResult | None" = None) -> str:
+               structure: "StructureIntegrityResult | None" = None,
+               tr: "Callable[[str], str] | None" = None) -> str:
     """Render one diagnosis as a human-readable multi-line report.
 
     Layout contract (kept stable for tests):
@@ -51,50 +57,60 @@ def render_text(diagnosis: Diagnosis,
       relationship`` line per missing entry. Omitted when *structure*
       is None or reports nothing missing.
 
-    All three integrity summaries are plain, untranslated English (like
-    the rest of this function's output), since ``check`` never routes
-    its text report through a translator.
+    *tr* is the ``--lang`` translator (:func:`pptrepair.i18n.get_translator`),
+    left at its default None for the plain, untranslated English report
+    (identical to every ``check`` call before ``--lang`` existed). The
+    path, the verdict code and every count/part-name/relationship-type
+    value stay untranslated data either way; only the surrounding
+    descriptive labels/sentences are passed through *tr*.
     """
+    if tr is None:
+        tr = _no_translation
     lines = [f"=== {diagnosis.path} ==="]
-    label = VERDICT_LABELS[diagnosis.verdict]
-    lines.append(f"Verdict: {diagnosis.verdict.value} ({label})")
+    label = tr(VERDICT_LABELS[diagnosis.verdict])
+    lines.append(tr("Verdict: {verdict} ({label})").format(
+        verdict=diagnosis.verdict.value, label=label))
 
     if diagnosis.evidence:
-        lines.append("Evidence:")
+        lines.append(tr("Evidence:"))
         lines.extend(f"  - {item}" for item in diagnosis.evidence)
 
     salvage = diagnosis.salvage_summary
     if salvage:
-        lines.append(
-            f"Salvageable: {salvage['entries_ok']}/{salvage['entries_total']} "
-            f"entries, {salvage['slides_ok']}/{salvage['slides_total']} slides"
-        )
+        lines.append(tr(
+            "Salvageable: {entries_ok}/{entries_total} entries, "
+            "{slides_ok}/{slides_total} slides"
+        ).format(entries_ok=salvage["entries_ok"],
+                 entries_total=salvage["entries_total"],
+                 slides_ok=salvage["slides_ok"],
+                 slides_total=salvage["slides_total"]))
 
     if ref_integrity is not None and ref_integrity.dangling:
         affected_parts = {ref.part for ref in ref_integrity.dangling}
-        lines.append(
-            f"Reference integrity: {len(ref_integrity.dangling)} unresolved "
-            f"reference(s) in {len(affected_parts)} part(s)"
-        )
-        lines.append(
-            "  PowerPoint may offer a one-time repair on first open.")
+        lines.append(tr(
+            "Reference integrity: {n} unresolved reference(s) in {m} "
+            "part(s)"
+        ).format(n=len(ref_integrity.dangling), m=len(affected_parts)))
+        lines.append("  " + tr(
+            "PowerPoint may offer a one-time repair on first open."))
 
     if timing is not None and (timing.dangling or timing.media_mismatch):
         timing_count = len(timing.dangling) + len(timing.media_mismatch)
         affected_parts = {ref.part for ref in timing.dangling} | {
             mismatch.part for mismatch in timing.media_mismatch}
-        lines.append(
-            f"Timing integrity: {timing_count} inconsistent reference(s) "
-            f"in {len(affected_parts)} part(s)"
-        )
+        lines.append(tr(
+            "Timing integrity: {n} inconsistent reference(s) in {m} "
+            "part(s)"
+        ).format(n=timing_count, m=len(affected_parts)))
 
     if structure is not None and structure.missing:
-        lines.append(
-            f"Structure integrity: {len(structure.missing)} required "
-            "relationship(s) missing"
-        )
+        lines.append(tr(
+            "Structure integrity: {n} required relationship(s) missing"
+        ).format(n=len(structure.missing)))
         lines.extend(
-            f"  - {item.part}: no {item.required_type} relationship"
+            f"  - {item.part}: "
+            + tr("no {required} relationship").format(
+                required=item.required_type)
             for item in structure.missing
         )
 

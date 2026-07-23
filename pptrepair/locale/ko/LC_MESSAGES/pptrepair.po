@@ -303,3 +303,24 @@ msgstr "  버전 계보 후보: {path} (점수 {score})"
 msgid "The merge target cannot be a file inside an archive: {path}. Extract it to a plain file and pass that instead."
 msgstr "병합 대상은 아카이브 내부의 파일일 수 없습니다: {path}. 압축을 풀어 일반 파일로 지정하세요."
 
+msgid "Evidence:"
+msgstr "근거:"
+
+msgid "Salvageable: {entries_ok}/{entries_total} entries, {slides_ok}/{slides_total} slides"
+msgstr "복구 가능: 항목 {entries_total}개 중 {entries_ok}개, 슬라이드 {slides_total}장 중 {slides_ok}장"
+
+msgid "Reference integrity: {n} unresolved reference(s) in {m} part(s)"
+msgstr "참조 무결성: {m}개 부분에서 해결되지 않은 참조 {n}개"
+
+msgid "PowerPoint may offer a one-time repair on first open."
+msgstr "PowerPoint에서 처음 열 때 일회성 복구를 제안할 수 있습니다."
+
+msgid "Timing integrity: {n} inconsistent reference(s) in {m} part(s)"
+msgstr "타이밍 무결성: {m}개 부분에서 불일치하는 참조 {n}개"
+
+msgid "Structure integrity: {n} required relationship(s) missing"
+msgstr "구조 무결성: 필요한 관계 {n}개 누락"
+
+msgid "no {required} relationship"
+msgstr "{required} 관계 없음"
+

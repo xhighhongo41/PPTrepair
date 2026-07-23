@@ -26,7 +26,7 @@ from pptrepair.report import (render_json, render_repair_json,
                               render_repair_text, render_text)
 
 
-def run_check(files: list[str], json_output: bool) -> int:
+def run_check(files: list[str], lang: str, json_output: bool) -> int:
     """Diagnose *files*, print reports to stdout, and return an exit code.
 
     Implementation requirements:
@@ -45,8 +45,10 @@ def run_check(files: list[str], json_output: bool) -> int:
       None), since check's exit code never depends on any of them
       either way.
     * With ``json_output`` a single JSON array covering all successfully
-      diagnosed files goes to stdout; otherwise one text report per
-      file.
+      diagnosed files goes to stdout (never translated, like every
+      other command's ``--json`` output); otherwise one text report per
+      file, rendered with :func:`pptrepair.report.render_text` and the
+      *lang* translator.
     * Exit code: 2 on any per-file error, else 1 if any verdict is not
       NORMAL, else 0. None of the three integrity results ever changes
       this: a package with dangling references, timing inconsistencies
@@ -92,12 +94,13 @@ def run_check(files: list[str], json_output: bool) -> int:
     if json_output:
         print(render_json(diagnoses, integrities, timings, structures))
     else:
+        tr = i18n.get_translator(lang)
         for index, diagnosis in enumerate(diagnoses):
             if index > 0:
                 print()
             print(render_text(diagnosis, ref_integrity=integrities[index],
                               timing=timings[index],
-                              structure=structures[index]))
+                              structure=structures[index], tr=tr))
 
     if had_error:
         return EXIT_ERROR

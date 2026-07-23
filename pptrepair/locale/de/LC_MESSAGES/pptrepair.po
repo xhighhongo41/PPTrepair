@@ -303,3 +303,24 @@ msgstr "  Abstammungskandidat: {path} (Wert {score})"
 msgid "The merge target cannot be a file inside an archive: {path}. Extract it to a plain file and pass that instead."
 msgstr "Das Merge-Ziel darf keine Datei innerhalb eines Archivs sein: {path}. Entpacken Sie es zu einer einfachen Datei und geben Sie diese stattdessen an."
 
+msgid "Evidence:"
+msgstr "Belege:"
+
+msgid "Salvageable: {entries_ok}/{entries_total} entries, {slides_ok}/{slides_total} slides"
+msgstr "Rettbar: {entries_ok}/{entries_total} Einträge, {slides_ok}/{slides_total} Folien"
+
+msgid "Reference integrity: {n} unresolved reference(s) in {m} part(s)"
+msgstr "Referenzintegrität: {n} nicht aufgelöste(r) Verweis(e) in {m} Teil(en)"
+
+msgid "PowerPoint may offer a one-time repair on first open."
+msgstr "PowerPoint bietet beim ersten Öffnen möglicherweise eine einmalige Reparatur an."
+
+msgid "Timing integrity: {n} inconsistent reference(s) in {m} part(s)"
+msgstr "Timing-Integrität: {n} inkonsistente(r) Verweis(e) in {m} Teil(en)"
+
+msgid "Structure integrity: {n} required relationship(s) missing"
+msgstr "Strukturintegrität: {n} erforderliche Beziehung(en) fehlend"
+
+msgid "no {required} relationship"
+msgstr "keine {required}-Beziehung"
+

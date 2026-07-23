@@ -67,6 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check.add_argument("files", metavar="FILE", nargs="+",
                        help=".pptx file(s) to examine")
+    check.add_argument("--lang", choices=i18n.SUPPORTED_LANGUAGES,
+                       default=i18n.DEFAULT_LANGUAGE,
+                       help="language of the human-readable report "
+                            "(default: en)")
     check.add_argument("--json", action="store_true", dest="json_output",
                        help="emit a JSON array instead of text reports")
 
@@ -758,7 +762,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "check":
-        return run_check(args.files, args.json_output)
+        return run_check(args.files, args.lang, args.json_output)
     if args.command == "repair":
         return run_repair(args.file, args.output, args.mode, args.force,
                           args.lang, args.json_output)
