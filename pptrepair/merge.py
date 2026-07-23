@@ -39,16 +39,20 @@ document rather than a copy of the same save -- cannot be spliced (its
 byte layout differs), but is used, on request (*allow_lineage*), as an
 entry-level *donor* for any entry no copy could supply. Donor rescue
 runs in two passes. First, when the reference central directory records
-an entry's CRC-32 (the oracle), a donor's same-named entry is adopted as
-verified (``method="donor"``) only when its recorded
-``(CRC-32, uncompressed size)`` matches and its bytes reproduce that
-CRC-32, so the content is provably the original; a donor's edited entry
-is never adopted this verified way. Second, an entry still missing after
-that pass -- typically plumbing XML (``ppt/presentation.xml``,
-``[Content_Types].xml``, ``*.rels``) whose CRC-32 necessarily changes
-between saved versions, so no oracle match was possible -- is adopted
-from a donor on the donor's own CRC-32 alone
-(``method="donor_unverified"``). Degraded mode, lacking any oracle,
+an entry's CRC-32 (the oracle), the donors are searched *by content*,
+not by name: a donor entry whose recorded ``(CRC-32, uncompressed size)``
+equals the reference entry's -- under any name, since PowerPoint may
+renumber ``ppt/slides/slideN.xml`` parts when a slide is inserted -- is
+read and adopted as verified (``method="donor"``) once its bytes
+reproduce that CRC-32, so the content is provably the original. The
+adopted bytes are stored under the *reference* entry's name, so a part
+renamed between versions is restored to its correct position; a donor's
+edited entry, carrying a different CRC-32, is never adopted this verified
+way. Second, an entry still missing after that pass -- typically plumbing
+XML (``ppt/presentation.xml``, ``[Content_Types].xml``, ``*.rels``) whose
+CRC-32 necessarily changes between saved versions, so no oracle match was
+possible -- is adopted from a donor on the donor's own CRC-32 alone, by
+name (``method="donor_unverified"``). Degraded mode, lacking any oracle,
 adopts every donor entry this same unverified way. Adopting even one
 ``donor_unverified`` entry caps the run at the ``"hybrid"`` guarantee --
 structurally rebuilt and part-verified, but not proven byte-identical to
@@ -508,12 +512,14 @@ def _run_splice(
     if any(prov.method == "missing" for prov in provenances):
         # Some entry survived in no copy. Before the rebuild fallback, try
         # to rescue the still-missing entries from lineage donors in two
-        # passes. First pass (oracle-checked): the reference central
-        # directory records each entry's CRC-32, so a donor's same-named
-        # entry is adopted as verified only when it reproduces that exact
-        # value (a donor-side edit is never adopted this way).
+        # passes. First pass (oracle-checked, content-addressed): the
+        # reference central directory records each entry's CRC-32, so a
+        # donor entry whose (CRC-32, uncompressed size) matches -- under
+        # any name, since PowerPoint may renumber slides between versions
+        # -- is adopted as verified once it reproduces that exact value (a
+        # donor-side edit is never adopted this way).
         donor_payloads = _rescue_missing_via_donors(
-            entries, provenances, donor_specs)
+            entries, provenances, donor_specs, notes)
         # Second pass (unverified): an entry still missing -- typically
         # plumbing XML whose CRC-32 necessarily differs between saved
         # versions, so no oracle match was possible -- is adopted from a
@@ -548,38 +554,62 @@ def _run_splice(
 
 def _rescue_missing_via_donors(
         entries: list[_RefEntry], provenances: list[EntryProvenance],
-        donor_specs: list[tuple[Path, Diagnosis, OriginScore]]
+        donor_specs: list[tuple[Path, Diagnosis, OriginScore]],
+        notes: list[str]
 ) -> dict[str, bytes]:
-    """Adopt still-missing entries from lineage donors, oracle-checked.
+    """Adopt still-missing entries from lineage donors, content-addressed.
 
-    For every entry the splice left missing, each donor (in priority
-    order) is asked for a same-named entry whose recorded
-    ``(CRC-32, uncompressed size)`` equals the reference central
-    directory's; its payload is then read and re-verified against that
-    CRC-32 before being accepted (``method="donor"``). A name-only match
-    with a different CRC-32 is a donor-side edit and is never adopted here
-    as ``"donor"``; the second pass (:func:`_rescue_missing_unverified`)
-    may still adopt it, explicitly, as ``"donor_unverified"``. Mutates the
-    matching provenances in place (first donor wins) and returns
-    ``{name: payload}`` for each rescued entry.
+    For every entry the splice left missing, the donors (in priority
+    order) are searched *by content* rather than by name: each donor is
+    indexed as ``(CRC-32, uncompressed size) -> donor-side names``, and
+    the reference entry's recorded ``(CRC-32, uncompressed size)`` is
+    looked up there. A hit means the donor still carries that exact
+    content -- possibly under a different name, since PowerPoint renumbers
+    ``ppt/slides/slideN.xml`` parts when a slide is inserted. Among the
+    hit names a same-named candidate is preferred, otherwise the first by
+    ascending name (kept deterministic); that entry's payload is read and
+    re-verified against the reference CRC-32 before being accepted
+    (``method="donor"``). The bytes are stored under the *reference*
+    entry's name, so a part renamed between versions is restored to its
+    correct position, and a different-name adoption is recorded in
+    *notes*. A donor entry whose content differs (a donor-side edit) never
+    matches the oracle here; the second pass
+    (:func:`_rescue_missing_unverified`) may still adopt it, explicitly,
+    as ``"donor_unverified"``. Mutates the matching provenances in place
+    (first donor wins) and returns ``{name: payload}`` for each rescued
+    entry.
     """
     missing_names = {prov.name for prov in provenances
                      if prov.method == "missing"}
     if not missing_names or not donor_specs:
         return {}
-    # Donors are read only now that a rescue is actually needed.
-    donors = [(donor, donor.recorded())
-              for donor in _build_donors(donor_specs)]
+    # Donors are read only now that a rescue is actually needed. Each is
+    # indexed by content -- (CRC-32, uncompressed size) -> donor-side names
+    # -- so a part renamed between saved versions is still found. Entries
+    # with an unknown recorded CRC-32 or size cannot be content-addressed
+    # and are skipped.
+    donors: list[tuple[_DonorSource, dict[tuple[int, int], list[str]]]] = []
+    for donor in _build_donors(donor_specs):
+        index: dict[tuple[int, int], list[str]] = {}
+        for name, (crc, size) in donor.recorded().items():
+            if crc is None or size is None:
+                continue
+            index.setdefault((crc, size), []).append(name)
+        donors.append((donor, index))
     prov_by_name = {prov.name: prov for prov in provenances}
     rescued: dict[str, bytes] = {}
     for entry in entries:
         if entry.name not in missing_names:
             continue
-        for donor, recorded in donors:
-            pair = recorded.get(entry.name)
-            if pair is None or pair != (entry.crc, entry.file_size):
+        for donor, index in donors:
+            names = index.get((entry.crc, entry.file_size))
+            if not names:
                 continue
-            payload = donor.read(entry.name)
+            # Prefer the same name when the donor also has it there,
+            # otherwise the first by ascending name for a deterministic
+            # choice.
+            donor_name = entry.name if entry.name in names else min(names)
+            payload = donor.read(donor_name)
             if payload is None:
                 continue
             # Belt-and-braces: confirm the read bytes against the oracle
@@ -590,6 +620,12 @@ def _rescue_missing_via_donors(
             prov.method = "donor"
             prov.source = donor.path
             rescued[entry.name] = payload
+            if donor_name != entry.name:
+                # The content survived under a different name (a slide or
+                # media part renumbered between saved versions).
+                notes.append(
+                    f"entry {entry.name} recovered from donor's "
+                    f"{donor_name} (renamed between versions)")
             break
     return rescued
 

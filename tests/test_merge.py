@@ -27,6 +27,16 @@ from pptrepair.repair import OutputExistsError
 
 _LFH_STRUCT = "<IHHHHHIIIHH"
 
+#: A longer replacement slide body used to grow a lineage donor's archive
+#: past the original's size, so :func:`pptrepair.origin.score_origin`
+#: reads the pair as a different *version* rather than an exact copy.
+_LINEAGE_SLIDE1 = (
+    b"<p:sld><p:cSld><p:spTree><p:nvGrpSpPr/><p:grpSpPr/><p:sp>"
+    b"<p:txBody><a:p><a:r><a:t>Edited slide body for the lineage "
+    b"version, padded so the archive size clearly differs.</a:t>"
+    b"</a:r></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+)
+
 
 def _write(tmp_path: Path, name: str, data: bytes) -> Path:
     """Write *data* to ``tmp_path / name`` and return the resulting path."""
@@ -139,6 +149,23 @@ def _lineage_versions(media_bytes: int = 60_000, *, add_jpeg: bool = True,
             original, replace={"ppt/slides/slide1.xml": new_slide + b"X" * 64})
     assert len(version) != len(original)
     return original, version
+
+
+def _media_lineage_original(seed: int = 0) -> bytes:
+    """Return a minimal deck carrying several distinct stored JPEG parts.
+
+    Four JPEGs of differing sizes are attached alongside the base PNG, so
+    a single media part can be renamed or duplicated in a lineage donor
+    while the remaining shared media keep the pair's media ratio -- and
+    thus its lineage score -- above the same-origin threshold.
+    """
+    base = build_minimal_pptx(num_slides=3, media_bytes=60_000, seed=seed)
+    return make_edited_version(base, add={
+        "ppt/media/image1.jpeg": build_minimal_jpeg(pad_to=9000),
+        "ppt/media/image2.jpeg": build_minimal_jpeg(pad_to=9400),
+        "ppt/media/image3.jpeg": build_minimal_jpeg(pad_to=9800),
+        "ppt/media/image4.jpeg": build_minimal_jpeg(pad_to=10200),
+    })
 
 
 def test_complementary_copies_restore_full(tmp_path: Path) -> None:
@@ -745,3 +772,140 @@ def test_entry_absent_from_donor_stays_missing(tmp_path: Path) -> None:
     assert outcome.output_path is not None
     with zipfile.ZipFile(outcome.output_path) as archive:
         assert archive.testzip() is None
+
+
+def test_renumbered_slide_verified_rescue(tmp_path: Path) -> None:
+    """A slide renumbered between versions is rescued by content, verified.
+
+    Both copies destroy ``ppt/slides/slide2.xml`` (its byte range zeroed,
+    central directory and plumbing intact), so the splice cannot recover
+    it. The lineage donor no longer carries that slide under its own name:
+    a slide was inserted before it, so the identical content now lives at
+    ``ppt/slides/slide99.xml`` instead -- the +1 renumbering PowerPoint
+    performs on ``slideN.xml`` parts. The name-only first pass would miss
+    it; the content-addressed pass looks the reference entry's recorded
+    ``(CRC-32, uncompressed size)`` up in the donor and finds it under the
+    new name, adopting it as a verified ``donor`` entry stored back under
+    the *reference* name -- the correct slide position. The rescue is
+    recorded in the notes as a rename, and with no unverified adoption the
+    run stays ``partial``.
+    """
+    original, _ = _lineage_versions()
+    name = "ppt/slides/slide2.xml"
+    donor_name = "ppt/slides/slide99.xml"
+    slide2_bytes = _read_member(original, name)
+    donor = make_edited_version(
+        original, remove=[name],
+        replace={"ppt/slides/slide1.xml": _LINEAGE_SLIDE1},
+        add={donor_name: slide2_bytes})
+    assert len(donor) != len(original)
+
+    start, end = _entry_interval(original, name)
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("zero_range", start, end)],
+        [("zero_range", start, end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    prov = _provenance(outcome, name)
+    assert prov.method == "donor"
+    assert prov.source == path_donor
+    assert prov.sources is None
+    assert outcome.guarantee == "partial"
+    assert outcome.output_path is not None
+    assert _read_member(outcome.output_path.read_bytes(), name) == slide2_bytes
+    assert any(name in note and donor_name in note and "renamed" in note
+               for note in outcome.notes)
+
+
+def test_renamed_media_verified_rescue(tmp_path: Path) -> None:
+    """A media part renamed between versions is rescued by content.
+
+    Both copies destroy ``ppt/media/image1.jpeg``; the lineage donor keeps
+    the identical JPEG bytes, but only under ``ppt/media/image9.jpeg`` (the
+    original name dropped). The content-addressed first pass matches the
+    reference entry's recorded ``(CRC-32, uncompressed size)`` to the
+    renamed donor entry and adopts it as a verified ``donor`` stored back
+    under the reference name, byte-for-byte, noting the rename. Extra
+    shared JPEGs keep the donor a ``lineage`` source despite the renamed
+    media part.
+    """
+    original = _media_lineage_original()
+    name = "ppt/media/image1.jpeg"
+    donor_name = "ppt/media/image9.jpeg"
+    jpeg_bytes = _read_member(original, name)
+    donor = make_edited_version(
+        original, remove=[name],
+        replace={"ppt/slides/slide1.xml": _LINEAGE_SLIDE1},
+        add={donor_name: jpeg_bytes})
+    assert len(donor) != len(original)
+
+    start, end = _entry_interval(original, name)
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("zero_range", start, end)],
+        [("zero_range", start, end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    prov = _provenance(outcome, name)
+    assert prov.method == "donor"
+    assert prov.source == path_donor
+    assert outcome.guarantee == "partial"
+    assert outcome.output_path is not None
+    assert _read_member(outcome.output_path.read_bytes(), name) == jpeg_bytes
+    assert any(name in note and donor_name in note and "renamed" in note
+               for note in outcome.notes)
+
+
+def test_same_name_preferred_over_renamed_duplicate(tmp_path: Path) -> None:
+    """When a donor holds the content under both names, the same one wins.
+
+    Both copies destroy ``ppt/media/image1.jpeg``; the lineage donor keeps
+    that exact content under *both* ``ppt/media/image1.jpeg`` and a
+    duplicate ``ppt/media/image9.jpeg``. The content lookup therefore hits
+    two candidate names, and the same-named one must be preferred, so the
+    adoption records no rename note -- the deterministic tie-break that
+    keeps an unchanged part reported as itself rather than as a rename.
+    """
+    original = _media_lineage_original()
+    name = "ppt/media/image1.jpeg"
+    dup_name = "ppt/media/image9.jpeg"
+    jpeg_bytes = _read_member(original, name)
+    donor = make_edited_version(
+        original,
+        replace={"ppt/slides/slide1.xml": _LINEAGE_SLIDE1},
+        add={dup_name: jpeg_bytes})
+    assert len(donor) != len(original)
+    assert _read_member(donor, name) == _read_member(donor, dup_name)
+
+    start, end = _entry_interval(original, name)
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("zero_range", start, end)],
+        [("zero_range", start, end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    prov = _provenance(outcome, name)
+    assert prov.method == "donor"
+    assert prov.source == path_donor
+    assert _read_member(outcome.output_path.read_bytes(), name) == jpeg_bytes
+    assert not any("renamed" in note for note in outcome.notes)
+    assert not any(dup_name in note for note in outcome.notes)
