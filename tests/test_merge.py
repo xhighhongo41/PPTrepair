@@ -533,14 +533,17 @@ def test_lineage_donor_supplies_missing_entry(tmp_path: Path) -> None:
         _read_member(original, name)
 
 
-def test_lineage_donor_skips_edited_entry(tmp_path: Path) -> None:
-    """A donor's edited entry is never mixed into the restoration.
+def test_lineage_donor_edited_entry_adopted_unverified(
+        tmp_path: Path) -> None:
+    """A donor's edited entry is adopted unverified, never as verified donor.
 
     The entry broken in every copy is the very slide the donor edited, so
     the donor's copy carries a different CRC-32 than the reference central
-    directory recorded. It is therefore rejected: the entry stays missing
-    and, if the rebuilt package lists it at all, its bytes never match the
-    donor's edited version.
+    directory recorded. The oracle-checked first pass therefore refuses it
+    as a ``"donor"``; the second pass adopts it on the donor's own CRC-32
+    alone as ``"donor_unverified"``, which caps the run at ``"hybrid"``.
+    The rebuilt output then holds the donor's edited version of the entry,
+    explicitly marked as an unverified adoption.
     """
     original, donor = _lineage_versions()
     name = "ppt/slides/slide1.xml"  # the slide the donor edited
@@ -557,16 +560,14 @@ def test_lineage_donor_skips_edited_entry(tmp_path: Path) -> None:
         [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
         allow_lineage=True)
 
-    assert _provenance(outcome, name).method == "missing"
-    assert not any(
-        prov.method in ("donor", "donor_unverified")
-        for prov in outcome.provenances)
+    prov = _provenance(outcome, name)
+    assert prov.method == "donor_unverified"
+    assert prov.source == path_donor
+    assert not any(other.method == "donor" for other in outcome.provenances)
+    assert outcome.guarantee == "hybrid"
     assert outcome.output_path is not None
     out_bytes = outcome.output_path.read_bytes()
-    with zipfile.ZipFile(io.BytesIO(out_bytes)) as archive:
-        present = name in set(archive.namelist())
-    if present:
-        assert _read_member(out_bytes, name) != _read_member(donor, name)
+    assert _read_member(out_bytes, name) == _read_member(donor, name)
 
 
 def test_degraded_lineage_donor_is_hybrid(tmp_path: Path) -> None:
@@ -660,3 +661,87 @@ def test_lineage_donor_unused_on_full_restore(tmp_path: Path) -> None:
     assert not any(
         prov.method in ("donor", "donor_unverified")
         for prov in outcome.provenances)
+
+
+def test_plumbing_xml_donor_unverified_is_hybrid(tmp_path: Path) -> None:
+    """Broken plumbing XML with a readable CD is rescued unverified (hybrid).
+
+    Both copies keep their central directory (the oracle survives) but
+    zero out ``ppt/presentation.xml``. A lineage donor carries that part,
+    yet with a different CRC-32 -- the real-world case where every
+    plumbing XML part (presentation/content-types/rels) changes between
+    saved versions. The oracle-checked first pass therefore cannot adopt
+    it; the second pass adopts it on the donor's own CRC-32 alone
+    (``donor_unverified``), which caps the run at ``hybrid`` while still
+    producing a self-checking archive that carries the required parts.
+
+    The donor's ``ppt/presentation.xml`` is given a distinct CRC-32 here
+    by inserting a harmless XML comment, since the shared
+    :func:`_lineage_versions` helper edits only ``slide1`` and would
+    otherwise leave every plumbing part byte-identical to the original
+    (an oracle match, adopted as a verified ``donor``).
+    """
+    original, base_donor = _lineage_versions()
+    pres_name = "ppt/presentation.xml"
+    edited_pres = _read_member(base_donor, pres_name).replace(
+        b"</p:presentation>", b"<!-- lineage version --></p:presentation>")
+    assert edited_pres != _read_member(base_donor, pres_name)
+    donor = make_edited_version(base_donor, replace={pres_name: edited_pres})
+
+    start, end = _entry_interval(original, pres_name)
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("zero_range", start, end)],
+        [("zero_range", start, end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    prov = _provenance(outcome, pres_name)
+    assert prov.method == "donor_unverified"
+    assert prov.source == path_donor
+    assert outcome.guarantee == "hybrid"
+    assert outcome.output_path is not None
+    with zipfile.ZipFile(outcome.output_path) as archive:
+        assert archive.testzip() is None
+        names = set(archive.namelist())
+    assert {pres_name, "[Content_Types].xml", "_rels/.rels"} <= names
+    assert any(n.startswith("ppt/slides/slide") for n in names)
+
+
+def test_entry_absent_from_donor_stays_missing(tmp_path: Path) -> None:
+    """An entry no copy and no donor carries is reported missing, not adopted.
+
+    The entry broken in every copy (slide3) is one the lineage donor
+    dropped entirely, so neither rescue pass can supply it: it stays
+    ``missing`` while the rebuild fallback prunes its dangling references
+    and still emits a self-checking archive from the parts that survived.
+    """
+    original, base_donor = _lineage_versions()
+    name = "ppt/slides/slide3.xml"
+    donor = make_edited_version(base_donor, remove=[name])
+    with zipfile.ZipFile(io.BytesIO(donor)) as archive:
+        assert name not in set(archive.namelist())
+
+    start, end = _entry_interval(original, name)
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("zero_range", start, end)],
+        [("zero_range", start, end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    assert _provenance(outcome, name).method == "missing"
+    assert outcome.guarantee in ("partial", "hybrid")
+    assert outcome.output_path is not None
+    with zipfile.ZipFile(outcome.output_path) as archive:
+        assert archive.testzip() is None

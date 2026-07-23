@@ -37,15 +37,22 @@ reference layout exists to guarantee byte identity.
 A ``lineage``-tier source -- a *different saved version* of the same
 document rather than a copy of the same save -- cannot be spliced (its
 byte layout differs), but is used, on request (*allow_lineage*), as an
-entry-level *donor*. When the reference central directory records an
-entry's CRC-32 (the oracle), a donor's same-named entry is adopted only
-when its recorded ``(CRC-32, uncompressed size)`` matches and its bytes
-reproduce that CRC-32, so the content is provably the original
-(``method="donor"``). In degraded mode no such oracle survives, so a
-donor entry is adopted on its own recorded CRC-32 alone
-(``method="donor_unverified"``); adopting even one such entry caps the
-run at the ``"hybrid"`` guarantee -- structurally rebuilt and
-part-verified, but not proven byte-identical to the original.
+entry-level *donor* for any entry no copy could supply. Donor rescue
+runs in two passes. First, when the reference central directory records
+an entry's CRC-32 (the oracle), a donor's same-named entry is adopted as
+verified (``method="donor"``) only when its recorded
+``(CRC-32, uncompressed size)`` matches and its bytes reproduce that
+CRC-32, so the content is provably the original; a donor's edited entry
+is never adopted this verified way. Second, an entry still missing after
+that pass -- typically plumbing XML (``ppt/presentation.xml``,
+``[Content_Types].xml``, ``*.rels``) whose CRC-32 necessarily changes
+between saved versions, so no oracle match was possible -- is adopted
+from a donor on the donor's own CRC-32 alone
+(``method="donor_unverified"``). Degraded mode, lacking any oracle,
+adopts every donor entry this same unverified way. Adopting even one
+``donor_unverified`` entry caps the run at the ``"hybrid"`` guarantee --
+structurally rebuilt and part-verified, but not proven byte-identical to
+the original.
 
 Same-origin scoring only *selects* candidates and donors; the safety of
 every adopted byte range is decided by its per-entry CRC-32, so
@@ -120,8 +127,14 @@ class EntryProvenance:
     could not be recovered from any source. For a ``crossover`` adoption
     this is the copy that supplied the first segment (``sources[0]``); for
     a ``donor`` / ``donor_unverified`` adoption it is the donor file."""
-    method: str  # "direct" | "crossover" | "donor" | "donor_unverified"
-    #                | "missing"
+    method: str
+    """How the entry was recovered: ``"direct"`` (one copy's byte range),
+    ``"crossover"`` (a range spliced across copies), ``"donor"`` (a
+    lineage donor entry proven original against the reference oracle),
+    ``"donor_unverified"`` (a lineage donor entry trusted on the donor's
+    own CRC-32 alone -- in splice mode for a still-missing entry the
+    oracle could not match, such as plumbing XML, and always in degraded
+    mode), or ``"missing"`` (recovered from no source)."""
     sources: tuple[Path, ...] | None = None
     """For a ``crossover`` adoption, the copy each spliced segment was
     taken from, in order; None for every other method (a ``donor`` entry
@@ -135,9 +148,11 @@ class MergeOutcome:
     output_path: Path | None
     guarantee: str  # "full" | "partial" | "hybrid" | "failed"
     """``"hybrid"`` marks a rebuilt output into which at least one
-    ``donor_unverified`` entry was adopted: part-verified against the
-    donor's own CRC-32 but, lacking a reference oracle, not proven
-    byte-identical to the original."""
+    ``donor_unverified`` entry was adopted -- part-verified against the
+    donor's own CRC-32 but not proven byte-identical to the original,
+    whether because the reference oracle's CRC-32 could not be matched
+    (plumbing XML that always changes between versions) or because no
+    reference oracle survived at all (degraded mode)."""
     provenances: list[EntryProvenance]
     scores: list[OriginScore]
     """Same-origin score of each scored non-target source, in source
@@ -162,13 +177,15 @@ def merge_restore(
 
     When *allow_lineage* is set, ``lineage``-tier sources (different saved
     versions of the same document) are used as entry-level donors for any
-    entry no copy could supply: with the reference central directory as an
-    oracle a donor entry is adopted only when it reproduces the recorded
-    CRC-32 (``method="donor"``, guarantee unchanged), while in degraded
-    mode it is adopted on the donor's own CRC-32 alone
-    (``method="donor_unverified"``), which downgrades the run to
-    ``"hybrid"``. Without the flag a ``lineage``-tier source is only noted
-    as unused.
+    entry no copy could supply, in two passes: with the reference central
+    directory as an oracle a donor entry is first adopted as verified
+    (``method="donor"``, guarantee unchanged) only when it reproduces the
+    recorded CRC-32; an entry still missing afterwards -- plumbing XML
+    whose CRC-32 always differs between versions -- is then adopted on the
+    donor's own CRC-32 alone (``method="donor_unverified"``), which
+    downgrades the run to ``"hybrid"``. Degraded mode adopts every donor
+    entry this second, unverified way. Without the flag a ``lineage``-tier
+    source is only noted as unused.
 
     *output* defaults to ``<target-stem>.merged.pptx`` next to the target;
     an existing path raises :class:`pptrepair.repair.OutputExistsError`
@@ -490,12 +507,20 @@ def _run_splice(
 
     if any(prov.method == "missing" for prov in provenances):
         # Some entry survived in no copy. Before the rebuild fallback, try
-        # to rescue the still-missing entries from lineage donors: the
-        # reference central directory records each entry's CRC-32, so a
-        # donor's same-named entry is adopted only when it reproduces that
-        # exact value (a donor-side edit is never mixed in).
+        # to rescue the still-missing entries from lineage donors in two
+        # passes. First pass (oracle-checked): the reference central
+        # directory records each entry's CRC-32, so a donor's same-named
+        # entry is adopted as verified only when it reproduces that exact
+        # value (a donor-side edit is never adopted this way).
         donor_payloads = _rescue_missing_via_donors(
             entries, provenances, donor_specs)
+        # Second pass (unverified): an entry still missing -- typically
+        # plumbing XML whose CRC-32 necessarily differs between saved
+        # versions, so no oracle match was possible -- is adopted from a
+        # donor on the donor's own CRC-32 alone, which caps the run at the
+        # ``"hybrid"`` guarantee below.
+        donor_payloads.update(
+            _rescue_missing_unverified(entries, provenances, donor_specs))
         # Hand every recovered entry -- spliced or donor-supplied -- to the
         # ordinary rebuild pipeline, which prunes the dangling references.
         items: list[tuple[str, bytes, int]] = []
@@ -508,6 +533,12 @@ def _run_splice(
                     (entry.name, donor_payloads[entry.name],
                      entry.compress_type))
         guarantee, out = _rebuild_from_entries(items, output_path, notes)
+        if guarantee == "partial" and any(
+                prov.method == "donor_unverified" for prov in provenances):
+            # An unverified donor adoption mirrors the degraded path:
+            # structurally rebuilt and part-verified, but not proven
+            # byte-identical to the original.
+            guarantee = "hybrid"
         return out, guarantee, provenances
 
     return _write_full_output(
@@ -526,9 +557,10 @@ def _rescue_missing_via_donors(
     ``(CRC-32, uncompressed size)`` equals the reference central
     directory's; its payload is then read and re-verified against that
     CRC-32 before being accepted (``method="donor"``). A name-only match
-    with a different CRC-32 is a donor-side edit and is never adopted, so
-    the reference oracle rules out an unverified adoption here. Mutates
-    the matching provenances in place (first donor wins) and returns
+    with a different CRC-32 is a donor-side edit and is never adopted here
+    as ``"donor"``; the second pass (:func:`_rescue_missing_unverified`)
+    may still adopt it, explicitly, as ``"donor_unverified"``. Mutates the
+    matching provenances in place (first donor wins) and returns
     ``{name: payload}`` for each rescued entry.
     """
     missing_names = {prov.name for prov in provenances
@@ -556,6 +588,49 @@ def _rescue_missing_via_donors(
                 continue
             prov = prov_by_name[entry.name]
             prov.method = "donor"
+            prov.source = donor.path
+            rescued[entry.name] = payload
+            break
+    return rescued
+
+
+def _rescue_missing_unverified(
+        entries: list[_RefEntry], provenances: list[EntryProvenance],
+        donor_specs: list[tuple[Path, Diagnosis, OriginScore]]
+) -> dict[str, bytes]:
+    """Adopt still-missing entries from donors on the donor's CRC alone.
+
+    Runs after :func:`_rescue_missing_via_donors`, over the entries the
+    oracle-checked first pass still left missing -- typically the plumbing
+    XML (``ppt/presentation.xml``, ``[Content_Types].xml``, ``*.rels``)
+    whose recorded CRC-32 necessarily changes between saved versions, so
+    no ``(CRC-32, uncompressed size)`` match with the reference central
+    directory was possible. For each, the donors (in priority order) are
+    asked for a same-named entry, adopted on the donor's own CRC-32 alone
+    -- the same verification level as the degraded path's
+    :func:`_rescue_union_via_donors` -- as ``method="donor_unverified"``
+    (first donor wins). The content is explicitly *not* proven identical
+    to the original, so adopting even one such entry caps the run at the
+    ``"hybrid"`` guarantee; a donor that lacks the entry leaves it
+    missing. Mutates the matching provenances in place and returns
+    ``{name: payload}`` for each rescued entry.
+    """
+    missing_names = {prov.name for prov in provenances
+                     if prov.method == "missing"}
+    if not missing_names or not donor_specs:
+        return {}
+    donors = _build_donors(donor_specs)
+    prov_by_name = {prov.name: prov for prov in provenances}
+    rescued: dict[str, bytes] = {}
+    for entry in entries:
+        if entry.name not in missing_names:
+            continue
+        for donor in donors:
+            payload = donor.read(entry.name)
+            if payload is None:
+                continue
+            prov = prov_by_name[entry.name]
+            prov.method = "donor_unverified"
             prov.source = donor.path
             rescued[entry.name] = payload
             break
