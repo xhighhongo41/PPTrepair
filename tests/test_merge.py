@@ -168,6 +168,39 @@ def test_complementary_copies_restore_full(tmp_path: Path) -> None:
     assert _provenance(outcome, "ppt/slides/slide1.xml").source == path_a
 
 
+def test_three_copies_each_sole_survivor_restore_full(
+        tmp_path: Path) -> None:
+    """Three copies, each the sole survivor of one entry, still merge full.
+
+    ``merge_restore`` takes any number of sources, not just a pair. Here
+    every damaged entry survives in exactly *one* of three copies (media
+    only in B, slide1 only in C, slide2 only in A), so a byte-identical
+    reconstruction is only possible when the splice draws on all three --
+    which the per-entry provenances then prove it did.
+    """
+    data = build_minimal_pptx(num_slides=3, media_bytes=200_000)
+    media = _entry_interval(data, "ppt/media/image1.png")
+    slide1 = _entry_interval(data, "ppt/slides/slide1.xml")
+    slide2 = _entry_interval(data, "ppt/slides/slide2.xml")
+    copy_a, copy_b, copy_c = make_corrupted_copies(data, [
+        [("zero_range", *media), ("zero_range", *slide1)],
+        [("zero_range", *slide1), ("zero_range", *slide2)],
+        [("zero_range", *media), ("zero_range", *slide2)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_c = _write(tmp_path, "c.pptx", copy_c)
+
+    outcome = merge_restore([path_a, path_b, path_c],
+                            output=tmp_path / "out.pptx")
+
+    assert outcome.guarantee == "full"
+    assert outcome.output_path.read_bytes() == data
+    assert _provenance(outcome, "ppt/media/image1.png").source == path_b
+    assert _provenance(outcome, "ppt/slides/slide1.xml").source == path_c
+    assert _provenance(outcome, "ppt/slides/slide2.xml").source == path_a
+
+
 def test_same_length_truncated_pair_degrades_to_partial(
         tmp_path: Path) -> None:
     """Two equally truncated copies (both CD lost) degrade to partial.
