@@ -24,30 +24,21 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Callable
 
 import pptrepair
-from pptrepair import batch as batch_module
+from pptrepair import archive as archive_module
 from pptrepair import i18n
 from pptrepair import merge as merge_module
 from pptrepair import repair as repair_module
-from pptrepair import rescue as rescue_module
 from pptrepair import scan as scan_module
-from pptrepair.classify import Diagnosis, Verdict
-from pptrepair.integrity import (RefIntegrityResult, StructureIntegrityResult,
-                                 TimingIntegrityResult, inspect_references,
-                                 inspect_structure, inspect_timing)
+from pptrepair.classify import Diagnosis
+from pptrepair.cli_batch import run_repair_all, run_scan
+from pptrepair.cli_single import run_check, run_repair, run_salvage
+from pptrepair.exit_codes import EXIT_CORRUPT, EXIT_ERROR, EXIT_OK
 from pptrepair.origin import OriginScore, score_origin
-from pptrepair.rebuild import RebuildError
-from pptrepair.report import (render_batch_json, render_batch_text,
-                              render_json, render_repair_json,
-                              render_repair_text, render_scan_json,
-                              render_scan_text, render_text)
-
-EXIT_OK = 0
-EXIT_CORRUPT = 1
-EXIT_ERROR = 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,6 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check.add_argument("files", metavar="FILE", nargs="+",
                        help=".pptx file(s) to examine")
+    check.add_argument("--lang", choices=i18n.SUPPORTED_LANGUAGES,
+                       default=i18n.DEFAULT_LANGUAGE,
+                       help="language of the human-readable report "
+                            "(default: en)")
     check.add_argument("--json", action="store_true", dest="json_output",
                        help="emit a JSON array instead of text reports")
 
@@ -214,6 +209,14 @@ def build_parser() -> argparse.ArgumentParser:
                           "and may take long and use significant disk "
                           "space (default: skip them without downloading)"
                       ))
+    scan.add_argument("--search-archives", action="store_true",
+                      help=(
+                          "also mine backup archives (zip/tar) found while "
+                          "walking for intact twins or older versions of "
+                          "corrupted files, offered as restore candidates "
+                          "only; archived files are never counted or "
+                          "repaired (default: ignore archives)"
+                      ))
 
     repair_all = subparsers.add_parser(
         "repair-all",
@@ -275,250 +278,16 @@ def build_parser() -> argparse.ArgumentParser:
                                 "significant disk space (default: skip "
                                 "them without downloading)"
                             ))
+    repair_all.add_argument("--search-archives", action="store_true",
+                            help=(
+                                "also mine backup archives (zip/tar) found "
+                                "while walking for intact twins or older "
+                                "versions of corrupted files, offered as "
+                                "restore candidates only; archived files "
+                                "are never counted or repaired (default: "
+                                "ignore archives)"
+                            ))
     return parser
-
-
-def run_check(files: list[str], json_output: bool) -> int:
-    """Diagnose *files*, print reports to stdout, and return an exit code.
-
-    Implementation requirements:
-
-    * Run the scanner -> census -> classify pipeline per file.
-    * A nonexistent or unreadable path prints an error to stderr and
-      forces exit code 2, but remaining files are still processed.
-    * A file diagnosed as NORMAL is additionally passed through
-      :func:`pptrepair.integrity.inspect_references`,
-      :func:`pptrepair.integrity.inspect_timing` and
-      :func:`pptrepair.integrity.inspect_structure`; an unexpected
-      failure in any of the three is reported the same way as a
-      diagnosis failure (stderr + exit code 2), with all three results
-      falling back to None, but does not stop the remaining files. Any
-      other verdict skips this pass entirely (all three results stay
-      None), since check's exit code never depends on any of them
-      either way.
-    * With ``json_output`` a single JSON array covering all successfully
-      diagnosed files goes to stdout; otherwise one text report per
-      file.
-    * Exit code: 2 on any per-file error, else 1 if any verdict is not
-      NORMAL, else 0. None of the three integrity results ever changes
-      this: a package with dangling references, timing inconsistencies
-      or missing structural relationships is still reported as normal
-      (see ``開発資料/v1.1.2実装計画.md`` §4.3 and §10 addendum item C
-      for the rationale).
-    """
-    had_error = False
-    diagnoses: list[Diagnosis] = []
-    integrities: list[RefIntegrityResult | None] = []
-    timings: list[TimingIntegrityResult | None] = []
-    structures: list[StructureIntegrityResult | None] = []
-
-    for file in files:
-        diagnosis, error_message = _diagnose_file(file)
-        if error_message is not None:
-            print(f"pptrepair: error: {error_message}", file=sys.stderr)
-            had_error = True
-            continue
-        assert diagnosis is not None
-        diagnoses.append(diagnosis)
-
-        integrity: RefIntegrityResult | None = None
-        timing: TimingIntegrityResult | None = None
-        structure: StructureIntegrityResult | None = None
-        if diagnosis.verdict == Verdict.NORMAL:
-            try:
-                integrity = inspect_references(Path(file))
-                timing = inspect_timing(Path(file))
-                structure = inspect_structure(Path(file))
-            except Exception as exc:
-                # Defensive: a verdict of NORMAL already implies the
-                # archive opened cleanly once, so this should not
-                # normally trigger.
-                print(f"pptrepair: error: {file}: "
-                      f"{type(exc).__name__}: {exc}", file=sys.stderr)
-                had_error = True
-                integrity = timing = structure = None
-        integrities.append(integrity)
-        timings.append(timing)
-        structures.append(structure)
-
-    if json_output:
-        print(render_json(diagnoses, integrities, timings, structures))
-    else:
-        for index, diagnosis in enumerate(diagnoses):
-            if index > 0:
-                print()
-            print(render_text(diagnosis, ref_integrity=integrities[index],
-                              timing=timings[index],
-                              structure=structures[index]))
-
-    if had_error:
-        return EXIT_ERROR
-    if any(diagnosis.verdict != Verdict.NORMAL for diagnosis in diagnoses):
-        return EXIT_CORRUPT
-    return EXIT_OK
-
-
-def _diagnose_file(file: str) -> tuple[Diagnosis | None, str | None]:
-    """Run the scan/census/classify pipeline on one file.
-
-    Returns ``(diagnosis, None)`` on success, or ``(None, message)`` when
-    the path is unusable or the pipeline raises; *message* is meant to
-    be printed to stderr and never includes the ``pptrepair: error:``
-    prefix (added by the caller). The pipeline itself lives in
-    :func:`pptrepair.scan.diagnose_file`, shared with ``scan``.
-    """
-    return scan_module.diagnose_file(Path(file))
-
-
-def run_repair(file: str, output: str | None, mode: str, force: bool,
-               lang: str, json_output: bool) -> int:
-    """Repair one file, print the report, and return an exit code.
-
-    Implementation requirements:
-
-    * Validate the input path like ``run_check`` (stderr + exit 2 on a
-      missing/non-regular file); catch unexpected pipeline exceptions
-      the same way.
-    * Call :func:`pptrepair.repair.repair_file`;
-      :class:`pptrepair.repair.OutputExistsError` prints a translated
-      hint to use ``--force`` and returns 2;
-      :class:`pptrepair.rebuild.RebuildError` (forced rebuild without a
-      presentation part) reports an unrepairable input and returns 1.
-    * Print :func:`pptrepair.report.render_repair_json` when
-      *json_output* is set, otherwise
-      :func:`pptrepair.report.render_repair_text` with the *lang*
-      translator; in extract mode also write that text as
-      ``REPORT.txt`` inside the recovery folder (UTF-8).
-    * Exit code: 0 when ``outcome.success`` (artifact produced, or the
-      input was already intact), 1 when nothing was recoverable, 2 on
-      usage/IO errors.
-    """
-    path = Path(file)
-    if not path.exists():
-        print(f"pptrepair: error: {file}: no such file", file=sys.stderr)
-        return EXIT_ERROR
-    if not path.is_file():
-        print(f"pptrepair: error: {file}: not a regular file",
-              file=sys.stderr)
-        return EXIT_ERROR
-
-    tr = i18n.get_translator(lang)
-    output_path = Path(output) if output is not None else None
-
-    try:
-        outcome = repair_module.repair_file(
-            path, output_path, mode, force, lang)
-    except repair_module.OutputExistsError as exc:
-        print(f"pptrepair: error: {exc}", file=sys.stderr)
-        print(tr("Hint: pass --force to overwrite the existing output."),
-              file=sys.stderr)
-        return EXIT_ERROR
-    except RebuildError as exc:
-        print(f"pptrepair: error: unrepairable: {exc}", file=sys.stderr)
-        return EXIT_CORRUPT
-    except Exception as exc:
-        # Any other pipeline failure (bad input, I/O error while reading
-        # or writing) is reported the same way run_check reports one.
-        print(f"pptrepair: error: {file}: {type(exc).__name__}: {exc}",
-              file=sys.stderr)
-        return EXIT_ERROR
-
-    if json_output:
-        print(render_repair_json(outcome))
-    else:
-        text = render_repair_text(outcome, tr)
-        print(text)
-        if outcome.mode == "extract" and outcome.success:
-            assert outcome.output_path is not None
-            report_path = outcome.output_path / "REPORT.txt"
-            report_path.write_text(text, encoding="utf-8")
-
-    return EXIT_OK if outcome.success else EXIT_CORRUPT
-
-
-def run_salvage(file: str, output: str | None, force: bool, lang: str,
-                json_output: bool) -> int:
-    """Rescue surviving content from one file and return an exit code.
-
-    Implementation requirements:
-
-    * Validate the input path like ``run_repair`` (stderr + exit 2 on a
-      missing/non-regular file); catch unexpected pipeline exceptions the
-      same way.
-    * Call :func:`pptrepair.rescue.rescue_file`;
-      :class:`pptrepair.repair.OutputExistsError` prints a translated
-      hint to use ``--force`` and returns 2.
-    * A ``NORMAL`` verdict prints a translated "nothing to salvage"
-      notice (no output folder was created) and returns 0.
-    * Otherwise print :func:`_render_salvage_summary` with the *lang*
-      translator, or the report JSON when *json_output* is set.
-    * Exit code: 0 when at least one item was rescued (or the input was
-      already intact), 1 when nothing could be rescued, 2 on usage/IO
-      errors.
-    """
-    path = Path(file)
-    if not path.exists():
-        print(f"pptrepair: error: {file}: no such file", file=sys.stderr)
-        return EXIT_ERROR
-    if not path.is_file():
-        print(f"pptrepair: error: {file}: not a regular file",
-              file=sys.stderr)
-        return EXIT_ERROR
-
-    tr = i18n.get_translator(lang)
-    output_path = Path(output) if output is not None else None
-
-    try:
-        result = rescue_module.rescue_file(
-            path, output_path, force=force, lang=lang)
-    except repair_module.OutputExistsError as exc:
-        print(f"pptrepair: error: {exc}", file=sys.stderr)
-        print(tr("Hint: pass --force to overwrite the existing output."),
-              file=sys.stderr)
-        return EXIT_ERROR
-    except Exception as exc:
-        # Any other pipeline failure (bad input, I/O error) is reported
-        # the way run_check/run_repair report one.
-        print(f"pptrepair: error: {file}: {type(exc).__name__}: {exc}",
-              file=sys.stderr)
-        return EXIT_ERROR
-
-    if result.verdict == Verdict.NORMAL:
-        if json_output:
-            print(json.dumps(result.report, indent=2, ensure_ascii=False))
-        else:
-            print(tr("Nothing to salvage: the file is already an intact "
-                     "PowerPoint package."))
-        return EXIT_OK
-
-    if json_output:
-        print(json.dumps(result.report, indent=2, ensure_ascii=False))
-    else:
-        print(_render_salvage_summary(result, tr))
-
-    return EXIT_OK if result.rescued_count() > 0 else EXIT_CORRUPT
-
-
-def _render_salvage_summary(result: rescue_module.RescueResult,
-                            tr: Callable[[str], str]) -> str:
-    """Render the human-readable per-stage summary of a rescue run."""
-    lines = [tr("=== Salvage summary ===")]
-    if result.output_dir is not None:
-        lines.append(tr("Output: {path}").format(path=result.output_dir))
-    lines.append(tr("Entries recovered: {n}").format(n=result.entries_saved))
-    lines.append(tr("Images carved: {n}").format(n=result.carved_images))
-    lines.append(tr("Partial XML parts: {n}").format(n=result.partial_xml))
-    lines.append(
-        tr("Text lines recovered: {n}").format(n=result.text_lines))
-    if result.carved_images > 0:
-        lines.append(tr("Note: carved images may contain unrelated data "
-                        "that overwrote the file."))
-    if result.rescued_count() == 0:
-        lines.append(tr("Nothing could be salvaged from this file."))
-    if result.warnings:
-        lines.append(tr("Warnings:"))
-        lines.extend(f"  {warning}" for warning in result.warnings)
-    return "\n".join(lines)
 
 
 def run_merge(sources: list[str], output: str | None, force: bool,
@@ -532,6 +301,20 @@ def run_merge(sources: list[str], output: str | None, force: bool,
       (stderr + exit 2), and every given path is validated to exist as
       a regular file the same way ``repair``/``salvage`` validate a
       single input, before anything is diagnosed.
+    * The first SRC (the target) can never itself be a backup archive
+      (:func:`pptrepair.archive.is_archive`); that is a translated usage
+      error (stderr + exit 2) instead of trying to diagnose the archive
+      file as a PowerPoint package.
+    * Every SRC after the target that *is* a backup archive is expanded,
+      under one :class:`tempfile.TemporaryDirectory` spanning the rest of
+      the run, into the plain ``.pptx``/``.pptm`` members it holds (see
+      :func:`_expand_archive_sources`); every other SRC is used
+      unchanged. An archive contributing no member is dropped with a
+      note; if fewer than two sources remain after expansion the run
+      falls back to the same usage error as too few raw SRC arguments.
+      A materialized member is named to the user, everywhere, only
+      through its ``"<archive>::<member>"`` label -- never through the
+      temporary path it was extracted to.
     * The first SRC is the target; :func:`pptrepair.scan.diagnose_file`
       diagnoses it, and an undiagnosable target is a fatal error (stderr
       + exit 2, mirroring ``check``/``repair``).
@@ -555,6 +338,9 @@ def run_merge(sources: list[str], output: str | None, force: bool,
       requires at least two sources); a synthetic ``"failed"``
       :class:`~pptrepair.merge.MergeOutcome` is reported instead, with
       no output produced.
+    * Every note collected while expanding archive sources is merged into
+      ``outcome.notes`` ahead of ``merge_restore``'s own notes, so it
+      reaches both the text summary and the ``--json`` output.
     * Prints :func:`_merge_json_payload` when *json_output* is set,
       otherwise :func:`_render_merge_summary` with the *lang* translator.
     * Exit code: 0 when ``outcome.guarantee`` is ``"full"``, ``"partial"``
@@ -577,69 +363,172 @@ def run_merge(sources: list[str], output: str | None, force: bool,
 
     tr = i18n.get_translator(lang)
     target_path = Path(sources[0])
-    other_paths = [Path(src) for src in sources[1:]]
-
-    target_diag, target_error = scan_module.diagnose_file(target_path)
-    if target_diag is None:
-        print(f"pptrepair: error: {target_path}: {target_error}",
-              file=sys.stderr)
+    if archive_module.is_archive(target_path):
+        message = tr(
+            "The merge target cannot be a file inside an archive: {path}. "
+            "Extract it to a plain file and pass that instead."
+        ).format(path=target_path)
+        print(f"pptrepair: error: {message}", file=sys.stderr)
         return EXIT_ERROR
 
-    scored, diagnose_warnings = _score_other_sources(target_diag, other_paths)
-    for warning in diagnose_warnings:
-        print(warning, file=sys.stderr)
+    with tempfile.TemporaryDirectory(prefix="pptrepair-merge-") as tmp_dir:
+        other_paths, display, origin, expand_notes = _expand_archive_sources(
+            [Path(src) for src in sources[1:]], Path(tmp_dir))
 
-    approved, used_candidate, used_lineage, select_warnings = _select_sources(
-        scored, allow_candidate=allow_candidate, yes=yes,
-        is_tty=sys.stdin.isatty(), tr=tr)
-    for warning in select_warnings:
-        print(warning, file=sys.stderr)
-
-    output_path = Path(output) if output is not None else None
-    if approved:
-        try:
-            outcome = merge_module.merge_restore(
-                [target_path, *approved], output=output_path, force=force,
-                allow_candidate=used_candidate, allow_lineage=used_lineage,
-                lang=lang)
-        except repair_module.OutputExistsError as exc:
-            print(f"pptrepair: error: {exc}", file=sys.stderr)
-            print(tr("Hint: pass --force to overwrite the existing output."),
+        if not other_paths:
+            # Every non-target SRC was either an archive with no usable
+            # member, or expansion left nothing: same shortage as too few
+            # raw SRC arguments.
+            print("pptrepair: error: merge requires at least two SRC files",
                   file=sys.stderr)
             return EXIT_ERROR
-    else:
-        # merge_restore itself requires at least two sources; with none
-        # approved there is nothing left to splice the target against.
-        outcome = merge_module.MergeOutcome(
-            output_path=None, guarantee="failed", provenances=[],
-            scores=[score for _path, _diag, score in scored],
-            notes=["no other usable source remained after selection"])
 
-    if json_output:
-        payload = _merge_json_payload(target_path, outcome, scored, approved)
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-    else:
-        print(_render_merge_summary(outcome, tr))
+        target_diag, target_error = scan_module.diagnose_file(target_path)
+        if target_diag is None:
+            print(f"pptrepair: error: {target_path}: {target_error}",
+                  file=sys.stderr)
+            return EXIT_ERROR
 
-    return EXIT_CORRUPT if outcome.guarantee == "failed" else EXIT_OK
+        scored, diagnose_warnings = _score_other_sources(
+            target_diag, other_paths, display)
+        for warning in diagnose_warnings:
+            print(warning, file=sys.stderr)
+
+        approved, used_candidate, used_lineage, select_warnings = (
+            _select_sources(
+                scored, allow_candidate=allow_candidate, yes=yes,
+                is_tty=sys.stdin.isatty(), tr=tr, display=display))
+        for warning in select_warnings:
+            print(warning, file=sys.stderr)
+
+        output_path = Path(output) if output is not None else None
+        if approved:
+            try:
+                outcome = merge_module.merge_restore(
+                    [target_path, *approved], output=output_path,
+                    force=force, allow_candidate=used_candidate,
+                    allow_lineage=used_lineage, lang=lang, display=display)
+            except repair_module.OutputExistsError as exc:
+                print(f"pptrepair: error: {exc}", file=sys.stderr)
+                print(tr(
+                    "Hint: pass --force to overwrite the existing output."),
+                    file=sys.stderr)
+                return EXIT_ERROR
+        else:
+            # merge_restore itself requires at least two sources; with none
+            # approved there is nothing left to splice the target against.
+            outcome = merge_module.MergeOutcome(
+                output_path=None, guarantee="failed", provenances=[],
+                scores=[score for _path, _diag, score in scored],
+                notes=["no other usable source remained after selection"])
+        # Archive-expansion notes happened first, chronologically.
+        outcome.notes = [*expand_notes, *outcome.notes]
+
+        if json_output:
+            payload = _merge_json_payload(
+                target_path, outcome, scored, approved, display, origin)
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print(_render_merge_summary(outcome, tr, display))
+
+        return EXIT_CORRUPT if outcome.guarantee == "failed" else EXIT_OK
+
+
+def _expand_archive_sources(
+    other_paths: list[Path], tmp_dir: Path
+) -> tuple[list[Path], dict[Path, str], dict[Path, str], list[str]]:
+    """Replace every archive SRC with its extracted usable members.
+
+    Each path in *other_paths* that :func:`pptrepair.archive.is_archive`
+    recognises as a backup archive is expanded, via
+    :func:`pptrepair.archive.list_members` and
+    :func:`pptrepair.archive.materialize`, into plain on-disk copies of
+    its ``.pptx``/``.pptm`` members under their own subdirectory of
+    *tmp_dir* (one subdirectory per archive, so destination names never
+    collide across archives); every other path is passed through
+    unchanged. An archive that yields no usable member contributes
+    nothing and is noted.
+
+    :returns: ``(expanded, display, origin, notes)`` --
+
+        * *expanded*: *other_paths* with each archive replaced by the
+          temporary paths of its extracted members, in encounter order;
+        * *display*: maps each temporary member path to its
+          ``"<archive>::<member>"`` label
+          (:meth:`pptrepair.archive.ArchiveMember.display`), so no
+          user-facing text ever names the temporary file directly;
+        * *origin*: maps each temporary member path to the archive
+          file's own path (as a string), for a JSON ``origin_archive``
+          field;
+        * *notes*: one English line per enumeration/extraction problem
+          (encrypted, corrupt or unreadable members, plus an archive
+          left with no usable member at all), in encounter order. Every
+          path named in a note is either the archive file itself or an
+          in-archive member label, never a temporary path.
+    """
+    expanded: list[Path] = []
+    display: dict[Path, str] = {}
+    origin: dict[Path, str] = {}
+    notes: list[str] = []
+    for index, path in enumerate(other_paths):
+        if not archive_module.is_archive(path):
+            expanded.append(path)
+            continue
+        members, list_notes = archive_module.list_members(path)
+        notes.extend(list_notes)
+        if not members:
+            if not list_notes:
+                notes.append(
+                    f"archive {path} has no usable .pptx/.pptm member; "
+                    "skipped")
+            continue
+        member_dir = tmp_dir / f"archive{index:04d}"
+        member_dir.mkdir()
+        extracted, materialize_notes = archive_module.materialize(
+            path, members, member_dir)
+        notes.extend(materialize_notes)
+        for member, dest_path in extracted.items():
+            expanded.append(dest_path)
+            display[dest_path] = member.display()
+            origin[dest_path] = str(path)
+    return expanded, display, origin, notes
+
+
+def _display_label(path: Path,
+                   display: dict[Path, str] | None) -> str | Path:
+    """Return *path*'s user-facing label.
+
+    When *display* maps *path* (a source materialized from inside an
+    archive) to its ``"<archive>::<member>"`` label, that label is
+    returned so the temporary on-disk path is never shown to the user;
+    otherwise *path* itself is returned unchanged.
+    """
+    if display is None:
+        return path
+    return display.get(path, path)
 
 
 def _score_other_sources(
-    target_diag: Diagnosis, others: list[Path]
+    target_diag: Diagnosis, others: list[Path],
+    display: dict[Path, str] | None = None,
 ) -> tuple[list[tuple[Path, Diagnosis, OriginScore]], list[str]]:
     """Diagnose and score every non-target source against *target_diag*.
 
     Returns the scored ``(path, diagnosis, score)`` triples, in source
     order, plus one stderr-ready (untranslated, ``pptrepair: error:``
     prefixed) warning line for every source that could not be diagnosed
-    -- excluded from scoring, but not fatal to the run.
+    -- excluded from scoring, but not fatal to the run. A source is named
+    in that warning through :func:`_display_label`, given *display*, so a
+    source materialized from an archive is never named by its temporary
+    path.
     """
     scored: list[tuple[Path, Diagnosis, OriginScore]] = []
     warnings: list[str] = []
     for path in others:
         diagnosis, error = scan_module.diagnose_file(path)
         if diagnosis is None:
-            warnings.append(f"pptrepair: error: {path}: {error}")
+            label = _display_label(path, display)
+            warnings.append(f"pptrepair: error: {label}: {error}")
             continue
         score = score_origin(target_diag, diagnosis)
         scored.append((path, diagnosis, score))
@@ -649,7 +538,7 @@ def _score_other_sources(
 def _select_sources(
     scored: list[tuple[Path, Diagnosis, OriginScore]], *,
     allow_candidate: bool, yes: bool, is_tty: bool,
-    tr: Callable[[str], str],
+    tr: Callable[[str], str], display: dict[Path, str] | None = None,
 ) -> tuple[list[Path], bool, bool, list[str]]:
     """Decide which scored sources the merge should use.
 
@@ -659,7 +548,8 @@ def _select_sources(
     *used_lineage* report whether at least one candidate-/lineage-tier
     source was approved (to pass through as ``allow_candidate``/
     ``allow_lineage``); *warnings* holds one translated line per source
-    left unused, ready to print to stderr.
+    left unused, ready to print to stderr, each source named through
+    :func:`_display_label` given *display*.
 
     An ``auto``-tier source is always used. A ``candidate``-tier source
     is used when *allow_candidate* or *yes* is set, or -- only when
@@ -679,7 +569,7 @@ def _select_sources(
             continue
         if score.tier == "candidate":
             use = allow_candidate or yes or (
-                is_tty and _confirm_source(path, score, tr))
+                is_tty and _confirm_source(path, score, tr, display))
             if use:
                 approved.append(path)
                 used_candidate = True
@@ -687,10 +577,10 @@ def _select_sources(
                 warnings.append(tr(
                     "Candidate-tier source not used: {path} (pass "
                     "--allow-candidate, --yes, or confirm the prompt to "
-                    "include it)").format(path=path))
+                    "include it)").format(path=_display_label(path, display)))
             continue
         if score.tier == "lineage":
-            use = yes or (is_tty and _confirm_source(path, score, tr))
+            use = yes or (is_tty and _confirm_source(path, score, tr, display))
             if use:
                 approved.append(path)
                 used_lineage = True
@@ -698,26 +588,29 @@ def _select_sources(
                 warnings.append(tr(
                     "Lineage-tier source not used: {path} (pass --yes "
                     "or confirm the prompt to include it)"
-                ).format(path=path))
+                ).format(path=_display_label(path, display)))
             continue
         warnings.append(tr(
             "Source not used (not the same origin): {path}"
-        ).format(path=path))
+        ).format(path=_display_label(path, display)))
     return approved, used_candidate, used_lineage, warnings
 
 
 def _confirm_source(path: Path, score: OriginScore,
-                    tr: Callable[[str], str]) -> bool:
+                    tr: Callable[[str], str],
+                    display: dict[Path, str] | None = None) -> bool:
     """Print *score*'s evidence for *path* and ask whether to use it.
 
-    Printed evidence: the file name, its tier, whether its size matches
-    the target, its triple/name/media ratios (as percentages) and its
-    lineage score, each label translated via *tr* (tier/match/ratio
-    values themselves stay untranslated, like verdict codes elsewhere in
-    this module). The actual y/N read is delegated to
-    :func:`_ask_yes_no`, isolated so tests can monkeypatch it.
+    Printed evidence: the file name (or, given *display*, its
+    ``"<archive>::<member>"`` label -- see :func:`_display_label`), its
+    tier, whether its size matches the target, its triple/name/media
+    ratios (as percentages) and its lineage score, each label translated
+    via *tr* (tier/match/ratio values themselves stay untranslated, like
+    verdict codes elsewhere in this module). The actual y/N read is
+    delegated to :func:`_ask_yes_no`, isolated so tests can monkeypatch
+    it.
     """
-    print(tr("Source: {path}").format(path=path))
+    print(tr("Source: {path}").format(path=_display_label(path, display)))
     print(tr("Tier: {tier}").format(tier=score.tier))
     print(tr("Size match: {value}").format(
         value="yes" if score.size_match else "no"))
@@ -748,6 +641,8 @@ def _ask_yes_no(prompt: str) -> bool:
 def _merge_json_payload(
     target_path: Path, outcome: "merge_module.MergeOutcome",
     scored: list[tuple[Path, Diagnosis, OriginScore]], approved: list[Path],
+    display: dict[Path, str] | None = None,
+    origin: dict[Path, str] | None = None,
 ) -> dict:
     """Build the JSON-schema dict for the merge command's ``--json`` output.
 
@@ -764,7 +659,8 @@ def _merge_json_payload(
           "sources": [
             {"path": str, "tier": str, "used": bool,
              "triple_ratio": float, "name_ratio": float,
-             "media_ratio": float, "lineage_score": float}, ...
+             "media_ratio": float, "lineage_score": float,
+             "origin_archive": str | null}, ...
           ],
           "notes": [str, ...]
         }
@@ -772,7 +668,12 @@ def _merge_json_payload(
     ``sources`` covers every non-target source that could be diagnosed
     and scored (in *scored*'s order), regardless of whether it was
     approved; a source excluded before diagnosis (e.g. it failed to
-    diagnose) is absent.
+    diagnose) is absent. A source's ``"path"`` is its
+    ``"<archive>::<member>"`` label (:func:`_display_label`) when
+    *display* maps it -- i.e. it was materialized from an archive SRC --
+    and its ``"origin_archive"`` is then that archive file's own path (a
+    plain source's is ``null``), from *origin*; the temporary path a
+    materialized source actually lives at never appears in either field.
     """
     approved_set = set(approved)
     provenance_counts = {
@@ -791,13 +692,14 @@ def _merge_json_payload(
         "provenance_counts": provenance_counts,
         "sources": [
             {
-                "path": str(path),
+                "path": str(_display_label(path, display)),
                 "tier": score.tier,
                 "used": path in approved_set,
                 "triple_ratio": score.triple_ratio,
                 "name_ratio": score.name_ratio,
                 "media_ratio": score.media_ratio,
                 "lineage_score": score.lineage_score,
+                "origin_archive": (origin or {}).get(path),
             }
             for path, _diagnosis, score in scored
         ],
@@ -806,8 +708,15 @@ def _merge_json_payload(
 
 
 def _render_merge_summary(outcome: "merge_module.MergeOutcome",
-                          tr: Callable[[str], str]) -> str:
-    """Render one merge outcome as a human-readable, translated summary."""
+                          tr: Callable[[str], str],
+                          display: dict[Path, str] | None = None) -> str:
+    """Render one merge outcome as a human-readable, translated summary.
+
+    Every entry-provenance source named in the summary is shown through
+    :func:`_display_label`, given *display*, so a source materialized
+    from an archive SRC is named by its ``"<archive>::<member>"`` label
+    rather than the temporary path it was extracted to.
+    """
     lines = [tr("=== Merge summary ===")]
     lines.append(
         tr("Guarantee: {guarantee}").format(guarantee=outcome.guarantee))
@@ -834,7 +743,7 @@ def _render_merge_summary(outcome: "merge_module.MergeOutcome",
     if source_counts:
         lines.append(tr("Entries by source:"))
         for source, count in source_counts.items():
-            lines.append(f"  {source}: {count}")
+            lines.append(f"  {_display_label(source, display)}: {count}")
 
     if outcome.guarantee == "hybrid":
         lines.append(tr(
@@ -848,267 +757,12 @@ def _render_merge_summary(outcome: "merge_module.MergeOutcome",
     return "\n".join(lines)
 
 
-def run_scan(roots: list[str], report: str | None, force: bool,
-             show_all: bool, lang: str, json_output: bool,
-             follow_symlinks: bool, include_filenames: bool,
-             allow_download: bool) -> int:
-    """Scan directory trees, print the results, and return an exit code.
-
-    Implementation requirements:
-
-    * Call :func:`pptrepair.scan.scan_paths` with the options mapped
-      through.
-      :class:`pptrepair.repair.OutputExistsError` (existing ``--report``
-      dir without ``--force``) prints the error plus a translated
-      ``--force`` hint to stderr and returns 2, mirroring ``repair``.
-    * Text mode streams one line per diagnosed file through the
-      ``progress`` callback while scanning: corrupted files always,
-      intact ones only with *show_all*; format ``{path}: {verdict}``
-      (and `` -> {error}`` for pipeline failures, streamed to stderr).
-      JSON mode passes no callback and prints nothing during the scan.
-    * Walk errors (nonexistent roots, unreadable directories) print one
-      ``pptrepair: error: {message}`` line each to stderr in both
-      modes, so an exit-2 scan never masquerades as a clean 0-file
-      report.
-    * In both modes, a translated ``Downloading cloud-only file: ...``
-      notice goes to stderr (flushed) right before a placeholder target
-      is read with ``--allow-download``, so the terminal is never
-      silent while the sync client hydrates a file.
-    * After the scan, text mode prints
-      :func:`render_scan_text(result, tr, include_files=False)
-      <pptrepair.report.render_scan_text>`; JSON mode prints
-      :func:`render_scan_json <pptrepair.report.render_scan_json>`.
-    * With ``--report``, additionally write ``scan_report.txt``
-      (``render_scan_text(result, tr, include_files=True)`` + trailing
-      newline, UTF-8) and ``scan_report.json``
-      (``render_scan_json(result)`` + trailing newline, UTF-8) into the
-      report directory — in *both* output modes.
-    * Exit code: 2 when ``result.had_errors()``, else 1 when any
-      diagnosed file is not NORMAL, else 0 (cloud-skips alone never
-      change the exit code).
-    """
-    tr = i18n.get_translator(lang)
-    report_dir = Path(report) if report is not None else None
-
-    def _report_progress(outcome: scan_module.FileOutcome) -> None:
-        if outcome.error is not None:
-            # diagnose_file's error message already carries the path
-            # ("{path}: {reason}"); stream it as-is.
-            print(outcome.error, file=sys.stderr)
-            return
-        assert outcome.diagnosis is not None
-        if show_all or outcome.diagnosis.verdict != Verdict.NORMAL:
-            print(f"{outcome.path}: {outcome.diagnosis.verdict.value}")
-
-    def _announce_download(path: Path) -> None:
-        # Reading the placeholder blocks until the sync client has
-        # downloaded it, so flush the notice out first. stderr keeps
-        # the stdout verdict stream / JSON parseable.
-        print(tr("Downloading cloud-only file: {path}").format(path=path),
-              file=sys.stderr, flush=True)
-
-    try:
-        result = scan_module.scan_paths(
-            [Path(root) for root in roots],
-            report_dir=report_dir,
-            force=force,
-            follow_symlinks=follow_symlinks,
-            allow_download=allow_download,
-            include_filenames=include_filenames,
-            progress=None if json_output else _report_progress,
-            on_download=_announce_download,
-        )
-    except repair_module.OutputExistsError as exc:
-        print(f"pptrepair: error: {exc}", file=sys.stderr)
-        print(tr("Hint: pass --force to overwrite the existing output."),
-              file=sys.stderr)
-        return EXIT_ERROR
-
-    # Walk errors (nonexistent roots, unreadable directories) are not
-    # streamed by the progress callback, so a silent exit-2 would look
-    # like a clean 0-file scan; report them the way `check` does. The
-    # message already carries the offending path.
-    for _path, message in result.walk.errors:
-        print(f"pptrepair: error: {message}", file=sys.stderr)
-
-    if json_output:
-        print(render_scan_json(result))
-    else:
-        print(render_scan_text(result, tr, include_files=False))
-
-    if report_dir is not None:
-        text_report = render_scan_text(result, tr, include_files=True)
-        (report_dir / "scan_report.txt").write_text(
-            text_report + "\n", encoding="utf-8")
-        json_report = render_scan_json(result)
-        (report_dir / "scan_report.json").write_text(
-            json_report + "\n", encoding="utf-8")
-
-    if result.had_errors():
-        return EXIT_ERROR
-    if result.corrupted():
-        return EXIT_CORRUPT
-    return EXIT_OK
-
-
-def run_repair_all(roots: list[str], output_dir: str | None, in_place: bool,
-                   report: str | None, force: bool, show_all: bool,
-                   dry_run: bool, lang: str, json_output: bool,
-                   follow_symlinks: bool, include_filenames: bool,
-                   allow_download: bool) -> int:
-    """Diagnose and repair directory trees, print the results, and return
-    an exit code.
-
-    Implementation requirements:
-
-    * In aggregate mode (``in_place`` is False), an *output_dir* that
-      already exists as a regular file (not a directory) is a usage
-      error: print ``pptrepair: error: ...`` to stderr and return 2
-      before anything is scanned. An existing *directory* is fine and
-      needs no ``--force`` (unlike ``--report``): per-artifact existence
-      is checked by :func:`pptrepair.batch.repair_paths` itself.
-    * Call :func:`pptrepair.batch.repair_paths` with the options mapped
-      through; :class:`pptrepair.repair.OutputExistsError` (an existing
-      ``--report`` dir without ``--force``) prints the error plus a
-      translated ``--force`` hint to stderr and returns 2, mirroring
-      ``repair``/``scan``.
-    * Text mode streams phase 1 exactly like ``run_scan``'s own
-      ``progress`` callback (corrupted files always, intact ones only
-      with *show_all*, pipeline errors to stderr) and additionally
-      streams one untranslated line per phase-2 :class:`BatchItem
-      <pptrepair.batch.BatchItem>` as it is produced: ``{path}: repaired
-      ({mode}) -> {output}`` when repaired, ``{path}: planned
-      ({output})`` when *dry_run* only predicted an artifact, ``{path}:
-      skipped (output exists)`` when an existing artifact blocked it
-      without ``--force``, ``pptrepair: error: {path}: {error}`` to
-      stderr when the repair raised, and ``{path}: {action}`` for every
-      other action (``unrepairable``). JSON mode passes no callback for
-      either phase and prints nothing while scanning/repairing.
-    * A translated ``Downloading cloud-only file: ...`` notice goes to
-      stderr (flushed) right before a placeholder target is read with
-      ``--allow-download``, exactly like ``run_scan``.
-    * Walk errors (nonexistent roots, unreadable directories) print one
-      ``pptrepair: error: {message}`` line each to stderr in both modes.
-    * After the run, text mode prints
-      :func:`render_batch_text(result, tr, include_files=False)
-      <pptrepair.report.render_batch_text>`; JSON mode prints
-      :func:`render_batch_json <pptrepair.report.render_batch_json>`.
-    * With ``--report`` and *not* ``dry_run``, additionally write, all
-      UTF-8 with a trailing newline: ``scan_report.txt``/``.json`` (the
-      phase-1 :class:`~pptrepair.scan.ScanResult`, ``include_files=True``)
-      and ``repair_report.txt``/``.json`` (the full batch result,
-      ``include_files=True``) into the report directory. Under
-      *dry_run*, nothing is written even when ``--report`` is given
-      (:func:`pptrepair.batch.repair_paths` itself never touches the
-      report directory in that case either).
-    * Exit code: 2 when ``result.had_errors()``, else 1 when
-      ``result.unrepaired_remaining() > 0`` (in *dry_run* this counts
-      everything that is not ``"repaired"`` or ``"planned"``), else 0.
-    """
-    tr = i18n.get_translator(lang)
-    output_dir_path = Path(output_dir) if output_dir is not None else None
-    report_dir = Path(report) if report is not None else None
-
-    if not in_place and output_dir_path is not None \
-            and output_dir_path.is_file():
-        print(f"pptrepair: error: {output_dir}: output path already "
-              "exists and is not a directory", file=sys.stderr)
-        return EXIT_ERROR
-
-    def _report_progress(outcome: scan_module.FileOutcome) -> None:
-        if outcome.error is not None:
-            # diagnose_file's error message already carries the path
-            # ("{path}: {reason}"); stream it as-is.
-            print(outcome.error, file=sys.stderr)
-            return
-        assert outcome.diagnosis is not None
-        if show_all or outcome.diagnosis.verdict != Verdict.NORMAL:
-            print(f"{outcome.path}: {outcome.diagnosis.verdict.value}")
-
-    def _announce_download(path: Path) -> None:
-        # Reading the placeholder blocks until the sync client has
-        # downloaded it, so flush the notice out first. stderr keeps
-        # the stdout verdict/JSON stream parseable.
-        print(tr("Downloading cloud-only file: {path}").format(path=path),
-              file=sys.stderr, flush=True)
-
-    def _repair_progress(item: batch_module.BatchItem) -> None:
-        # Plain, untranslated output, matching the phase-1 per-file
-        # stream's own convention (machine-facing path/action/mode
-        # values are never translated).
-        path = item.source.path
-        if item.action == "repaired":
-            mode = item.repair.mode if item.repair is not None else "-"
-            print(f"{path}: repaired ({mode}) -> {item.planned_output}")
-        elif item.action == "planned":
-            print(f"{path}: planned ({item.planned_output})")
-        elif item.action == "skipped_existing":
-            print(f"{path}: skipped (output exists)")
-        elif item.action == "failed":
-            print(f"pptrepair: error: {path}: {item.error}", file=sys.stderr)
-        else:
-            print(f"{path}: {item.action}")
-
-    try:
-        result = batch_module.repair_paths(
-            [Path(root) for root in roots],
-            output_dir=output_dir_path,
-            in_place=in_place,
-            report_dir=report_dir,
-            force=force,
-            dry_run=dry_run,
-            follow_symlinks=follow_symlinks,
-            allow_download=allow_download,
-            include_filenames=include_filenames,
-            lang=lang,
-            progress=None if json_output else _report_progress,
-            repair_progress=None if json_output else _repair_progress,
-            on_download=_announce_download,
-        )
-    except repair_module.OutputExistsError as exc:
-        print(f"pptrepair: error: {exc}", file=sys.stderr)
-        print(tr("Hint: pass --force to overwrite the existing output."),
-              file=sys.stderr)
-        return EXIT_ERROR
-
-    # Walk errors are not streamed by the progress callback; report them
-    # the way `scan` does so an exit-2 run never masquerades as clean.
-    for _path, message in result.scan.walk.errors:
-        print(f"pptrepair: error: {message}", file=sys.stderr)
-
-    if json_output:
-        print(render_batch_json(result))
-    else:
-        print(render_batch_text(result, tr, include_files=False))
-
-    if report_dir is not None and not dry_run:
-        scan_text_report = render_scan_text(
-            result.scan, tr, include_files=True)
-        (report_dir / "scan_report.txt").write_text(
-            scan_text_report + "\n", encoding="utf-8")
-        scan_json_report = render_scan_json(result.scan)
-        (report_dir / "scan_report.json").write_text(
-            scan_json_report + "\n", encoding="utf-8")
-        repair_text_report = render_batch_text(result, tr, include_files=True)
-        (report_dir / "repair_report.txt").write_text(
-            repair_text_report + "\n", encoding="utf-8")
-        repair_json_report = render_batch_json(result)
-        (report_dir / "repair_report.json").write_text(
-            repair_json_report + "\n", encoding="utf-8")
-
-    if result.had_errors():
-        return EXIT_ERROR
-    if result.unrepaired_remaining() > 0:
-        return EXIT_CORRUPT
-    return EXIT_OK
-
-
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns the process exit code."""
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "check":
-        return run_check(args.files, args.json_output)
+        return run_check(args.files, args.lang, args.json_output)
     if args.command == "repair":
         return run_repair(args.file, args.output, args.mode, args.force,
                           args.lang, args.json_output)
@@ -1122,12 +776,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "scan":
         return run_scan(args.roots, args.report, args.force, args.show_all,
                         args.lang, args.json_output, args.follow_symlinks,
-                        args.include_filenames, args.allow_download)
+                        args.include_filenames, args.allow_download,
+                        args.search_archives)
     if args.command == "repair-all":
         return run_repair_all(
             args.roots, args.output_dir, args.in_place, args.report,
             args.force, args.show_all, args.dry_run, args.lang,
             args.json_output, args.follow_symlinks, args.include_filenames,
-            args.allow_download)
+            args.allow_download, args.search_archives)
     parser.error(f"unknown command: {args.command}")
     return EXIT_ERROR

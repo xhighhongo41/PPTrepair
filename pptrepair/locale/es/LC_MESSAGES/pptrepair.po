@@ -300,3 +300,27 @@ msgstr "    Estos archivos pueden ser la misma versión guardada y podrían repa
 msgid "  lineage candidate: {path} (score {score})"
 msgstr "  candidato de linaje: {path} (puntuación {score})"
 
+msgid "The merge target cannot be a file inside an archive: {path}. Extract it to a plain file and pass that instead."
+msgstr "El destino de la fusión no puede ser un archivo dentro de un archivo comprimido: {path}. Extráigalo a un archivo normal y use ese en su lugar."
+
+msgid "Evidence:"
+msgstr "Evidencia:"
+
+msgid "Salvageable: {entries_ok}/{entries_total} entries, {slides_ok}/{slides_total} slides"
+msgstr "Recuperable: {entries_ok}/{entries_total} entradas, {slides_ok}/{slides_total} diapositivas"
+
+msgid "Reference integrity: {n} unresolved reference(s) in {m} part(s)"
+msgstr "Integridad de referencias: {n} referencia(s) sin resolver en {m} parte(s)"
+
+msgid "PowerPoint may offer a one-time repair on first open."
+msgstr "PowerPoint puede ofrecer una reparación única al abrirlo por primera vez."
+
+msgid "Timing integrity: {n} inconsistent reference(s) in {m} part(s)"
+msgstr "Integridad de temporización: {n} referencia(s) incoherente(s) en {m} parte(s)"
+
+msgid "Structure integrity: {n} required relationship(s) missing"
+msgstr "Integridad de estructura: faltan {n} relación(es) requerida(s)"
+
+msgid "no {required} relationship"
+msgstr "sin relación {required}"
+

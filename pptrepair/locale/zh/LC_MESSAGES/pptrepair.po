@@ -300,3 +300,27 @@ msgstr "    这些文件可能是同一保存版本，或许可以用 pptrepair 
 msgid "  lineage candidate: {path} (score {score})"
 msgstr "  版本候选: {path}（分数 {score}）"
 
+msgid "The merge target cannot be a file inside an archive: {path}. Extract it to a plain file and pass that instead."
+msgstr "合并目标不能是压缩包内的文件: {path}。请先解压为普通文件后再指定。"
+
+msgid "Evidence:"
+msgstr "证据:"
+
+msgid "Salvageable: {entries_ok}/{entries_total} entries, {slides_ok}/{slides_total} slides"
+msgstr "可抢救: 条目共 {entries_total} 项中的 {entries_ok} 项，幻灯片共 {slides_total} 张中的 {slides_ok} 张"
+
+msgid "Reference integrity: {n} unresolved reference(s) in {m} part(s)"
+msgstr "引用完整性: {m} 个部件中有 {n} 个未解决的引用"
+
+msgid "PowerPoint may offer a one-time repair on first open."
+msgstr "PowerPoint 首次打开时可能会提示进行一次性修复。"
+
+msgid "Timing integrity: {n} inconsistent reference(s) in {m} part(s)"
+msgstr "计时完整性: {m} 个部件中有 {n} 个不一致的引用"
+
+msgid "Structure integrity: {n} required relationship(s) missing"
+msgstr "结构完整性: 缺少 {n} 个必需的关系"
+
+msgid "no {required} relationship"
+msgstr "无 {required} 关系"
+

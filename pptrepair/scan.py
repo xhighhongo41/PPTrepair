@@ -13,10 +13,12 @@ directory (never next to the scanned files).
 from __future__ import annotations
 
 import json
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
+from pptrepair.archive import ArchiveMember, list_members, materialize
 from pptrepair.census import from_central_directory, from_lfh_scan
 from pptrepair.classify import Diagnosis, Verdict, classify
 from pptrepair.diagnostics import build_fingerprint, file_id, is_fingerprint_target
@@ -46,6 +48,31 @@ class FileOutcome:
 
 
 @dataclass
+class ArchiveMaterial:
+    """Diagnosis outcome for one ``.pptx``/``.pptm`` member of a backup archive.
+
+    Donor material only: an archive member is never a repair target and
+    never enters the corrupted / scanned statistics. It participates in
+    the report solely as a twin-, lineage- or merge-candidate for the
+    files actually scanned on disk. The member is always named to the
+    user through :meth:`display` (its ``"<archive>::<member>"`` label),
+    never through the temporary path it was briefly extracted to.
+    """
+
+    archive_path: Path
+    """The backup archive the member was found in."""
+    member: ArchiveMember
+    """The member's archive-recorded identity (name, size)."""
+    diagnosis: Diagnosis | None = None
+    """None when the pipeline failed for this member; see ``error``."""
+    error: str | None = None
+
+    def display(self) -> str:
+        """Return the member's ``"<archive>::<member>"`` label for messages."""
+        return self.member.display()
+
+
+@dataclass
 class ScanResult:
     """Aggregate outcome of one ``scan_paths`` run."""
 
@@ -55,6 +82,15 @@ class ScanResult:
     report_dir: Path | None = None
     fingerprints_skipped: int = 0
     """Fingerprint targets beyond :data:`MAX_FINGERPRINTS` (not written)."""
+    materials: list[ArchiveMaterial] = field(default_factory=list)
+    """Archive members mined as donor material (only with
+    ``search_archives``); never counted in any scanned/corrupted tally."""
+    material_notes: list[str] = field(default_factory=list)
+    """English notes from enumerating/extracting archive members
+    (encrypted, corrupt or unreadable members, unreadable archives)."""
+    search_archives: bool = False
+    """True when this scan mined backup archives for donor material;
+    drives the report's archive-aware schema version and note fields."""
 
     def verdict_counts(self) -> dict[str, int]:
         """Return ``verdict.value -> count`` over successful outcomes."""
@@ -128,13 +164,78 @@ def diagnose_file(path: Path) -> tuple[Diagnosis | None, str | None]:
     return diagnosis, None
 
 
+def diagnose_archive_materials(
+    archives: Sequence[Path], *,
+    on_download: Callable[[Path], None] | None = None,
+    download_targets: Sequence[Path] = (),
+) -> tuple[list[ArchiveMaterial], list[str]]:
+    """Enumerate and diagnose the ``.pptx``/``.pptm`` members of *archives*.
+
+    Each archive is opened just far enough to read its member index
+    (:func:`pptrepair.archive.list_members`); every member is then, one
+    at a time, streamed out to a plain file
+    (:func:`pptrepair.archive.materialize` called with a single-element
+    list), diagnosed via :func:`diagnose_file`, and the temporary file
+    deleted immediately -- so the memory and disk peak stays at one
+    member's worth regardless of how many members an archive holds. A
+    single :class:`tempfile.TemporaryDirectory` spans the whole run and
+    is removed on exit.
+
+    *on_download* (when given) is invoked with an archive's path just
+    before it is first read, but only for archives listed in
+    *download_targets* (the cloud-only placeholders that
+    :func:`discover_targets` cleared for hydration under
+    ``allow_download``): reading such an archive blocks while the sync
+    client downloads it, so the announcement must precede the read,
+    exactly as the per-file target loop announces a placeholder target.
+
+    :return: ``(materials, notes)`` -- one :class:`ArchiveMaterial` per
+        member that could be extracted (its ``diagnosis`` may still be
+        None if the pipeline failed on the member's bytes), plus every
+        enumeration/extraction note collected along the way, in
+        encounter order. Never raises: an unreadable archive or member
+        degrades to a note, and the remaining archives/members are still
+        processed.
+    """
+    materials: list[ArchiveMaterial] = []
+    notes: list[str] = []
+    if not archives:
+        return materials, notes
+
+    download_set = set(download_targets)
+    with tempfile.TemporaryDirectory(prefix="pptrepair-scan-arc-") as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        for archive_path in archives:
+            if on_download is not None and archive_path in download_set:
+                on_download(archive_path)
+            members, list_notes = list_members(archive_path)
+            notes.extend(list_notes)
+            for member in members:
+                # One member at a time: materialize with a single-element
+                # list, diagnose, then delete before touching the next.
+                extracted, materialize_notes = materialize(
+                    archive_path, [member], tmp_path)
+                notes.extend(materialize_notes)
+                dest_path = extracted.get(member)
+                if dest_path is None:
+                    continue  # extraction failed; already noted above
+                diagnosis, error = diagnose_file(dest_path)
+                materials.append(ArchiveMaterial(
+                    archive_path=archive_path, member=member,
+                    diagnosis=diagnosis, error=error))
+                # Free the disk/memory footprint before the next member.
+                dest_path.unlink(missing_ok=True)
+    return materials, notes
+
+
 def _apply_exclusions(walk: WalkResult, exclude: Sequence[Path]) -> WalkResult:
     """Return a copy of *walk* with every path under *exclude* removed.
 
-    Applied to all five path buckets (``targets`` / ``skipped_legacy`` /
-    ``skipped_temp`` / ``skipped_cloud`` / ``download_targets``) plus
-    ``errors`` (matched on its path element). *walker* itself is never
-    touched; this only post-filters its output. Comparison resolves
+    Applied to all six path buckets (``targets`` / ``skipped_legacy`` /
+    ``skipped_temp`` / ``skipped_cloud`` / ``download_targets`` /
+    ``archives``) plus ``errors`` (matched on its path element).
+    *walker* itself is never touched; this only post-filters its output.
+    Comparison resolves
     both sides with ``Path.resolve()``, a best-effort symlink-following
     normalisation, so an exclusion given as a relative path or through
     a symlinked ancestor still matches.
@@ -156,6 +257,7 @@ def _apply_exclusions(walk: WalkResult, exclude: Sequence[Path]) -> WalkResult:
         skipped_temp=_filter(walk.skipped_temp),
         skipped_cloud=_filter(walk.skipped_cloud),
         download_targets=_filter(walk.download_targets),
+        archives=_filter(walk.archives),
         errors=[(path, message) for path, message in walk.errors
                if not _is_excluded(path)],
     )
@@ -167,6 +269,7 @@ def scan_paths(roots: Sequence[Path], *,
                follow_symlinks: bool = False,
                allow_download: bool = False,
                include_filenames: bool = False,
+               search_archives: bool = False,
                exclude: Sequence[Path] = (),
                progress: Callable[[FileOutcome], None] | None = None,
                on_download: Callable[[Path], None] | None = None
@@ -182,6 +285,15 @@ def scan_paths(roots: Sequence[Path], *,
       the first fingerprint.
     * Discover targets via :func:`discover_targets` with
       *follow_symlinks* / *allow_download* passed through.
+    * *search_archives*: opt-in only. When True, backup archives found
+      during the walk are enumerated and their members diagnosed as
+      donor *material* (:func:`diagnose_archive_materials`), stored on
+      ``ScanResult.materials`` / ``material_notes`` with
+      ``search_archives`` set; the materials never enter the target
+      loop, the fingerprint budget or any scanned/corrupted count.
+      Left False (the default) this is a complete no-op: no archive is
+      collected, opened or diagnosed, and every existing output byte is
+      unchanged.
     * *exclude*: subtrees to leave out of every discovery bucket (e.g.
       a batch driver's own aggregate output directory, which would
       otherwise be diagnosed as part of the very tree it is writing
@@ -220,11 +332,13 @@ def scan_paths(roots: Sequence[Path], *,
         report_dir.mkdir(parents=True, exist_ok=True)
 
     walk = discover_targets(roots, follow_symlinks=follow_symlinks,
-                            allow_download=allow_download)
+                            allow_download=allow_download,
+                            collect_archives=search_archives)
     if exclude:
         walk = _apply_exclusions(walk, exclude)
     result = ScanResult(roots=[Path(root) for root in roots],
-                        walk=walk, report_dir=report_dir)
+                        walk=walk, report_dir=report_dir,
+                        search_archives=search_archives)
 
     diagnostics_dir = (
         report_dir / DIAGNOSTICS_DIRNAME if report_dir is not None else None
@@ -258,5 +372,16 @@ def scan_paths(roots: Sequence[Path], *,
         result.outcomes.append(outcome)
         if progress is not None:
             progress(outcome)
+
+    # Archive material is diagnosed after the on-disk targets so it never
+    # perturbs the target loop, the fingerprint budget or any tally. A
+    # placeholder archive cleared for hydration is announced before it
+    # is read, the same way the target loop announces a placeholder file.
+    if search_archives:
+        materials, material_notes = diagnose_archive_materials(
+            walk.archives, on_download=on_download,
+            download_targets=walk.download_targets)
+        result.materials = materials
+        result.material_notes = material_notes
 
     return result

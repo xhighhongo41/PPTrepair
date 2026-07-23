@@ -1,0 +1,427 @@
+"""Tests for ``--search-archives`` in the ``scan`` / ``repair-all`` CLI.
+
+Exercises :func:`pptrepair.cli.main` end to end on small synthetic trees
+built under ``tmp_path`` (like :mod:`test_scan_cli`), each holding one or
+more backup archives (zip/tar) whose ``.pptx`` members are mined as donor
+material for the twin / lineage / merge candidate sections. Only the
+opt-in ``--search-archives`` path is covered here; the archive-free
+behaviour is pinned by :mod:`test_scan_cli` / :mod:`test_repair_all_cli`.
+The real ``broken_ppt/`` / ``normal_ppt/`` sample directories are never
+touched.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import tarfile
+import zipfile
+from pathlib import Path
+
+import pytest
+from fixtures import (build_minimal_pptx, header_offset, make_corrupted_copies,
+                      make_edited_version, truncate, zero_prefix)
+
+from pptrepair import walker as walker_module
+from pptrepair.cli import EXIT_CORRUPT, EXIT_OK, main
+
+#: Shorthand for the capsys fixture type, to keep signatures short.
+CaptureFixture = pytest.CaptureFixture[str]
+
+#: Media payload large enough that a 256 KiB head zero-fill still leaves
+#: surviving tail bytes (so the file classifies as head_zero_fill rather
+#: than empty), yet small enough to keep fixtures fast.
+_MEDIA_BYTES = 600_000
+
+#: Head length zero-filled to synthesise a size-preserving corruption.
+_ZERO_HEAD = 262_144
+
+#: A slide-1 body distinctly larger than the fixture default, used to
+#: build a genuinely different-sized lineage version of a synthetic
+#: .pptx (mirrors :mod:`test_report`'s own ``_new_slide_xml``).
+_NEW_SLIDE_XML = (
+    b"<p:sld><p:cSld><p:spTree><p:nvGrpSpPr/><p:grpSpPr/><p:sp>"
+    b"<p:txBody><a:p><a:r><a:t>Edited slide body for the lineage version, "
+    b"padded so the archive size clearly differs.</a:t>"
+    b"</a:r></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+)
+
+
+def _write(dir_path: Path, name: str, data: bytes) -> Path:
+    """Write *data* to ``dir_path / name`` and return the resulting path."""
+    path = dir_path / name
+    path.write_bytes(data)
+    return path
+
+
+def _mkroot(tmp_path: Path, name: str = "root") -> Path:
+    """Create and return an empty scan-root directory under *tmp_path*."""
+    root = tmp_path / name
+    root.mkdir()
+    return root
+
+
+def _write_zip(path: Path, entries: dict[str, bytes]) -> None:
+    """Write *entries* to a new zip archive at *path*."""
+    with zipfile.ZipFile(path, mode="w") as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+
+
+def _write_targz(path: Path, entries: dict[str, bytes]) -> None:
+    """Write *entries* to a new gzip-compressed tar archive at *path*."""
+    with tarfile.open(path, mode="w:gz") as tf:
+        for name, data in entries.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+
+
+def _file_entry(payload: dict, path: Path) -> dict:
+    """Return the ``files`` entry whose ``path`` equals *path*."""
+    return next(f for f in payload["files"] if f["path"] == str(path))
+
+
+def _rebuildable_truncated(num_slides: int = 3) -> bytes:
+    """Build a TAIL_TRUNCATED fixture that rebuilds with every slide intact."""
+    data = build_minimal_pptx(num_slides=num_slides, media_bytes=4096)
+    cutoff = header_offset(data, "ppt/media/image1.png")
+    return truncate(data, cutoff)
+
+
+# --- 1. archive twin candidate: "::" label, text + JSON ----------------------
+
+
+def test_search_archives_surfaces_zip_twin_candidate(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """A corrupted file's intact twin kept inside a zip backup is offered
+    as a restore candidate, named by its ``"<archive>::<member>"`` label
+    in both the text report and the JSON (with a non-null
+    ``origin_archive``)."""
+    original = build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    broken_path = _write(_root := _mkroot(tmp_path), "broken.pptx",
+                         zero_prefix(original, _ZERO_HEAD))
+    archive_path = _root / "backup.zip"
+    _write_zip(archive_path, {"backup/broken.pptx": original})
+    report_dir = tmp_path / "report"
+
+    exit_code = main(["scan", str(_root), "--report", str(report_dir),
+                      "--json", "--search-archives"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == EXIT_CORRUPT
+    assert payload["schema_version"] == 4
+
+    label = f"{archive_path}::backup/broken.pptx"
+    entry = _file_entry(payload, broken_path)
+    twin = next(t for t in entry["twin_candidates"] if t["path"] == label)
+    assert twin["confidence"] == "high"
+    assert twin["size"] == len(original)
+    assert twin["origin_archive"] == str(archive_path)
+
+    text = (report_dir / "scan_report.txt").read_text(encoding="utf-8")
+    assert f"restore candidate: {label}" in text
+
+
+def test_search_archives_surfaces_targz_twin_candidate(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """The same twin recovery works from a ``.tar.gz`` backup, not only zip."""
+    original = build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    broken_path = _write(_root := _mkroot(tmp_path), "broken.pptx",
+                         zero_prefix(original, _ZERO_HEAD))
+    archive_path = _root / "backup.tar.gz"
+    _write_targz(archive_path, {"backup/broken.pptx": original})
+
+    exit_code = main(["scan", str(_root), "--json", "--search-archives"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == EXIT_CORRUPT
+    label = f"{archive_path}::backup/broken.pptx"
+    entry = _file_entry(payload, broken_path)
+    assert any(t["path"] == label and t["origin_archive"] == str(archive_path)
+               for t in entry["twin_candidates"])
+
+
+# --- 2. archive lineage candidate --------------------------------------------
+
+
+def test_search_archives_surfaces_lineage_candidate(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """A corrupted file's different-sized version kept inside a backup is
+    offered as a lineage candidate, named by its ``"::"`` label with the
+    archive path in ``origin_archive``."""
+    original = build_minimal_pptx(num_slides=3, media_bytes=60_000)
+    version = make_edited_version(
+        original, replace={"ppt/slides/slide1.xml": _NEW_SLIDE_XML})
+    assert len(version) != len(original)
+    (corrupted,) = make_corrupted_copies(
+        original, [[("foreign_prefix", 4096)]])
+    broken_path = _write(_root := _mkroot(tmp_path), "broken.pptx", corrupted)
+    archive_path = _root / "versions.zip"
+    _write_zip(archive_path, {"versions/v1.pptx": version})
+    report_dir = tmp_path / "report"
+
+    exit_code = main(["scan", str(_root), "--report", str(report_dir),
+                      "--json", "--search-archives"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == EXIT_CORRUPT
+    label = f"{archive_path}::versions/v1.pptx"
+    entry = _file_entry(payload, broken_path)
+    lineage = next(c for c in entry["lineage_candidates"]
+                   if c["path"] == label)
+    assert lineage["origin_archive"] == str(archive_path)
+
+    text = (report_dir / "scan_report.txt").read_text(encoding="utf-8")
+    assert f"lineage candidate: {label}" in text
+
+
+# --- 3. archive material in a merge-candidate group --------------------------
+
+
+def test_search_archives_material_joins_merge_group(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """A corrupted archive member sharing an exact byte size with a
+    corrupted on-disk file joins its merge-candidate group, displayed by
+    its ``"::"`` label."""
+    base = build_minimal_pptx(num_slides=3, media_bytes=100_000)
+    copy_a, copy_b = make_corrupted_copies(base, [
+        [("foreign_prefix", 4096)],
+        [("foreign_prefix", 8192)],
+    ])
+    disk_path = _write(_root := _mkroot(tmp_path), "a.pptx", copy_a)
+    archive_path = _root / "backup.zip"
+    _write_zip(archive_path, {"backup/b.pptx": copy_b})
+    report_dir = tmp_path / "report"
+
+    exit_code = main(["scan", str(_root), "--report", str(report_dir),
+                      "--json", "--search-archives"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == EXIT_CORRUPT
+    label = f"{archive_path}::backup/b.pptx"
+    group = next(g for g in payload["merge_groups"]
+                 if g["size"] == len(base))
+    assert str(disk_path) in group["files"]
+    assert label in group["files"]
+
+    text = (report_dir / "scan_report.txt").read_text(encoding="utf-8")
+    merge_section = text.split("Merge candidates:")[1]
+    assert label in merge_section
+
+
+# --- 4. flag OFF: archives ignored, output unchanged -------------------------
+
+
+def test_flag_off_ignores_archives_entirely(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """Without ``--search-archives`` an archive in the tree is ignored: no
+    schema bump, no material keys, no archive-derived candidates, and the
+    scanned count reflects only the on-disk .pptx files."""
+    original = build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    broken_path = _write(_root := _mkroot(tmp_path), "broken.pptx",
+                         zero_prefix(original, _ZERO_HEAD))
+    archive_path = _root / "backup.zip"
+    _write_zip(archive_path, {"backup/broken.pptx": original})
+
+    exit_code = main(["scan", str(_root), "--json"])
+
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert exit_code == EXIT_CORRUPT
+    # The pre-archive schema carries no version / note fields at all.
+    assert "schema_version" not in payload
+    assert "archive_notes" not in payload
+    # Only the on-disk file is scanned; the archive is neither counted
+    # nor mined for donor material.
+    assert payload["summary"]["scanned"] == 1
+    assert "twin_candidates" not in _file_entry(payload, broken_path)
+    assert str(archive_path) not in out
+
+
+# --- 5. flag ON: schema 4, materials excluded from every tally ---------------
+
+
+def test_material_never_counted_in_scanned_or_verdicts(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """A mined archive member feeds the candidate sections but is absent
+    from the scanned count and the verdict tally (schema_version 4)."""
+    original = build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    broken_path = _write(_root := _mkroot(tmp_path), "broken.pptx",
+                         zero_prefix(original, _ZERO_HEAD))
+    archive_path = _root / "backup.zip"
+    _write_zip(archive_path, {"backup/broken.pptx": original})
+
+    exit_code = main(["scan", str(_root), "--json", "--search-archives"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == EXIT_CORRUPT
+    assert payload["schema_version"] == 4
+    # One on-disk target only; the intact member is not a scanned file.
+    assert payload["summary"]["scanned"] == 1
+    assert payload["summary"]["verdicts"] == {"head_zero_fill": 1}
+    # Yet it is present as donor material (proving it was mined, not
+    # counted).
+    label = f"{archive_path}::backup/broken.pptx"
+    entry = _file_entry(payload, broken_path)
+    assert any(t["path"] == label for t in entry["twin_candidates"])
+
+
+# --- 6. unreadable archive: noted, scan still completes ----------------------
+
+
+def test_unreadable_archive_is_noted_and_scan_completes(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """A ``.zip`` that cannot be opened yields an archive note without
+    aborting the scan of the surrounding tree."""
+    broken_path = _write(_root := _mkroot(tmp_path), "broken.pptx",
+                         zero_prefix(build_minimal_pptx(
+                             media_bytes=_MEDIA_BYTES), _ZERO_HEAD))
+    bad_archive = _root / "corrupt.zip"
+    bad_archive.write_bytes(b"this is not a valid zip archive at all")
+
+    exit_code = main(["scan", str(_root), "--json", "--search-archives"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == EXIT_CORRUPT
+    # The scan of the on-disk tree still succeeded.
+    assert payload["summary"]["scanned"] == 1
+    assert _file_entry(payload, broken_path)["verdict"] == "head_zero_fill"
+    # The unreadable archive is surfaced as a note, naming the archive.
+    assert any("cannot read archive" in note and str(bad_archive) in note
+               for note in payload["archive_notes"])
+
+
+# --- 7. repair-all: candidates shown, material never repaired ----------------
+
+
+def test_repair_all_never_repairs_archive_material(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """``repair-all --search-archives`` repairs only the on-disk corrupted
+    files; the archive member feeds the candidate sections but produces no
+    artifact and no repair entry of its own."""
+    trunc = _rebuildable_truncated()
+    original = build_minimal_pptx(num_slides=3, media_bytes=4096)
+    trunc_path = _write(_root := _mkroot(tmp_path), "trunc.pptx", trunc)
+    archive_path = _root / "backup.zip"
+    _write_zip(archive_path, {"backup/trunc.pptx": original})
+    out_dir = tmp_path / "out"
+
+    exit_code = main(["repair-all", str(_root), "-o", str(out_dir),
+                      "--json", "--search-archives"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == EXIT_OK
+    assert payload["schema_version"] == 4
+    # Exactly one corrupted on-disk file was repaired; the material added
+    # no repair entry.
+    assert payload["counts"]["repaired"] == 1
+    assert len(payload["repairs"]) == 1
+    assert payload["repairs"][0]["path"] == str(trunc_path)
+    # The member surfaces as a candidate in the embedded scan payload.
+    label = f"{archive_path}::backup/trunc.pptx"
+    scan_entry = next(f for f in payload["scan"]["files"]
+                      if f["path"] == str(trunc_path))
+    assert any(t["path"] == label for t in scan_entry.get("twin_candidates", []))
+    # No artifact is ever derived from the archive member.
+    repaired = list(out_dir.rglob("*.repaired.pptx"))
+    assert [p.name for p in repaired] == ["trunc.repaired.pptx"]
+
+
+# --- cloud-placeholder archives obey the download rule -----------------------
+
+
+def test_placeholder_archive_skipped_without_allow_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: CaptureFixture
+) -> None:
+    """A cloud-only placeholder archive is not mined without
+    ``--allow-download``: it is counted as a skipped cloud-only file and
+    offers no donor material (no implicit download)."""
+    original = build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    root = _mkroot(tmp_path)
+    broken_path = _write(root, "broken.pptx", zero_prefix(original, _ZERO_HEAD))
+    archive_path = root / "backup.zip"
+    _write_zip(archive_path, {"backup/broken.pptx": original})
+    arc_ino = archive_path.stat().st_ino
+    monkeypatch.setattr(walker_module, "is_cloud_placeholder",
+                        lambda st: st.st_ino == arc_ino)
+
+    exit_code = main(["scan", str(root), "--json", "--search-archives"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == EXIT_CORRUPT
+    # The placeholder archive is left un-hydrated: no member is mined.
+    assert "twin_candidates" not in _file_entry(payload, broken_path)
+    # It is accounted for as a skipped cloud-only file instead.
+    assert str(archive_path) in payload["skipped_cloud"]
+    assert payload["summary"]["skipped"]["cloud_placeholder"] == 1
+
+
+def test_placeholder_archive_mined_with_allow_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: CaptureFixture
+) -> None:
+    """With ``--allow-download`` a placeholder archive is hydrated (its
+    download announced on stderr first), mined, and its intact twin
+    surfaces as a candidate; it is not also counted as skipped."""
+    original = build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    root = _mkroot(tmp_path)
+    broken_path = _write(root, "broken.pptx", zero_prefix(original, _ZERO_HEAD))
+    archive_path = root / "backup.zip"
+    _write_zip(archive_path, {"backup/broken.pptx": original})
+    arc_ino = archive_path.stat().st_ino
+    monkeypatch.setattr(walker_module, "is_cloud_placeholder",
+                        lambda st: st.st_ino == arc_ino)
+
+    exit_code = main(["scan", str(root), "--json", "--search-archives",
+                      "--allow-download"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == EXIT_CORRUPT
+    # The impending hydration is announced before the archive is read.
+    assert f"Downloading cloud-only file: {archive_path}" in captured.err
+    # The archive is now mined and offers its intact twin as a candidate.
+    label = f"{archive_path}::backup/broken.pptx"
+    entry = _file_entry(payload, broken_path)
+    assert any(t["path"] == label for t in entry["twin_candidates"])
+    # It is not double-counted as a skipped cloud-only file.
+    assert str(archive_path) not in payload["skipped_cloud"]
+
+
+# --- 8. temporary extraction paths never leak --------------------------------
+
+
+def test_no_temporary_extraction_path_leaks(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """Neither the JSON nor the written text/JSON reports ever name the
+    temporary directory or the ``memberNNNN-`` destination file a member
+    was extracted to; only the ``"::"`` label appears."""
+    original = build_minimal_pptx(media_bytes=_MEDIA_BYTES)
+    _write(_root := _mkroot(tmp_path), "broken.pptx",
+           zero_prefix(original, _ZERO_HEAD))
+    archive_path = _root / "backup.zip"
+    _write_zip(archive_path, {"deep/folder/broken.pptx": original})
+    report_dir = tmp_path / "report"
+
+    exit_code = main(["scan", str(_root), "--report", str(report_dir),
+                      "--json", "--search-archives"])
+
+    out = capsys.readouterr().out
+    report_txt = (report_dir / "scan_report.txt").read_text(encoding="utf-8")
+    report_json = (report_dir / "scan_report.json").read_text(encoding="utf-8")
+    assert exit_code == EXIT_CORRUPT
+    for blob in (out, report_txt, report_json):
+        assert "member0000" not in blob
+        assert "pptrepair-scan-arc-" not in blob
+    label = f"{archive_path}::deep/folder/broken.pptx"
+    assert label in out
+    assert label in report_txt

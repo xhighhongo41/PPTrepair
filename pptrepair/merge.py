@@ -190,10 +190,28 @@ class MergeOutcome:
     """Factual English notes: excluded sources, gaps, degradations, etc."""
 
 
+def _display_name(path: Path, display: dict[Path, str] | None) -> str:
+    """Return *path*'s note-friendly label.
+
+    When *display* maps *path* to an archive-member label (a source
+    materialized from inside a backup archive, ``"<archive>::<member>"``
+    -- see :mod:`pptrepair.archive`), that label is returned so the
+    temporary on-disk path a note is built from is never shown to the
+    user; otherwise falls back to *path*'s plain file name, exactly as
+    every note in this module read before archive sources existed.
+    """
+    if display is not None:
+        label = display.get(path)
+        if label is not None:
+            return label
+    return path.name
+
+
 def merge_restore(
         sources: list[Path], output: Path | None = None, *,
         force: bool = False, allow_candidate: bool = False,
-        allow_lineage: bool = False, lang: str = "en") -> MergeOutcome:
+        allow_lineage: bool = False, lang: str = "en",
+        display: dict[Path, str] | None = None) -> MergeOutcome:
     """Reconstruct the original file from several same-origin *sources*.
 
     The first source is the *target*; every other is compared against it
@@ -220,6 +238,9 @@ def merge_restore(
     an existing path raises :class:`pptrepair.repair.OutputExistsError`
     unless *force*. A ``failed`` run leaves no file behind. *lang* is
     accepted for signature parity with the CLI stage and otherwise unused.
+    *display* optionally maps a *sources* path to a user-facing label
+    (see :func:`_display_name`); it changes no recovery logic, only how a
+    source is named in :attr:`MergeOutcome.notes`.
 
     :raises ValueError: when fewer than two sources are given, or any
         source is not an existing file.
@@ -243,11 +264,12 @@ def merge_restore(
     target_diag, target_error = diagnose_file(target)
     if target_diag is None:
         notes.append(
-            f"target {target.name} could not be diagnosed: {target_error}")
+            f"target {_display_name(target, display)} could not be "
+            f"diagnosed: {target_error}")
 
     usable, donor_specs = _select_usable_sources(
         sources[1:], target, target_diag, allow_candidate, allow_lineage,
-        scores, notes)
+        scores, notes, display)
 
     copies: list[tuple[Path, Diagnosis]] = []
     if target_diag is not None:
@@ -260,7 +282,7 @@ def merge_restore(
     # Every copy is read whole into memory: the splice writes an output
     # of the common file size and reads entry ranges out of each copy.
     copy_bytes = {path: path.read_bytes() for path, _diag in copies}
-    _note_identical_copies(copies, copy_bytes, notes)
+    _note_identical_copies(copies, copy_bytes, notes, display)
 
     copy_paths = [path for path, _diag in copies]
     cd_copies = [(path, diag) for path, diag in copies
@@ -275,7 +297,7 @@ def merge_restore(
             cd_copies, key=lambda item: _lfh_survival(item[1]))
         result = _run_splice(
             ref_path, copy_bytes[ref_path], copy_paths, copy_bytes,
-            target, output_path, donor_specs, notes)
+            target, output_path, donor_specs, notes, display)
     if result is None:
         result = _run_degraded(
             copies, copy_bytes, donor_specs, output_path, notes)
@@ -287,14 +309,15 @@ def merge_restore(
 def _select_usable_sources(
         others: list[Path], target: Path, target_diag: Diagnosis | None,
         allow_candidate: bool, allow_lineage: bool, scores: list[OriginScore],
-        notes: list[str]
+        notes: list[str], display: dict[Path, str] | None = None
 ) -> tuple[list[tuple[Path, Diagnosis]],
            list[tuple[Path, Diagnosis, OriginScore]]]:
     """Diagnose and score each non-target source, sorting them by role.
 
     Appends one score per successfully diagnosed source to *scores* (in
     source order) and one explanatory line to *notes* for every source
-    excluded or held back. Returns ``(copies, donors)``:
+    excluded or held back (each named through :func:`_display_name`,
+    given *display*). Returns ``(copies, donors)``:
 
     * *copies* are the ``(path, diagnosis)`` pairs cleared for byte
       splicing -- ``auto`` tier always, ``candidate`` only when
@@ -306,15 +329,16 @@ def _select_usable_sources(
     copies: list[tuple[Path, Diagnosis]] = []
     donors: list[tuple[Path, Diagnosis, OriginScore]] = []
     for src in others:
+        label = _display_name(src, display)
         diag, error = diagnose_file(src)
         if diag is None:
             notes.append(
-                f"source {src.name} excluded: could not be diagnosed "
+                f"source {label} excluded: could not be diagnosed "
                 f"({error})")
             continue
         if target_diag is None:
             notes.append(
-                f"source {src.name} not scored: target diagnosis unavailable")
+                f"source {label} not scored: target diagnosis unavailable")
             continue
         score = score_origin(target_diag, diag)
         scores.append(score)
@@ -325,18 +349,18 @@ def _select_usable_sources(
                 copies.append((src, diag))
             else:
                 notes.append(
-                    f"candidate-tier source {src.name} not used "
+                    f"candidate-tier source {label} not used "
                     "(pass allow_candidate to include it)")
         elif score.tier == "lineage":
             if allow_lineage:
                 donors.append((src, diag, score))
             else:
                 notes.append(
-                    f"lineage-tier source {src.name} not used "
+                    f"lineage-tier source {label} not used "
                     "(pass allow_lineage to include it)")
         else:
             notes.append(
-                f"rejected-tier source {src.name} not used (not same origin)")
+                f"rejected-tier source {label} not used (not same origin)")
     return copies, donors
 
 
@@ -353,12 +377,14 @@ def _lfh_survival(diag: Diagnosis) -> float:
 
 def _note_identical_copies(copies: list[tuple[Path, Diagnosis]],
                            copy_bytes: dict[Path, bytes],
-                           notes: list[str]) -> None:
+                           notes: list[str],
+                           display: dict[Path, str] | None = None) -> None:
     """Record copies that are byte-for-byte identical (no merge gain).
 
     Copies are grouped by size first (a cheap disqualifier), and only the
     same-size ones are hashed, so a matching size is confirmed before any
-    SHA-256 work is done.
+    SHA-256 work is done. Each copy is named through :func:`_display_name`,
+    given *display*.
     """
     by_size: dict[int, list[Path]] = {}
     for path, _diag in copies:
@@ -372,7 +398,8 @@ def _note_identical_copies(copies: list[tuple[Path, Diagnosis]],
             by_hash.setdefault(digest, []).append(path)
         for paths in by_hash.values():
             if len(paths) > 1:
-                names = ", ".join(path.name for path in paths)
+                names = ", ".join(
+                    _display_name(path, display) for path in paths)
                 notes.append(f"identical copies: no merge gain from {names}")
 
 
@@ -489,13 +516,14 @@ def _run_splice(
         ref_path: Path, ref_bytes: bytes, copy_paths: list[Path],
         copy_bytes: dict[Path, bytes], target: Path, output_path: Path,
         donor_specs: list[tuple[Path, Diagnosis, OriginScore]],
-        notes: list[str]
+        notes: list[str], display: dict[Path, str] | None = None
 ) -> tuple[Path | None, str, list[EntryProvenance]] | None:
     """Splice each entry's byte range from the first CRC-valid copy.
 
     Any entry no copy can supply is offered to the lineage donors in
     *donor_specs* before the rebuild fallback (see
-    :func:`_rescue_missing_via_donors`). Returns
+    :func:`_rescue_missing_via_donors`). *display*, given, names sources
+    in *notes* through :func:`_display_name`. Returns
     ``(output_path, guarantee, provenances)`` on success, or None to
     signal that the reference central directory is untrustworthy and the
     caller should fall back to the degraded (LFH-union) mode.
@@ -503,8 +531,9 @@ def _run_splice(
     layout = _reference_layout(ref_path, ref_bytes)
     if layout is None:
         notes.append(
-            f"reference central directory in {ref_path.name} is not "
-            "usable; falling back to degraded mode")
+            f"reference central directory in "
+            f"{_display_name(ref_path, display)} is not usable; falling "
+            "back to degraded mode")
         return None
     entries, intervals, cd_start = layout
 
@@ -561,7 +590,7 @@ def _run_splice(
             if primary_donor is not None:
                 return _run_mode_b(
                     entries, adopted, donor_payloads, provenances,
-                    primary_donor, output_path, notes)
+                    primary_donor, output_path, notes, display)
 
         # Mode A. Second pass (unverified): an entry still missing --
         # typically plumbing XML whose CRC-32 necessarily differs between
@@ -592,7 +621,7 @@ def _run_splice(
 
     return _write_full_output(
         ref_bytes, cd_start, entries, intervals, adopted, target,
-        copy_bytes, output_path, provenances, notes)
+        copy_bytes, output_path, provenances, notes, display)
 
 
 def _rescue_missing_via_donors(
@@ -742,7 +771,8 @@ def _run_mode_b(
         donor_payloads: dict[str, bytes],
         splice_provenances: list[EntryProvenance],
         primary_donor: _DonorSource, output_path: Path,
-        notes: list[str]) -> tuple[Path | None, str, list[EntryProvenance]]:
+        notes: list[str], display: dict[Path, str] | None = None
+) -> tuple[Path | None, str, list[EntryProvenance]]:
     """Reconstruct the package in *primary_donor*'s namespace (Mode B).
 
     Reached when the splice and the oracle-checked first pass together left
@@ -770,6 +800,8 @@ def _run_mode_b(
     orphans, the drop recorded in *notes*. The returned provenances hold
     one entry per output part plus a ``"missing"`` entry for every
     reference part whose content reached the output under no name.
+    *display*, given, names *primary_donor* in *notes* through
+    :func:`_display_name`.
     """
     donor_recorded = primary_donor.recorded()
     ref_by_name = {entry.name: entry for entry in entries}
@@ -847,8 +879,9 @@ def _run_mode_b(
             f"part(s) not referenced by it were dropped: {shown}")
 
     notes.append(
-        f"structure adopted from donor {primary_donor.path.name} (Mode B): "
-        "parts are keyed to the donor's naming")
+        f"structure adopted from donor "
+        f"{_display_name(primary_donor.path, display)} (Mode B): parts are "
+        "keyed to the donor's naming")
 
     # Reference entries whose content reached the output under no name are
     # recorded as missing; a name the output keeps, or renamed content it
@@ -1160,14 +1193,16 @@ def _write_full_output(
         intervals: list[tuple[int, int]],
         adopted: dict[str, tuple[tuple[int, int], bytes, bytes]],
         target: Path, copy_bytes: dict[Path, bytes], output_path: Path,
-        provenances: list[EntryProvenance],
-        notes: list[str]) -> tuple[Path, str, list[EntryProvenance]]:
+        provenances: list[EntryProvenance], notes: list[str],
+        display: dict[Path, str] | None = None
+) -> tuple[Path, str, list[EntryProvenance]]:
     """Assemble the spliced output when every entry was recovered.
 
     Each adopted byte range is written at its offset, the central
     directory is copied from the reference, and any byte not covered by a
     range or the CD is filled from the target (downgrading the guarantee
-    to ``partial``). A final :meth:`zipfile.ZipFile.testzip` self-check
+    to ``partial``, and naming the target through :func:`_display_name`
+    given *display*). A final :meth:`zipfile.ZipFile.testzip` self-check
     downgrades to ``partial`` too if it does not pass.
     """
     size = len(ref_bytes)
@@ -1185,11 +1220,12 @@ def _write_full_output(
     gaps = _find_gaps(covered, size)
     if gaps:
         filler = copy_bytes.get(target, ref_bytes)
+        target_label = _display_name(target, display)
         for gap_start, gap_end in gaps:
             chunk = filler[gap_start:gap_end]
             buffer[gap_start:gap_start + len(chunk)] = chunk
             notes.append(
-                f"gap [{gap_start}, {gap_end}) filled from {target.name}")
+                f"gap [{gap_start}, {gap_end}) filled from {target_label}")
         guarantee = "partial"
 
     output_path.write_bytes(bytes(buffer))
