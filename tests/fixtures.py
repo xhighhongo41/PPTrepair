@@ -543,6 +543,45 @@ def zero_range(data: bytes, start: int, end: int) -> bytes:
     return data[:start] + b"\x00" * (end - start) + data[end:]
 
 
+def make_corrupted_copies(data: bytes, specs: list[list[tuple]]) -> list[bytes]:
+    """Build several distinctly corrupted copies of *data*.
+
+    Each element of *specs* describes one copy as an ordered list of
+    corruption operations, applied left to right onto a fresh copy of
+    *data* (an empty list leaves the copy untouched). Every operation is a
+    tuple whose first element names an existing byte-level transform in
+    this module:
+
+    * ``("zero_range", start, end)`` -> :func:`zero_range`;
+    * ``("foreign_prefix", length)`` -> :func:`foreign_prefix`;
+    * ``("truncate", length)`` -> :func:`truncate`.
+
+    Reproduces the real-world scenario in which several same-origin copies
+    (a working file plus its sync-conflict twins) are each damaged in a
+    different place, so merge restoration can splice the surviving byte
+    ranges back together.
+
+    :param specs: one operation list per copy to produce.
+    :return: the corrupted copies, in the same order as *specs*.
+    :raises ValueError: on an unknown operation name.
+    """
+    copies: list[bytes] = []
+    for spec in specs:
+        current = data
+        for operation in spec:
+            kind = operation[0]
+            if kind == "zero_range":
+                current = zero_range(current, operation[1], operation[2])
+            elif kind == "foreign_prefix":
+                current = foreign_prefix(current, operation[1])
+            elif kind == "truncate":
+                current = truncate(current, operation[1])
+            else:
+                raise ValueError(f"unknown corruption operation: {kind!r}")
+        copies.append(current)
+    return copies
+
+
 def find_eocd(data: bytes) -> tuple[int, int, int]:
     """Locate and parse the last end-of-central-directory record in *data*.
 
@@ -792,6 +831,48 @@ def rebuild_with_entries(data: bytes, extra: dict[str, bytes] | None = None,
             compress = (zipfile.ZIP_STORED if name in stored
                         else zipfile.ZIP_DEFLATED)
             zf.writestr(name, payload, compress_type=compress)
+    return buffer.getvalue()
+
+
+def make_edited_version(data: bytes, *, replace: dict[str, bytes] | None = None,
+                        add: dict[str, bytes] | None = None,
+                        remove: list[str] | None = None) -> bytes:
+    """Build an edited copy of an existing archive.
+
+    Reads *data* as a ZIP and re-emits its entries in their original
+    order and compression method, applying up to three edits: *replace*
+    swaps in a new payload for an existing member, *remove* drops named
+    members entirely, and *add* appends new members afterwards
+    (``ZIP_DEFLATED``, except names under ``ppt/media/`` which are
+    written ``ZIP_STORED`` to mimic PowerPoint's own uncompressed media
+    parts). Used to synthesise a plausible "different version of the
+    same presentation" -- most parts unchanged, a handful edited -- for
+    same-origin scoring tests.
+
+    :param replace: mapping of existing member name to its new payload.
+    :param add: mapping of new member name to its payload.
+    :param remove: member names to drop entirely.
+    :return: the edited ZIP archive as bytes.
+    """
+    replace = dict(replace or {})
+    remove_set = set(remove or [])
+    items: list[tuple[str, bytes, int]] = []
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for info in zf.infolist():
+            name = info.filename
+            if name in remove_set:
+                continue
+            payload = replace.get(name, zf.read(name))
+            items.append((name, payload, info.compress_type))
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w") as zf:
+        for name, payload, compress_type in items:
+            zf.writestr(name, payload, compress_type=compress_type)
+        for name, payload in (add or {}).items():
+            compress_type = (zipfile.ZIP_STORED if name.startswith("ppt/media/")
+                             else zipfile.ZIP_DEFLATED)
+            zf.writestr(name, payload, compress_type=compress_type)
     return buffer.getvalue()
 
 

@@ -240,3 +240,63 @@ msgstr "nur gleiche Größe"
 msgid "same name only"
 msgstr "nur gleicher Name"
 
+msgid "=== Merge summary ==="
+msgstr "=== Zusammenführungsübersicht ==="
+
+msgid "Guarantee: {guarantee}"
+msgstr "Garantie: {guarantee}"
+
+msgid "Entries by source:"
+msgstr "Einträge nach Quelle:"
+
+msgid "Warning: part of the output comes from a different version and is not guaranteed to be identical to the original."
+msgstr "Warnung: Ein Teil der Ausgabe stammt aus einer anderen Version und ist nicht garantiert mit dem Original identisch."
+
+msgid "Notes:"
+msgstr "Hinweise:"
+
+msgid "Candidate-tier source not used: {path} (pass --allow-candidate, --yes, or confirm the prompt to include it)"
+msgstr "Quelle der Stufe candidate nicht verwendet: {path} (geben Sie --allow-candidate, --yes an, oder bestätigen Sie die Abfrage, um sie einzuschließen)"
+
+msgid "Lineage-tier source not used: {path} (pass --yes or confirm the prompt to include it)"
+msgstr "Quelle der Stufe lineage nicht verwendet: {path} (geben Sie --yes an, oder bestätigen Sie die Abfrage, um sie einzuschließen)"
+
+msgid "Source not used (not the same origin): {path}"
+msgstr "Quelle nicht verwendet (kein gemeinsamer Ursprung): {path}"
+
+msgid "Source: {path}"
+msgstr "Quelle: {path}"
+
+msgid "Tier: {tier}"
+msgstr "Stufe: {tier}"
+
+msgid "Size match: {value}"
+msgstr "Größenübereinstimmung: {value}"
+
+msgid "Triple ratio: {pct}%"
+msgstr "Tripel-Quote: {pct}%"
+
+msgid "Name ratio: {pct}%"
+msgstr "Namens-Quote: {pct}%"
+
+msgid "Media ratio: {pct}%"
+msgstr "Medien-Quote: {pct}%"
+
+msgid "Lineage score: {value}"
+msgstr "Abstammungswert: {value}"
+
+msgid "Use this source for the merge? [y/N] "
+msgstr "Diese Quelle für die Zusammenführung verwenden? [y/N] "
+
+msgid "Merge candidates:"
+msgstr "Zusammenführungskandidaten:"
+
+msgid "  {size} bytes: {files}"
+msgstr "  {size} Bytes: {files}"
+
+msgid "    These files may be the same saved version and could be repaired together into one file with pptrepair merge."
+msgstr "    Diese Dateien könnten dieselbe gespeicherte Version sein und könnten mit pptrepair merge gemeinsam zu einer Datei repariert werden."
+
+msgid "  lineage candidate: {path} (score {score})"
+msgstr "  Abstammungskandidat: {path} (Wert {score})"
+

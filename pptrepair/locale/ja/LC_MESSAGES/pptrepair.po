@@ -240,3 +240,63 @@ msgstr "同サイズのみ"
 msgid "same name only"
 msgstr "同名のみ"
 
+msgid "=== Merge summary ==="
+msgstr "=== マージ概要 ==="
+
+msgid "Guarantee: {guarantee}"
+msgstr "保証レベル: {guarantee}"
+
+msgid "Entries by source:"
+msgstr "採用元ごとの件数:"
+
+msgid "Warning: part of the output comes from a different version and is not guaranteed to be identical to the original."
+msgstr "警告: 出力の一部は別バージョン由来であり、原本と完全に同一である保証はありません。"
+
+msgid "Notes:"
+msgstr "備考:"
+
+msgid "Candidate-tier source not used: {path} (pass --allow-candidate, --yes, or confirm the prompt to include it)"
+msgstr "candidate判定のソースは未使用: {path}（含めるには --allow-candidate か --yes を指定するか、確認プロンプトで承認してください）"
+
+msgid "Lineage-tier source not used: {path} (pass --yes or confirm the prompt to include it)"
+msgstr "lineage判定のソースは未使用: {path}（含めるには --yes を指定するか、確認プロンプトで承認してください）"
+
+msgid "Source not used (not the same origin): {path}"
+msgstr "ソースは未使用（同一原本と判定されませんでした）: {path}"
+
+msgid "Source: {path}"
+msgstr "ソース: {path}"
+
+msgid "Tier: {tier}"
+msgstr "判定: {tier}"
+
+msgid "Size match: {value}"
+msgstr "サイズ一致: {value}"
+
+msgid "Triple ratio: {pct}%"
+msgstr "triple一致率: {pct}%"
+
+msgid "Name ratio: {pct}%"
+msgstr "name一致率: {pct}%"
+
+msgid "Media ratio: {pct}%"
+msgstr "media一致率: {pct}%"
+
+msgid "Lineage score: {value}"
+msgstr "lineageスコア: {value}"
+
+msgid "Use this source for the merge? [y/N] "
+msgstr "このソースをマージに使用しますか? [y/N] "
+
+msgid "Merge candidates:"
+msgstr "マージ候補:"
+
+msgid "  {size} bytes: {files}"
+msgstr "  {size} バイト: {files}"
+
+msgid "    These files may be the same saved version and could be repaired together into one file with pptrepair merge."
+msgstr "    これらは同じ保存バージョンの可能性があり、pptrepair merge で1つのファイルに統合修復できるかもしれません。"
+
+msgid "  lineage candidate: {path} (score {score})"
+msgstr "  別バージョン候補: {path}（スコア {score}）"
+

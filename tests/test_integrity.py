@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from pptrepair.integrity import (inspect_references, inspect_structure,
-                                 inspect_timing)
+from pptrepair.integrity import (inspect_orphans, inspect_references,
+                                 inspect_structure, inspect_timing)
 
 _A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -677,3 +677,135 @@ def test_structure_corrupt_rels_recorded_and_required_types_missing(
     missing = result.missing[0]
     assert (missing.part, missing.required_type) == (
         "ppt/slideMasters/slideMaster3.xml", "theme")
+
+
+# --- inspect_orphans: unreferenced slide / notes-slide detection ----------
+
+
+def _orphan_base_parts() -> dict[str, bytes]:
+    """Return a small, fully-referenced deck (one slide, one notes slide).
+
+    ``ppt/_rels/presentation.xml.rels`` references the slide and the slide's
+    own ``.rels`` references its notes slide, so both target parts are
+    reachable and :func:`inspect_orphans` reports nothing for the base deck.
+    """
+    return {
+        "[Content_Types].xml": b'<Types xmlns="urn:example:types"/>',
+        "_rels/.rels": _rels_xml(
+            [("rId1", "officeDocument", "ppt/presentation.xml")]),
+        "ppt/presentation.xml": b"<p:presentation/>",
+        "ppt/_rels/presentation.xml.rels": _rels_xml(
+            [("rId1", "slide", "slides/slide1.xml")]),
+        "ppt/slides/slide1.xml": b"<p:sld/>",
+        "ppt/slides/_rels/slide1.xml.rels": _rels_xml(
+            [("rId1", "notesSlide", "../notesSlides/notesSlide1.xml")]),
+        "ppt/notesSlides/notesSlide1.xml": b"<p:notes/>",
+        "ppt/notesSlides/_rels/notesSlide1.xml.rels": _rels_xml(
+            [("rId1", "slide", "../slides/slide1.xml")]),
+    }
+
+
+# --- (a) a fully-referenced deck has no orphans ---------------------------
+
+
+def test_orphans_referenced_deck_has_none(tmp_path: Path) -> None:
+    """A deck whose slide and notes slide are referenced has no orphans."""
+    path = _make_pptx(tmp_path / "orphans_healthy.pptx", _orphan_base_parts())
+
+    result = inspect_orphans(path)
+
+    assert result.orphans == []
+
+
+# --- (b) an unreferenced slide is reported --------------------------------
+
+
+def test_orphan_slide_detected(tmp_path: Path) -> None:
+    """An unreferenced slide part is reported; the referenced one is not."""
+    parts = _orphan_base_parts()
+    parts["ppt/slides/slide99.xml"] = b"<p:sld/>"  # no relationship targets it
+    path = _make_pptx(tmp_path / "orphan_slide.pptx", parts)
+
+    result = inspect_orphans(path)
+
+    assert [(orphan.name, orphan.kind) for orphan in result.orphans] == [
+        ("ppt/slides/slide99.xml", "slide")]
+
+
+# --- (c) an unreferenced notes slide is reported --------------------------
+
+
+def test_orphan_notes_slide_detected(tmp_path: Path) -> None:
+    """An unreferenced notes-slide part is reported with kind notes_slide."""
+    parts = _orphan_base_parts()
+    parts["ppt/notesSlides/notesSlide99.xml"] = b"<p:notes/>"
+    path = _make_pptx(tmp_path / "orphan_notes.pptx", parts)
+
+    result = inspect_orphans(path)
+
+    assert [(orphan.name, orphan.kind) for orphan in result.orphans] == [
+        ("ppt/notesSlides/notesSlide99.xml", "notes_slide")]
+
+
+# --- (d) unreferenced non-target parts are never flagged ------------------
+
+
+def test_orphans_ignore_unreferenced_non_target_parts(tmp_path: Path) -> None:
+    """A layout or media part no relationship targets is not an orphan.
+
+    Only slides and notes slides are inspected, so an unreferenced slide
+    layout (legitimately reachable from a master) and a stray media part are
+    both left out entirely, avoiding a false positive.
+    """
+    parts = _orphan_base_parts()
+    parts["ppt/slideLayouts/slideLayout9.xml"] = b"<p:sldLayout/>"
+    parts["ppt/media/image9.png"] = b"\x89PNG-fake"
+    path = _make_pptx(tmp_path / "orphans_non_target.pptx", parts)
+
+    result = inspect_orphans(path)
+
+    assert result.orphans == []
+
+
+# --- (e) an absolute (leading-slash) target resolves correctly ------------
+
+
+def test_orphans_absolute_target_resolves(tmp_path: Path) -> None:
+    """A slide referenced by a package-absolute Target is not an orphan."""
+    parts = _orphan_base_parts()
+    parts["ppt/_rels/presentation.xml.rels"] = _rels_xml(
+        [("rId1", "slide", "/ppt/slides/slide1.xml")])
+    path = _make_pptx(tmp_path / "orphans_absolute.pptx", parts)
+
+    result = inspect_orphans(path)
+
+    assert result.orphans == []
+
+
+# --- (f) a corrupt .rels part is skipped without aborting the scan --------
+
+
+def test_orphans_corrupt_rels_is_skipped(tmp_path: Path) -> None:
+    """An unparsable .rels contributes no references but does not abort.
+
+    ``slide1`` is referenced only by the corrupted presentation rels, so it
+    is reported as an orphan; the intact ``slide1`` rels is still scanned,
+    keeping its notes slide referenced. The corrupt rels neither aborts the
+    scan nor counts as a reference.
+    """
+    parts = {
+        "ppt/presentation.xml": b"<p:presentation/>",
+        "ppt/_rels/presentation.xml.rels": b"<Relationships broken",
+        "ppt/slides/slide1.xml": b"<p:sld/>",
+        "ppt/slides/_rels/slide1.xml.rels": _rels_xml(
+            [("rId1", "notesSlide", "../notesSlides/notesSlide1.xml")]),
+        "ppt/notesSlides/notesSlide1.xml": b"<p:notes/>",
+        "ppt/notesSlides/_rels/notesSlide1.xml.rels": _rels_xml(
+            [("rId1", "notesMaster", "../notesMasters/notesMaster1.xml")]),
+    }
+    path = _make_pptx(tmp_path / "orphans_corrupt_rels.pptx", parts)
+
+    result = inspect_orphans(path)
+
+    assert [(orphan.name, orphan.kind) for orphan in result.orphans] == [
+        ("ppt/slides/slide1.xml", "slide")]

@@ -240,3 +240,63 @@ msgstr "mismo tamaño solamente"
 msgid "same name only"
 msgstr "mismo nombre solamente"
 
+msgid "=== Merge summary ==="
+msgstr "=== Resumen de fusión ==="
+
+msgid "Guarantee: {guarantee}"
+msgstr "Garantía: {guarantee}"
+
+msgid "Entries by source:"
+msgstr "Entradas por origen:"
+
+msgid "Warning: part of the output comes from a different version and is not guaranteed to be identical to the original."
+msgstr "Advertencia: parte de la salida proviene de una versión diferente y no se garantiza que sea idéntica al original."
+
+msgid "Notes:"
+msgstr "Notas:"
+
+msgid "Candidate-tier source not used: {path} (pass --allow-candidate, --yes, or confirm the prompt to include it)"
+msgstr "Origen de nivel candidate no utilizado: {path} (pase --allow-candidate, --yes, o confirme la petición para incluirlo)"
+
+msgid "Lineage-tier source not used: {path} (pass --yes or confirm the prompt to include it)"
+msgstr "Origen de nivel lineage no utilizado: {path} (pase --yes o confirme la petición para incluirlo)"
+
+msgid "Source not used (not the same origin): {path}"
+msgstr "Origen no utilizado (no es el mismo origen): {path}"
+
+msgid "Source: {path}"
+msgstr "Origen: {path}"
+
+msgid "Tier: {tier}"
+msgstr "Nivel: {tier}"
+
+msgid "Size match: {value}"
+msgstr "Coincidencia de tamaño: {value}"
+
+msgid "Triple ratio: {pct}%"
+msgstr "Proporción triple: {pct}%"
+
+msgid "Name ratio: {pct}%"
+msgstr "Proporción de nombres: {pct}%"
+
+msgid "Media ratio: {pct}%"
+msgstr "Proporción de multimedia: {pct}%"
+
+msgid "Lineage score: {value}"
+msgstr "Puntuación de linaje: {value}"
+
+msgid "Use this source for the merge? [y/N] "
+msgstr "¿Usar este origen para la fusión? [y/N] "
+
+msgid "Merge candidates:"
+msgstr "Candidatos de fusión:"
+
+msgid "  {size} bytes: {files}"
+msgstr "  {size} bytes: {files}"
+
+msgid "    These files may be the same saved version and could be repaired together into one file with pptrepair merge."
+msgstr "    Estos archivos pueden ser la misma versión guardada y podrían repararse juntos en un solo archivo con pptrepair merge."
+
+msgid "  lineage candidate: {path} (score {score})"
+msgstr "  candidato de linaje: {path} (puntuación {score})"
+

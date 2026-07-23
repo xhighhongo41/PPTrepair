@@ -28,6 +28,17 @@ part's relationship out of a slide master's ``.rels`` is exactly this
 case (see ``開発資料/v1.1.2実装計画.md`` §10, addendum item C, for the
 design rationale); :func:`inspect_structure` surfaces it.
 
+A fourth, still unrelated source is an *orphan* slide or notes slide: a
+``ppt/slides/slideN.xml`` or ``ppt/notesSlides/notesSlideN.xml`` part that
+no relationship anywhere in the package points at. A merge or rebuild that
+keeps a part the surviving -- or borrowed -- presentation structure never
+references leaves it unreachable, and PowerPoint again offers to repair
+the file; :func:`inspect_orphans` surfaces these. Only slides and notes
+slides are inspected: layouts, masters, themes and media are legitimately
+reachable from a master or by extension convention even when no explicit
+relationship names them, so flagging an unreferenced one would be a false
+positive.
+
 The inspection is read-only and uses only the standard library. Callers
 are responsible for handling :class:`zipfile.BadZipFile`; this module
 never catches it, so a malformed archive simply propagates the exception
@@ -169,6 +180,26 @@ class StructureIntegrityResult:
     required relationships are all counted as missing regardless)."""
 
 
+@dataclass
+class OrphanPart:
+    """One slide or notes slide no relationship in the package references."""
+
+    name: str
+    """Package-relative name of the orphaned part, e.g.
+    ``"ppt/slides/slide58.xml"``."""
+    kind: str
+    """Either ``"slide"`` (a ``ppt/slides/slideN.xml`` part) or
+    ``"notes_slide"`` (a ``ppt/notesSlides/notesSlideN.xml`` part)."""
+
+
+@dataclass
+class OrphanIntegrityResult:
+    """Outcome of one :func:`inspect_orphans` run."""
+
+    orphans: list[OrphanPart]
+    """Every unreferenced slide/notes-slide part, ordered by part name."""
+
+
 #: Required-relationship rules: a part name pattern paired with the
 #: relationship ``Type`` tail(s) its ``.rels`` must define at least one
 #: of each, per ``開発資料/v1.1.2実装計画.md`` §10 (addendum item C).
@@ -182,6 +213,15 @@ _STRUCTURE_RULES: list[tuple[re.Pattern[str], tuple[str, ...]]] = [
     (re.compile(r"^ppt/notesSlides/notesSlide\d+\.xml$"),
      ("slide", "notesMaster")),
     (re.compile(r"^ppt/presentation\.xml$"), ("slideMaster",)),
+]
+
+#: Part-name patterns paired with the :class:`OrphanPart` ``kind`` reported
+#: for them; only these two part families are checked for orphaning, since
+#: any other unreferenced part kind would be a false positive (see the
+#: module docstring).
+_ORPHAN_RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^ppt/slides/slide\d+\.xml$"), "slide"),
+    (re.compile(r"^ppt/notesSlides/notesSlide\d+\.xml$"), "notes_slide"),
 ]
 
 
@@ -398,6 +438,111 @@ def inspect_structure(path: Path) -> StructureIntegrityResult:
         missing=missing,
         parse_errors=parse_errors,
     )
+
+
+def inspect_orphans(path: Path) -> OrphanIntegrityResult:
+    """Report slides / notes slides no relationship in the package targets.
+
+    The set of *referenced* parts is built by walking every ``.rels`` entry
+    in the archive and resolving each ``Relationship``'s ``Target`` against
+    that ``.rels`` part's own base directory (``X/`` for a
+    ``X/_rels/Y.rels`` part, the package root for ``_rels/.rels``), exactly
+    as OPC does. ``TargetMode="External"`` relationships are skipped, since
+    they name resources outside the package rather than an internal part.
+    A ``.rels`` that cannot be parsed as XML contributes no references but
+    does not abort the scan.
+
+    Every archive entry matching one of :data:`_ORPHAN_RULES`
+    (``ppt/slides/slideN.xml`` or ``ppt/notesSlides/notesSlideN.xml``) that
+    is absent from that referenced set is reported as an
+    :class:`OrphanPart`, ordered by part name. No other part kind is
+    inspected: an unreferenced layout, master, theme or media part is
+    reachable by convention (or from a master) and would be a false
+    positive.
+
+    This function opens *path* read-only and never modifies it.
+    :class:`zipfile.BadZipFile` is not caught here and propagates to the
+    caller.
+    """
+    with zipfile.ZipFile(path) as archive:
+        name_set = set(archive.namelist())
+        referenced = _collect_referenced_parts(archive, name_set)
+
+    orphans: list[OrphanPart] = []
+    for name in sorted(name_set):
+        kind = _orphan_kind(name)
+        if kind is None or name in referenced:
+            continue
+        orphans.append(OrphanPart(name=name, kind=kind))
+
+    return OrphanIntegrityResult(orphans=orphans)
+
+
+def _orphan_kind(name: str) -> str | None:
+    """Return *name*'s orphan ``kind``, or None when it is not checked."""
+    for pattern, kind in _ORPHAN_RULES:
+        if pattern.match(name):
+            return kind
+    return None
+
+
+def _collect_referenced_parts(archive: zipfile.ZipFile,
+                              name_set: set[str]) -> set[str]:
+    """Return every internal part targeted by a relationship in the archive.
+
+    Walks all ``.rels`` entries, resolving each internal (non-External)
+    ``Relationship``'s ``Target`` against the ``.rels`` part's base
+    directory. Unparsable ``.rels`` parts are skipped silently, since the
+    orphan check only needs the references it can positively read.
+    """
+    referenced: set[str] = set()
+    for rels_name in name_set:
+        if not rels_name.endswith(".rels"):
+            continue
+        try:
+            root = ET.fromstring(archive.read(rels_name))
+        except ET.ParseError:
+            continue
+        base = _rels_base_dir(rels_name)
+        for child in root:
+            if not isinstance(child.tag, str):
+                continue
+            if _local_name(child.tag) != "Relationship":
+                continue
+            if child.get("TargetMode") == "External":
+                continue
+            target = child.get("Target")
+            if not target:
+                continue
+            referenced.add(_resolve_rels_target(base, target))
+    return referenced
+
+
+def _rels_base_dir(rels_name: str) -> str:
+    """Return the base directory a ``.rels`` part resolves its targets against.
+
+    A relationships part ``X/_rels/Y.rels`` resolves relative targets
+    against ``X/`` (kept with its trailing slash); the package-root
+    ``_rels/.rels`` resolves against the empty string.
+    """
+    index = rels_name.rfind("_rels/")
+    if index == -1:
+        return ""
+    return rels_name[:index]
+
+
+def _resolve_rels_target(base: str, target: str) -> str:
+    """Resolve a relationship *target* against its *base* directory.
+
+    A leading slash makes the target package-root relative; otherwise it is
+    joined onto *base*. The result is POSIX-normalised so ``../`` and
+    ``./`` segments collapse to a canonical package-relative part name.
+    """
+    if target.startswith("/"):
+        cleaned = target[1:]
+    else:
+        cleaned = posixpath.join(base, target)
+    return posixpath.normpath(cleaned)
 
 
 def _collect_refs(root: ET.Element, part: str) -> list[DanglingRef]:

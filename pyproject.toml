@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pptrepair"
-version = "1.2.1.1"
+dynamic = ["version"]
 description = "Diagnose (and eventually repair) PowerPoint .pptx files corrupted while stored on OneDrive"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -26,6 +26,9 @@ dev = ["pytest"]
 
 [tool.setuptools]
 packages = ["pptrepair"]
+
+[tool.setuptools.dynamic]
+version = {attr = "pptrepair.__version__"}
 
 [tool.setuptools.package-data]
 pptrepair = ["locale/*/LC_MESSAGES/*.mo"]

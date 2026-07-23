@@ -99,6 +99,15 @@ class EntryResult:
     file_size: int
     ok: bool
     error: str | None = None
+    crc: int | None = None
+    """Expected CRC-32 as recorded by the archive itself (central
+    directory, local file header, or data descriptor), independent of
+    whether the entry's actual data verified against it. None when the
+    recorded value could not be determined (e.g. a streamed entry whose
+    trailing data descriptor was never reached)."""
+    comp_size: int | None = None
+    """Recorded compressed size in bytes, from the same source as
+    ``crc`` and subject to the same None condition."""
 
 
 @dataclass
@@ -201,6 +210,8 @@ def _census_cd_entry(zf: zipfile.ZipFile,
         file_size=info.file_size,
         ok=ok,
         error=error,
+        crc=info.CRC,
+        comp_size=info.compress_size,
     )
 
 
@@ -331,24 +342,29 @@ def _census_fixed_entry(f: BinaryIO, sig_pos: int, name: str, category: str,
     """
     if data_start + comp_size > file_size:
         # The data runs past EOF: a truncated entry. Its data end lies
-        # outside the file, so stop scanning here.
+        # outside the file, so stop scanning here. The header itself was
+        # fully parsed, so its recorded crc/comp_size are still known.
         entry = EntryResult(
             name=name, category=category, header_offset=sig_pos,
-            file_size=uncomp_size, ok=False, error="Truncated")
+            file_size=uncomp_size, ok=False, error="Truncated",
+            crc=header_crc, comp_size=comp_size)
         return entry, file_size
     try:
         computed_crc = _crc_of_fixed_data(f, data_start, comp_size, method)
     except Exception as exc:
         # On a decompression failure the boundaries are untrustworthy,
-        # so resume searching just past the candidate signature.
+        # so resume searching just past the candidate signature. The
+        # header's recorded crc/comp_size remain known regardless.
         entry = EntryResult(
             name=name, category=category, header_offset=sig_pos,
-            file_size=uncomp_size, ok=False, error=type(exc).__name__)
+            file_size=uncomp_size, ok=False, error=type(exc).__name__,
+            crc=header_crc, comp_size=comp_size)
         return entry, sig_pos + 4
     ok = computed_crc == header_crc
     entry = EntryResult(
         name=name, category=category, header_offset=sig_pos,
-        file_size=uncomp_size, ok=ok, error=None if ok else "BadCRC")
+        file_size=uncomp_size, ok=ok, error=None if ok else "BadCRC",
+        crc=header_crc, comp_size=comp_size)
     return entry, data_start + comp_size
 
 
@@ -415,11 +431,12 @@ def _census_streamed_entry(f: BinaryIO, sig_pos: int, name: str,
             name=name, category=category, header_offset=sig_pos,
             file_size=out_len, ok=False, error="MissingDescriptor")
         return entry, file_size
-    dd_crc, _dd_comp, dd_uncomp, descriptor_end = descriptor
+    dd_crc, dd_comp, dd_uncomp, descriptor_end = descriptor
     ok = computed_crc == dd_crc
     entry = EntryResult(
         name=name, category=category, header_offset=sig_pos,
-        file_size=dd_uncomp, ok=ok, error=None if ok else "BadCRC")
+        file_size=dd_uncomp, ok=ok, error=None if ok else "BadCRC",
+        crc=dd_crc, comp_size=dd_comp)
     return entry, descriptor_end
 
 

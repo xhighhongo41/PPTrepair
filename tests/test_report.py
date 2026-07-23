@@ -6,6 +6,13 @@ rendering layer itself -- verdict labels, repair-report layout and the
 JSON schema -- not about how a diagnosis or outcome was produced. See
 :mod:`test_cli` / :mod:`test_scan_cli` / :mod:`test_repair` for
 end-to-end coverage of the same rendering through the CLI.
+
+The v1.3 merge-candidate / lineage-candidate sections are the
+exception: they need real central-directory/local-file-header census
+data for :func:`pptrepair.origin.score_origin` to compare, so those
+tests run the real scan pipeline (:func:`pptrepair.scan.scan_paths`)
+over a small synthetic corpus written under ``tmp_path``, the same way
+:mod:`test_merge` exercises :func:`pptrepair.origin.score_origin`.
 """
 
 from __future__ import annotations
@@ -14,6 +21,8 @@ import json
 from pathlib import Path
 
 import pytest
+
+import fixtures
 
 from pptrepair.batch import BatchItem, BatchResult
 from pptrepair.classify import Diagnosis, Verdict
@@ -27,7 +36,7 @@ from pptrepair.report import (VERDICT_LABELS, render_batch_json,
                               render_batch_text, render_json,
                               render_repair_json, render_repair_text,
                               render_scan_json, render_scan_text, render_text)
-from pptrepair.scan import FileOutcome, ScanResult
+from pptrepair.scan import FileOutcome, ScanResult, scan_paths
 from pptrepair.scanner import ZipStructure
 from pptrepair.walker import WalkResult
 
@@ -743,7 +752,7 @@ def test_render_batch_json_top_level_keys_and_counts() -> None:
 
     payload = json.loads(render_batch_json(result))
 
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["dry_run"] is False
     assert payload["in_place"] is False
     assert payload["output_dir"] == str(result.output_dir)
@@ -900,9 +909,10 @@ def test_scan_text_collapses_extra_candidates_into_a_count_line() -> None:
     assert "(+2 more restore candidates)" in text
 
 
-def test_batch_json_schema_version_is_2_and_lists_twin_candidates() -> None:
-    """render_batch_json bumps schema_version to 2 and attaches
-    twin_candidates to an unrepairable item with a matching twin."""
+def test_batch_json_schema_version_is_3_and_lists_twin_candidates() -> None:
+    """render_batch_json's schema_version is 3 (see the v1.3 merge-report
+    tests below) and it attaches twin_candidates to an unrepairable item
+    with a matching twin."""
     broken = _twin_outcome("root/a.pptx", Verdict.TAIL_TRUNCATED, 1000)
     twin = _twin_outcome("root/backup/a.pptx", Verdict.NORMAL, 1000)
     scan = _twin_scan_result([broken, twin])
@@ -913,7 +923,7 @@ def test_batch_json_schema_version_is_2_and_lists_twin_candidates() -> None:
 
     payload = json.loads(render_batch_json(result))
 
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     repair_entry = payload["repairs"][0]
     assert repair_entry["twin_candidates"] == [
         {"path": "root/backup/a.pptx", "confidence": "high", "size": 1000},
@@ -936,3 +946,124 @@ def test_batch_text_lists_restore_candidate_for_unrepairable_item() -> None:
     assert (
         "restore candidate: root/backup/a.pptx (same name and size)" in text
     )
+
+
+# --- v1.3: merge_groups / lineage_candidates in scan / repair-all reports --
+
+
+def _new_slide_xml() -> bytes:
+    """Return a slide1 body distinctly different (and larger) than the
+    fixture default, used to build a genuinely different-sized lineage
+    version of a synthetic .pptx."""
+    return (
+        b"<p:sld><p:cSld><p:spTree><p:nvGrpSpPr/><p:grpSpPr/><p:sp>"
+        b"<p:txBody><a:p><a:r><a:t>Edited slide body for the lineage "
+        b"version, padded so the archive size clearly differs.</a:t>"
+        b"</a:r></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+    )
+
+
+def test_scan_report_merge_groups_groups_same_size_corrupted_files(
+    tmp_path: Path,
+) -> None:
+    """Two corrupted files sharing an exact byte size are grouped as a
+    merge candidate, in text and JSON; a differently sized corrupted
+    file is excluded."""
+    base = fixtures.build_minimal_pptx(num_slides=3, media_bytes=100_000)
+    copy_a, copy_b = fixtures.make_corrupted_copies(base, [
+        [("foreign_prefix", 4096)],
+        [("foreign_prefix", 8192)],
+    ])
+    other_size = fixtures.build_minimal_pptx(num_slides=5, media_bytes=250_000)
+    (copy_c,) = fixtures.make_corrupted_copies(
+        other_size, [[("foreign_prefix", 4096)]])
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "a.pptx").write_bytes(copy_a)
+    (root / "b.pptx").write_bytes(copy_b)
+    (root / "c.pptx").write_bytes(copy_c)
+
+    result = scan_paths([root])
+
+    text = render_scan_text(result, _TR, include_files=True)
+    payload = json.loads(render_scan_json(result))
+
+    assert payload["merge_groups"] == [
+        {"size": len(copy_a),
+         "files": [str(root / "a.pptx"), str(root / "b.pptx")]},
+    ]
+    assert "Merge candidates:" in text
+    assert str(root / "a.pptx") in text
+    assert str(root / "b.pptx") in text
+    assert str(root / "c.pptx") not in text.split("Merge candidates:")[1]
+    assert f'pptrepair merge "{root / "a.pptx"}" "{root / "b.pptx"}"' in text
+
+
+def test_scan_report_lineage_candidates_lists_related_version(
+    tmp_path: Path,
+) -> None:
+    """A corrupted file's lineage-tier version is listed as a lineage
+    candidate, in text and JSON; an unrelated normal file is not."""
+    original = fixtures.build_minimal_pptx(num_slides=3, media_bytes=60_000)
+    version = fixtures.make_edited_version(
+        original, replace={"ppt/slides/slide1.xml": _new_slide_xml()})
+    assert len(version) != len(original)
+    (corrupted_target,) = fixtures.make_corrupted_copies(
+        original, [[("foreign_prefix", 4096)]])
+    unrelated = fixtures.build_minimal_pptx(
+        num_slides=6, media_bytes=400_000, seed=99)
+    root = tmp_path / "root"
+    root.mkdir()
+    broken_path = root / "broken.pptx"
+    version_path = root / "version.pptx"
+    unrelated_path = root / "unrelated.pptx"
+    broken_path.write_bytes(corrupted_target)
+    version_path.write_bytes(version)
+    unrelated_path.write_bytes(unrelated)
+
+    result = scan_paths([root])
+
+    text = render_scan_text(result, _TR, include_files=True)
+    payload = json.loads(render_scan_json(result))
+
+    assert f"lineage candidate: {version_path}" in text
+    assert f"lineage candidate: {unrelated_path}" not in text
+    broken_entry = next(
+        f for f in payload["files"] if f["path"] == str(broken_path))
+    lineage_paths = {
+        c["path"] for c in broken_entry["lineage_candidates"]}
+    assert str(version_path) in lineage_paths
+    assert str(unrelated_path) not in lineage_paths
+    version_entry = next(
+        f for f in payload["files"] if f["path"] == str(version_path))
+    assert "lineage_candidates" not in version_entry
+
+
+def test_batch_report_propagates_merge_groups_and_lineage_candidates(
+    tmp_path: Path,
+) -> None:
+    """render_batch_text/json surface the same merge-candidate groups and
+    lineage candidates as the scan report, and schema_version is 3."""
+    base = fixtures.build_minimal_pptx(num_slides=3, media_bytes=100_000)
+    copy_a, copy_b = fixtures.make_corrupted_copies(base, [
+        [("foreign_prefix", 4096)],
+        [("foreign_prefix", 8192)],
+    ])
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "a.pptx").write_bytes(copy_a)
+    (root / "b.pptx").write_bytes(copy_b)
+    scan_result = scan_paths([root])
+    batch_result = BatchResult(
+        scan=scan_result, items=[], output_dir=root, in_place=False,
+        dry_run=True)
+
+    text = render_batch_text(batch_result, _TR, include_files=True)
+    payload = json.loads(render_batch_json(batch_result))
+
+    assert payload["schema_version"] == 3
+    assert payload["scan"]["merge_groups"] == [
+        {"size": len(copy_a),
+         "files": [str(root / "a.pptx"), str(root / "b.pptx")]},
+    ]
+    assert "Merge candidates:" in text

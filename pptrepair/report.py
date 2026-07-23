@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
 from pptrepair.classify import Diagnosis, Verdict
+from pptrepair.origin import OriginScore, score_origin
 from pptrepair.scanner import ZipStructure
 from pptrepair.twin import TwinCandidate, build_twin_index, find_twin_candidates
 
@@ -47,6 +48,14 @@ VERDICT_LABELS: dict[Verdict, str] = {
 #: Number of twin-restoration candidates listed individually per file in
 #: a text report before the remainder collapses into one "+n more" line.
 _TWIN_CANDIDATES_DISPLAY_LIMIT = 3
+
+#: Maximum number of lineage-version candidates listed per corrupted file
+#: (highest :attr:`~pptrepair.origin.OriginScore.lineage_score` first).
+_LINEAGE_CANDIDATES_DISPLAY_LIMIT = 5
+
+#: Minimum number of same-size corrupted files to report as one merge
+#: candidate group.
+_MERGE_GROUP_MIN_FILES = 2
 
 
 def _twin_reason_label(confidence: str, tr: Callable[[str], str]) -> str:
@@ -128,6 +137,119 @@ def _twin_candidates_to_json(candidates: list[TwinCandidate]) -> list[dict]:
         {"path": str(candidate.path), "confidence": candidate.confidence,
          "size": candidate.size}
         for candidate in candidates
+    ]
+
+
+def _lineage_candidates_map(
+    outcomes: "Sequence[FileOutcome]",
+) -> dict[Path, list[tuple[Path, OriginScore]]]:
+    """Map each corrupted file's path to its lineage-version candidates.
+
+    For every outcome whose verdict is not :attr:`Verdict.NORMAL`, scores
+    it (:func:`pptrepair.origin.score_origin`) against every *other*
+    diagnosed outcome, normal or corrupted alike, using only the
+    :class:`~pptrepair.classify.Diagnosis` objects *outcomes* already
+    carries (no file is re-read). Only ``tier == "lineage"`` results are
+    kept, sorted by descending ``lineage_score`` and capped at
+    :data:`_LINEAGE_CANDIDATES_DISPLAY_LIMIT`; a path with no such result
+    is absent from the returned mapping.
+    """
+    candidates_map: dict[Path, list[tuple[Path, OriginScore]]] = {}
+    for outcome in outcomes:
+        diagnosis = outcome.diagnosis
+        if diagnosis is None or diagnosis.verdict == Verdict.NORMAL:
+            continue
+        scored: list[tuple[Path, OriginScore]] = []
+        for other in outcomes:
+            if other.path == outcome.path or other.diagnosis is None:
+                continue
+            score = score_origin(diagnosis, other.diagnosis)
+            if score.tier == "lineage":
+                scored.append((other.path, score))
+        if scored:
+            scored.sort(key=lambda item: item[1].lineage_score, reverse=True)
+            candidates_map[outcome.path] = (
+                scored[:_LINEAGE_CANDIDATES_DISPLAY_LIMIT])
+    return candidates_map
+
+
+def _lineage_candidate_text_lines(
+    path: Path, lineage_map: dict[Path, list[tuple[Path, OriginScore]]],
+    tr: Callable[[str], str],
+) -> list[str]:
+    """Render the indented lineage-candidate lines that follow *path*'s own
+    line in a text report, one translated ``lineage candidate: <path>
+    (score <n.nn>)`` line per candidate. Empty when *path* has no entry
+    in *lineage_map*.
+    """
+    candidates = lineage_map.get(path, [])
+    return [
+        tr("  lineage candidate: {path} (score {score})").format(
+            path=candidate_path, score=f"{score.lineage_score:.2f}")
+        for candidate_path, score in candidates
+    ]
+
+
+def _lineage_candidates_to_json(
+    candidates: list[tuple[Path, OriginScore]],
+) -> list[dict]:
+    """Render *candidates* as the JSON-schema list for a "lineage_candidates" key."""
+    return [
+        {"path": str(path), "lineage_score": score.lineage_score,
+         "media_ratio": score.media_ratio}
+        for path, score in candidates
+    ]
+
+
+def _merge_group_map(outcomes: "Sequence[FileOutcome]") -> list[dict]:
+    """Group corrupted files sharing an exact byte size into merge candidates.
+
+    Only outcomes with a non-:attr:`Verdict.NORMAL` verdict and a known
+    ``diagnosis.structure.size`` participate; a size shared by fewer than
+    :data:`_MERGE_GROUP_MIN_FILES` such files is not a group. Each group
+    is ``{"size": int, "files": [Path, ...]}``, files in scan order;
+    groups themselves are returned in ascending size order.
+    """
+    by_size: dict[int, list[Path]] = {}
+    for outcome in outcomes:
+        diagnosis = outcome.diagnosis
+        if diagnosis is None or diagnosis.verdict == Verdict.NORMAL:
+            continue
+        if diagnosis.structure is None:
+            continue
+        by_size.setdefault(diagnosis.structure.size, []).append(outcome.path)
+    return [
+        {"size": size, "files": paths}
+        for size, paths in sorted(by_size.items())
+        if len(paths) >= _MERGE_GROUP_MIN_FILES
+    ]
+
+
+def _merge_group_text_lines(group: dict, tr: Callable[[str], str]) -> list[str]:
+    """Render one merge-candidate group's text lines.
+
+    One translated line listing the group's size and files, one
+    translated note pointing at ``pptrepair merge``, and one
+    untranslated example command line (machine-facing, like the other
+    path-bearing lines in this module).
+    """
+    files = group["files"]
+    files_str = ", ".join(str(path) for path in files)
+    lines = [tr("  {size} bytes: {files}").format(
+        size=group["size"], files=files_str)]
+    lines.append(tr(
+        "    These files may be the same saved version and could be "
+        "repaired together into one file with pptrepair merge."))
+    example = " ".join(f'"{path}"' for path in files)
+    lines.append(f"    pptrepair merge {example}")
+    return lines
+
+
+def _merge_groups_to_json(groups: list[dict]) -> list[dict]:
+    """Render *groups* (from :func:`_merge_group_map`) as the JSON-schema list."""
+    return [
+        {"size": group["size"], "files": [str(path) for path in group["files"]]}
+        for group in groups
     ]
 
 
@@ -563,8 +685,14 @@ def render_scan_text(result: "ScanResult", tr: Callable[[str], str],
     * ``include_files`` only: a ``Corrupted files:`` section listing
       ``  - {path}: {verdict}`` per corrupted outcome, each immediately
       followed by that file's twin-restoration candidates, when any
-      (see :func:`_twin_candidate_text_lines`), and an ``Errors:``
-      section listing walk errors and per-file pipeline errors as
+      (see :func:`_twin_candidate_text_lines`), and then its
+      lineage-version candidates, when any (see
+      :func:`_lineage_candidate_text_lines`); when at least one
+      merge-candidate group exists (same-size corrupted files, see
+      :func:`_merge_group_map`), a ``Merge candidates:`` section listing
+      each group's size/files plus a ``pptrepair merge`` example command
+      (see :func:`_merge_group_text_lines`); and an ``Errors:`` section
+      listing walk errors and per-file pipeline errors as
       ``  - {path}: {message}``;
     * **always** when cloud placeholders were skipped (never omitted,
       even on an all-normal scan): ``Not examined: {n} cloud-only
@@ -624,11 +752,21 @@ def _scan_summary_lines(result: "ScanResult", tr: Callable[[str], str],
         if corrupted:
             lines.append(tr("Corrupted files:"))
             twin_map = _twin_candidates_map(result.outcomes)
+            lineage_map = _lineage_candidates_map(result.outcomes)
             for outcome in corrupted:
                 lines.append(
                     f"  - {outcome.path}: {outcome.diagnosis.verdict.value}")
                 lines.extend(
                     _twin_candidate_text_lines(outcome.path, twin_map, tr))
+                lines.extend(
+                    _lineage_candidate_text_lines(
+                        outcome.path, lineage_map, tr))
+
+        merge_groups = _merge_group_map(result.outcomes)
+        if merge_groups:
+            lines.append(tr("Merge candidates:"))
+            for group in merge_groups:
+                lines.extend(_merge_group_text_lines(group, tr))
 
         errors = _collect_errors(result)
         if errors:
@@ -704,7 +842,12 @@ def render_scan_json(result: "ScanResult") -> str:
                       "twin_candidates": [    # present only when >= 1
                         {"path": str, "confidence": "high" | "medium"
                                                      | "low", "size": int}
+                      ],
+                      "lineage_candidates": [    # present only when >= 1
+                        {"path": str, "lineage_score": float,
+                         "media_ratio": float}
                       ]}, ...],
+          "merge_groups": [{"size": int, "files": [str, ...]}, ...],
           "skipped_cloud": [str, ...],
           "skipped_legacy": [str, ...],
           "skipped_temp": [str, ...],
@@ -714,6 +857,9 @@ def render_scan_json(result: "ScanResult") -> str:
 
     ``files`` covers every diagnosed file in walk order; ``errors``
     merges walk errors and per-file pipeline failures in that order.
+    ``merge_groups`` lists every group of corrupted files sharing an
+    exact byte size (see :func:`_merge_group_map`), regardless of
+    whether any file in ``files`` is itself unrelated.
     """
     return json.dumps(_scan_payload(result), indent=2)
 
@@ -731,6 +877,7 @@ def _scan_payload(result: "ScanResult") -> dict:
     )
     errors = _collect_errors(result)
     twin_map = _twin_candidates_map(result.outcomes)
+    lineage_map = _lineage_candidates_map(result.outcomes)
 
     payload = {
         "roots": [str(root) for root in result.roots],
@@ -749,9 +896,10 @@ def _scan_payload(result: "ScanResult") -> dict:
             "fingerprints_skipped": result.fingerprints_skipped,
         },
         "files": [
-            _scan_file_entry(outcome, twin_map)
+            _scan_file_entry(outcome, twin_map, lineage_map)
             for outcome in result.outcomes if outcome.diagnosis is not None
         ],
+        "merge_groups": _merge_groups_to_json(_merge_group_map(result.outcomes)),
         "skipped_cloud": [str(path) for path in result.walk.skipped_cloud],
         "skipped_legacy": [str(path) for path in result.walk.skipped_legacy],
         "skipped_temp": [str(path) for path in result.walk.skipped_temp],
@@ -767,12 +915,14 @@ def _scan_payload(result: "ScanResult") -> dict:
 
 def _scan_file_entry(
     outcome: "FileOutcome", twin_map: dict[Path, list[TwinCandidate]],
+    lineage_map: dict[Path, list[tuple[Path, OriginScore]]],
 ) -> dict:
     """Render one diagnosed file's entry in :func:`_scan_payload`'s ``files`` list.
 
-    ``twin_candidates`` is added only when ``outcome.path`` has at
-    least one entry in *twin_map*; a file with none carries no such
-    key at all (see :func:`render_scan_json`'s schema).
+    ``twin_candidates``/``lineage_candidates`` is added only when
+    ``outcome.path`` has at least one entry in *twin_map*/*lineage_map*
+    respectively; a file with none carries no such key at all (see
+    :func:`render_scan_json`'s schema).
     """
     assert outcome.diagnosis is not None  # caller filters this out
     entry = {
@@ -786,6 +936,10 @@ def _scan_file_entry(
     candidates = twin_map.get(outcome.path)
     if candidates:
         entry["twin_candidates"] = _twin_candidates_to_json(candidates)
+    lineage_candidates = lineage_map.get(outcome.path)
+    if lineage_candidates:
+        entry["lineage_candidates"] = (
+            _lineage_candidates_to_json(lineage_candidates))
     return entry
 
 
@@ -821,16 +975,30 @@ def render_batch_text(result: "BatchResult", tr: Callable[[str], str],
     * ``result.warnings`` (collision-fallback notices etc.), one
       ``  - {warning}`` per entry, under a translated ``Warnings:``
       header, when non-empty;
+    * *include_files* only, right after the (per-file-less) scan summary:
+      when at least one merge-candidate group exists among
+      ``result.scan.outcomes`` (see :func:`_merge_group_map`), the same
+      translated ``Merge candidates:`` section :func:`render_scan_text`
+      would show;
     * *include_files* only: a translated ``Repairs:`` header followed by
       one line per :class:`~pptrepair.batch.BatchItem`, in batch order
       (see :func:`_repair_item_line`); an ``"unrepairable"``/``"failed"``
       item's line is immediately followed by that file's
       twin-restoration candidates, when any (see
-      :func:`_twin_candidate_text_lines`), using the twin index built
-      from ``result.scan.outcomes`` (every diagnosed file, not just the
-      corrupted ones this batch attempted to repair).
+      :func:`_twin_candidate_text_lines`), and then its lineage-version
+      candidates, when any (see :func:`_lineage_candidate_text_lines`),
+      using the twin/lineage indexes built from ``result.scan.outcomes``
+      (every diagnosed file, not just the corrupted ones this batch
+      attempted to repair).
     """
     lines = _scan_summary_lines(result.scan, tr, include_files=False)
+
+    if include_files:
+        merge_groups = _merge_group_map(result.scan.outcomes)
+        if merge_groups:
+            lines.append(tr("Merge candidates:"))
+            for group in merge_groups:
+                lines.extend(_merge_group_text_lines(group, tr))
 
     lines.append(tr("=== Repair summary ==="))
     counts = result.counts()
@@ -875,12 +1043,16 @@ def render_batch_text(result: "BatchResult", tr: Callable[[str], str],
     if include_files:
         lines.append(tr("Repairs:"))
         twin_map = _twin_candidates_map(result.scan.outcomes)
+        lineage_map = _lineage_candidates_map(result.scan.outcomes)
         for item in result.items:
             lines.append(_repair_item_line(item))
             if item.action in ("unrepairable", "failed"):
                 lines.extend(
                     _twin_candidate_text_lines(
                         item.source.path, twin_map, tr))
+                lines.extend(
+                    _lineage_candidate_text_lines(
+                        item.source.path, lineage_map, tr))
 
     return "\n".join(lines)
 
@@ -932,7 +1104,7 @@ def render_batch_json(result: "BatchResult") -> str:
     Schema (stable for tests)::
 
         {
-          "schema_version": 2,
+          "schema_version": 3,
           "dry_run": bool,
           "in_place": bool,
           "output_dir": str | null,      # None in --in-place mode
@@ -959,24 +1131,30 @@ def render_batch_json(result: "BatchResult") -> str:
               "twin_candidates": [        # "unrepairable"/"failed" only,
                 {"path": str, "confidence": "high" | "medium" | "low",  # present only when >= 1
                  "size": int}
-              ]
+              ],
+              "lineage_candidates": [     # "unrepairable"/"failed" only,
+                {"path": str, "lineage_score": float, "media_ratio": float}
+              ]                           # present only when >= 1
             },
             ...
           ]
         }
 
     ``scan`` embeds :func:`_scan_payload`'s dict verbatim, so it matches
-    :func:`render_scan_json`'s own top-level schema field for field.
-    ``repairs`` covers every corrupted file in batch order; for an item
-    whose repair was never executed (``skipped_existing``, ``failed``,
-    a CFB ``unrepairable``, or a dry-run ``planned``), every field that
-    comes from :class:`~pptrepair.repair.RepairOutcome` is None or an
-    empty list, per the key-by-key null noted above. ``schema_version``
-    became 2 when ``twin_candidates`` was added.
+    :func:`render_scan_json`'s own top-level schema field for field
+    (including its own ``"merge_groups"`` key). ``repairs`` covers every
+    corrupted file in batch order; for an item whose repair was never
+    executed (``skipped_existing``, ``failed``, a CFB ``unrepairable``,
+    or a dry-run ``planned``), every field that comes from
+    :class:`~pptrepair.repair.RepairOutcome` is None or an empty list,
+    per the key-by-key null noted above. ``schema_version`` became 2
+    when ``twin_candidates`` was added, and 3 when ``merge_groups``
+    (inside ``scan``) and ``lineage_candidates`` were added.
     """
     twin_map = _twin_candidates_map(result.scan.outcomes)
+    lineage_map = _lineage_candidates_map(result.scan.outcomes)
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "dry_run": result.dry_run,
         "in_place": result.in_place,
         "output_dir": str(result.output_dir)
@@ -986,7 +1164,8 @@ def render_batch_json(result: "BatchResult") -> str:
         "unrepaired_remaining": result.unrepaired_remaining(),
         "warnings": list(result.warnings),
         "repairs": [
-            _batch_item_to_dict(item, twin_map) for item in result.items
+            _batch_item_to_dict(item, twin_map, lineage_map)
+            for item in result.items
         ],
     }
     return json.dumps(payload, indent=2)
@@ -994,6 +1173,7 @@ def render_batch_json(result: "BatchResult") -> str:
 
 def _batch_item_to_dict(
     item: "BatchItem", twin_map: dict[Path, list[TwinCandidate]],
+    lineage_map: dict[Path, list[tuple[Path, OriginScore]]],
 ) -> dict:
     """Render one :class:`~pptrepair.batch.BatchItem` as its JSON-schema dict.
 
@@ -1001,10 +1181,10 @@ def _batch_item_to_dict(
     :class:`~pptrepair.repair.RepairOutcome`-derived field falls back to
     None (or an empty list) when ``item.repair`` is None, i.e. the item
     was never handed to :func:`~pptrepair.repair.repair_file`.
-    ``twin_candidates`` is added, mirroring
-    :func:`render_batch_text`'s own restore-candidate lines, only for
-    an ``"unrepairable"``/``"failed"`` item whose source path has at
-    least one candidate in *twin_map*.
+    ``twin_candidates``/``lineage_candidates`` is added, mirroring
+    :func:`render_batch_text`'s own restore-/lineage-candidate lines,
+    only for an ``"unrepairable"``/``"failed"`` item whose source path
+    has at least one candidate in *twin_map*/*lineage_map* respectively.
     """
     diagnosis = item.source.diagnosis
     assert diagnosis is not None  # corrupted() never yields a failed pipeline
@@ -1036,4 +1216,8 @@ def _batch_item_to_dict(
         candidates = twin_map.get(item.source.path)
         if candidates:
             entry["twin_candidates"] = _twin_candidates_to_json(candidates)
+        lineage_candidates = lineage_map.get(item.source.path)
+        if lineage_candidates:
+            entry["lineage_candidates"] = (
+                _lineage_candidates_to_json(lineage_candidates))
     return entry
