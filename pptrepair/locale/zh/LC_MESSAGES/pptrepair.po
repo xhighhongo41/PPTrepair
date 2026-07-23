@@ -240,3 +240,63 @@ msgstr "仅大小相同"
 msgid "same name only"
 msgstr "仅同名"
 
+msgid "=== Merge summary ==="
+msgstr "=== 合并摘要 ==="
+
+msgid "Guarantee: {guarantee}"
+msgstr "保证级别: {guarantee}"
+
+msgid "Entries by source:"
+msgstr "按来源统计的条目数:"
+
+msgid "Warning: part of the output comes from a different version and is not guaranteed to be identical to the original."
+msgstr "警告: 部分输出来自不同版本，不保证与原始文件完全相同。"
+
+msgid "Notes:"
+msgstr "备注:"
+
+msgid "Candidate-tier source not used: {path} (pass --allow-candidate, --yes, or confirm the prompt to include it)"
+msgstr "未使用candidate级别来源: {path}（如需包含，请指定 --allow-candidate、--yes，或在提示中确认）"
+
+msgid "Lineage-tier source not used: {path} (pass --yes or confirm the prompt to include it)"
+msgstr "未使用lineage级别来源: {path}（如需包含，请指定 --yes，或在提示中确认）"
+
+msgid "Source not used (not the same origin): {path}"
+msgstr "未使用该来源（并非同一来源）: {path}"
+
+msgid "Source: {path}"
+msgstr "来源: {path}"
+
+msgid "Tier: {tier}"
+msgstr "级别: {tier}"
+
+msgid "Size match: {value}"
+msgstr "大小匹配: {value}"
+
+msgid "Triple ratio: {pct}%"
+msgstr "triple匹配率: {pct}%"
+
+msgid "Name ratio: {pct}%"
+msgstr "name匹配率: {pct}%"
+
+msgid "Media ratio: {pct}%"
+msgstr "media匹配率: {pct}%"
+
+msgid "Lineage score: {value}"
+msgstr "lineage分数: {value}"
+
+msgid "Use this source for the merge? [y/N] "
+msgstr "是否将该来源用于合并？[y/N] "
+
+msgid "Merge candidates:"
+msgstr "合并候选:"
+
+msgid "  {size} bytes: {files}"
+msgstr "  {size} 字节: {files}"
+
+msgid "    These files may be the same saved version and could be repaired together into one file with pptrepair merge."
+msgstr "    这些文件可能是同一保存版本，或许可以用 pptrepair merge 合并修复为一个文件。"
+
+msgid "  lineage candidate: {path} (score {score})"
+msgstr "  版本候选: {path}（分数 {score}）"
+

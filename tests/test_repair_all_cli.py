@@ -165,7 +165,7 @@ def test_json_output_schema_and_no_progress_lines_mixed_in(
     out_text = capsys.readouterr().out
     assert exit_code == EXIT_OK
     payload = json.loads(out_text)  # fails outright if a stray line leaked in
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert set(payload["counts"]) >= {
         "repaired", "repaired_rebuild", "repaired_trim", "repaired_extract",
         "unrepairable", "unrepairable_cfb", "skipped_existing", "failed",
@@ -203,7 +203,7 @@ def test_report_dir_writes_four_files_and_force_semantics(
     assert "=== Repair summary ===" in repair_text
     repair_json = json.loads(
         (report_dir / "repair_report.json").read_text(encoding="utf-8"))
-    assert repair_json["schema_version"] == 2
+    assert repair_json["schema_version"] == 3
     assert repair_json["counts"]["repaired"] == 1
 
     exit_code_conflict = main(

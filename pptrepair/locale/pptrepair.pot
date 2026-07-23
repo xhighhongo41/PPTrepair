@@ -2,16 +2,31 @@ msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 
+msgid "    These files may be the same saved version and could be repaired together into one file with pptrepair merge."
+msgstr ""
+
 msgid "  (+{n} more restore candidates)"
 msgstr ""
 
+msgid "  lineage candidate: {path} (score {score})"
+msgstr ""
+
 msgid "  restore candidate: {path} ({reason})"
+msgstr ""
+
+msgid "  {size} bytes: {files}"
+msgstr ""
+
+msgid "=== Merge summary ==="
 msgstr ""
 
 msgid "=== Repair summary ==="
 msgstr ""
 
 msgid "=== Scan summary ==="
+msgstr ""
+
+msgid "Candidate-tier source not used: {path} (pass --allow-candidate, --yes, or confirm the prompt to include it)"
 msgstr ""
 
 msgid "Category"
@@ -35,10 +50,16 @@ msgstr ""
 msgid "Encrypted or legacy Office file(s) (not attempted): {n}"
 msgstr ""
 
+msgid "Entries by source:"
+msgstr ""
+
 msgid "Errors:"
 msgstr ""
 
 msgid "Failed: {n} file(s)"
+msgstr ""
+
+msgid "Guarantee: {guarantee}"
 msgstr ""
 
 msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
@@ -59,16 +80,31 @@ msgstr ""
 msgid "Last Modified By"
 msgstr ""
 
+msgid "Lineage score: {value}"
+msgstr ""
+
+msgid "Lineage-tier source not used: {path} (pass --yes or confirm the prompt to include it)"
+msgstr ""
+
 msgid "Lost entries: {n}"
 msgstr ""
 
 msgid "Lost slides: {numbers}"
 msgstr ""
 
+msgid "Media ratio: {pct}%"
+msgstr ""
+
+msgid "Merge candidates:"
+msgstr ""
+
 msgid "Mode: {mode}"
 msgstr ""
 
 msgid "Modified"
+msgstr ""
+
+msgid "Name ratio: {pct}%"
 msgstr ""
 
 msgid "No content survives: {n} file(s)"
@@ -87,6 +123,9 @@ msgid "Note: {n} additional unknown-pattern file(s) were not fingerprinted becau
 msgstr ""
 
 msgid "Note: {n} of the not_a_zip file(s) look like encrypted or legacy Office documents, not OneDrive corruption."
+msgstr ""
+
+msgid "Notes:"
 msgstr ""
 
 msgid "Nothing to repair: the file is already an intact PowerPoint package."
@@ -122,6 +161,9 @@ msgstr ""
 msgid "Series"
 msgstr ""
 
+msgid "Size match: {value}"
+msgstr ""
+
 msgid "Skipped (output exists): {n} file(s)"
 msgstr ""
 
@@ -137,10 +179,22 @@ msgstr ""
 msgid "Slides recovered: {ok} of {total}"
 msgstr ""
 
+msgid "Source not used (not the same origin): {path}"
+msgstr ""
+
+msgid "Source: {path}"
+msgstr ""
+
 msgid "The recovery folder groups salvaged content by kind: images/ and media/ hold pictures, audio and video; texts/ holds best-effort recovered text; charts/ holds chart XML plus cached data; parts/ holds every salvaged part in its original, raw form."
 msgstr ""
 
+msgid "Tier: {tier}"
+msgstr ""
+
 msgid "Title"
+msgstr ""
+
+msgid "Triple ratio: {pct}%"
 msgstr ""
 
 msgid "Unknown pattern: {n} file(s) did not match any known corruption pattern."
@@ -155,10 +209,16 @@ msgstr ""
 msgid "Unresolved references after repair: {n}"
 msgstr ""
 
+msgid "Use this source for the merge? [y/N] "
+msgstr ""
+
 msgid "Value"
 msgstr ""
 
 msgid "Verdict: {verdict} ({label})"
+msgstr ""
+
+msgid "Warning: part of the output comes from a different version and is not guaranteed to be identical to the original."
 msgstr ""
 
 msgid "Warnings:"

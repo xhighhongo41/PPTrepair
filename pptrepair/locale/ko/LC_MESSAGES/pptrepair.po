@@ -240,3 +240,63 @@ msgstr "크기만 동일"
 msgid "same name only"
 msgstr "이름만 동일"
 
+msgid "=== Merge summary ==="
+msgstr "=== 병합 요약 ==="
+
+msgid "Guarantee: {guarantee}"
+msgstr "보증 수준: {guarantee}"
+
+msgid "Entries by source:"
+msgstr "출처별 항목 수:"
+
+msgid "Warning: part of the output comes from a different version and is not guaranteed to be identical to the original."
+msgstr "경고: 출력의 일부는 다른 버전에서 가져온 것으로, 원본과 완전히 동일함이 보장되지 않습니다."
+
+msgid "Notes:"
+msgstr "참고:"
+
+msgid "Candidate-tier source not used: {path} (pass --allow-candidate, --yes, or confirm the prompt to include it)"
+msgstr "candidate 등급 소스는 사용되지 않음: {path} (포함하려면 --allow-candidate, --yes를 지정하거나 확인 프롬프트에서 승인하세요)"
+
+msgid "Lineage-tier source not used: {path} (pass --yes or confirm the prompt to include it)"
+msgstr "lineage 등급 소스는 사용되지 않음: {path} (포함하려면 --yes를 지정하거나 확인 프롬프트에서 승인하세요)"
+
+msgid "Source not used (not the same origin): {path}"
+msgstr "소스가 사용되지 않음(동일 원본 아님): {path}"
+
+msgid "Source: {path}"
+msgstr "소스: {path}"
+
+msgid "Tier: {tier}"
+msgstr "등급: {tier}"
+
+msgid "Size match: {value}"
+msgstr "크기 일치: {value}"
+
+msgid "Triple ratio: {pct}%"
+msgstr "triple 일치율: {pct}%"
+
+msgid "Name ratio: {pct}%"
+msgstr "name 일치율: {pct}%"
+
+msgid "Media ratio: {pct}%"
+msgstr "media 일치율: {pct}%"
+
+msgid "Lineage score: {value}"
+msgstr "lineage 점수: {value}"
+
+msgid "Use this source for the merge? [y/N] "
+msgstr "이 소스를 병합에 사용하시겠습니까? [y/N] "
+
+msgid "Merge candidates:"
+msgstr "병합 후보:"
+
+msgid "  {size} bytes: {files}"
+msgstr "  {size} 바이트: {files}"
+
+msgid "    These files may be the same saved version and could be repaired together into one file with pptrepair merge."
+msgstr "    이 파일들은 동일한 저장 버전일 수 있으며, pptrepair merge로 하나의 파일로 함께 복구할 수 있습니다."
+
+msgid "  lineage candidate: {path} (score {score})"
+msgstr "  버전 계보 후보: {path} (점수 {score})"
+
