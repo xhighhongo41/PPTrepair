@@ -205,6 +205,14 @@ def build_parser() -> argparse.ArgumentParser:
                           "and may take long and use significant disk "
                           "space (default: skip them without downloading)"
                       ))
+    scan.add_argument("--search-archives", action="store_true",
+                      help=(
+                          "also mine backup archives (zip/tar) found while "
+                          "walking for intact twins or older versions of "
+                          "corrupted files, offered as restore candidates "
+                          "only; archived files are never counted or "
+                          "repaired (default: ignore archives)"
+                      ))
 
     repair_all = subparsers.add_parser(
         "repair-all",
@@ -265,6 +273,15 @@ def build_parser() -> argparse.ArgumentParser:
                                 "content and may take long and use "
                                 "significant disk space (default: skip "
                                 "them without downloading)"
+                            ))
+    repair_all.add_argument("--search-archives", action="store_true",
+                            help=(
+                                "also mine backup archives (zip/tar) found "
+                                "while walking for intact twins or older "
+                                "versions of corrupted files, offered as "
+                                "restore candidates only; archived files "
+                                "are never counted or repaired (default: "
+                                "ignore archives)"
                             ))
     return parser
 
@@ -755,12 +772,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "scan":
         return run_scan(args.roots, args.report, args.force, args.show_all,
                         args.lang, args.json_output, args.follow_symlinks,
-                        args.include_filenames, args.allow_download)
+                        args.include_filenames, args.allow_download,
+                        args.search_archives)
     if args.command == "repair-all":
         return run_repair_all(
             args.roots, args.output_dir, args.in_place, args.report,
             args.force, args.show_all, args.dry_run, args.lang,
             args.json_output, args.follow_symlinks, args.include_filenames,
-            args.allow_download)
+            args.allow_download, args.search_archives)
     parser.error(f"unknown command: {args.command}")
     return EXIT_ERROR

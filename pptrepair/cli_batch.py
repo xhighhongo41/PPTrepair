@@ -23,7 +23,7 @@ from pptrepair.report import (render_batch_json, render_batch_text,
 def run_scan(roots: list[str], report: str | None, force: bool,
              show_all: bool, lang: str, json_output: bool,
              follow_symlinks: bool, include_filenames: bool,
-             allow_download: bool) -> int:
+             allow_download: bool, search_archives: bool) -> int:
     """Scan directory trees, print the results, and return an exit code.
 
     Implementation requirements:
@@ -87,6 +87,7 @@ def run_scan(roots: list[str], report: str | None, force: bool,
             follow_symlinks=follow_symlinks,
             allow_download=allow_download,
             include_filenames=include_filenames,
+            search_archives=search_archives,
             progress=None if json_output else _report_progress,
             on_download=_announce_download,
         )
@@ -127,7 +128,7 @@ def run_repair_all(roots: list[str], output_dir: str | None, in_place: bool,
                    report: str | None, force: bool, show_all: bool,
                    dry_run: bool, lang: str, json_output: bool,
                    follow_symlinks: bool, include_filenames: bool,
-                   allow_download: bool) -> int:
+                   allow_download: bool, search_archives: bool) -> int:
     """Diagnose and repair directory trees, print the results, and return
     an exit code.
 
@@ -232,6 +233,7 @@ def run_repair_all(roots: list[str], output_dir: str | None, in_place: bool,
             follow_symlinks=follow_symlinks,
             allow_download=allow_download,
             include_filenames=include_filenames,
+            search_archives=search_archives,
             lang=lang,
             progress=None if json_output else _report_progress,
             repair_progress=None if json_output else _repair_progress,

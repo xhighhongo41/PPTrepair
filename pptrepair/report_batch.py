@@ -78,7 +78,8 @@ def render_batch_text(result: "BatchResult", tr: Callable[[str], str],
     lines = _scan_summary_lines(result.scan, tr, include_files=False)
 
     if include_files:
-        merge_groups = _merge_group_map(result.scan.outcomes)
+        merge_groups = _merge_group_map(
+            result.scan.outcomes, result.scan.materials)
         if merge_groups:
             lines.append(tr("Merge candidates:"))
             for group in merge_groups:
@@ -126,8 +127,10 @@ def render_batch_text(result: "BatchResult", tr: Callable[[str], str],
 
     if include_files:
         lines.append(tr("Repairs:"))
-        twin_map = _twin_candidates_map(result.scan.outcomes)
-        lineage_map = _lineage_candidates_map(result.scan.outcomes)
+        twin_map = _twin_candidates_map(
+            result.scan.outcomes, result.scan.materials)
+        lineage_map = _lineage_candidates_map(
+            result.scan.outcomes, result.scan.materials)
         for item in result.items:
             lines.append(_repair_item_line(item))
             if item.action in ("unrepairable", "failed"):
@@ -188,7 +191,7 @@ def render_batch_json(result: "BatchResult") -> str:
     Schema (stable for tests)::
 
         {
-          "schema_version": 3,
+          "schema_version": 3,           # 4 with --search-archives
           "dry_run": bool,
           "in_place": bool,
           "output_dir": str | null,      # None in --in-place mode
@@ -233,12 +236,21 @@ def render_batch_json(result: "BatchResult") -> str:
     :class:`~pptrepair.repair.RepairOutcome` is None or an empty list,
     per the key-by-key null noted above. ``schema_version`` became 2
     when ``twin_candidates`` was added, and 3 when ``merge_groups``
-    (inside ``scan``) and ``lineage_candidates`` were added.
+    (inside ``scan``) and ``lineage_candidates`` were added; it is 4
+    only when this run used ``--search-archives`` (opt-in), where twin-/
+    lineage candidates materialized from a backup archive are named by
+    their ``"<archive>::<member>"`` label and carry an ``origin_archive``
+    key (absent for on-disk candidates).
     """
-    twin_map = _twin_candidates_map(result.scan.outcomes)
-    lineage_map = _lineage_candidates_map(result.scan.outcomes)
+    twin_map = _twin_candidates_map(
+        result.scan.outcomes, result.scan.materials)
+    lineage_map = _lineage_candidates_map(
+        result.scan.outcomes, result.scan.materials)
+    # Archive searching bumps the schema (4) only when it was actually
+    # requested; a default repair-all keeps emitting version 3 verbatim.
+    schema_version = 4 if result.scan.search_archives else 3
     payload = {
-        "schema_version": 3,
+        "schema_version": schema_version,
         "dry_run": result.dry_run,
         "in_place": result.in_place,
         "output_dir": str(result.output_dir)

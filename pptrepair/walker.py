@@ -65,12 +65,22 @@ class WalkResult:
     skipped_temp: list[Path] = field(default_factory=list)
     """Office ``~$`` owner/lock temp files."""
     skipped_cloud: list[Path] = field(default_factory=list)
-    """PowerPoint files that are cloud-only placeholders, skipped
-    without downloading. Non-PowerPoint placeholders are filtered out
-    by name beforehand and never appear here."""
+    """PowerPoint files -- and, with ``collect_archives``, backup
+    archives -- that are cloud-only placeholders, skipped without
+    downloading. Other non-PowerPoint placeholders are filtered out by
+    name beforehand and never appear here."""
     download_targets: list[Path] = field(default_factory=list)
-    """Subset of ``targets`` that are cloud-only placeholders and will
-    be downloaded when read (populated only with ``allow_download``)."""
+    """Cloud-only placeholders that will be downloaded when read
+    (populated only with ``allow_download``): the placeholder subset of
+    ``targets`` plus, with ``collect_archives``, any placeholder
+    ``archives``."""
+    archives: list[Path] = field(default_factory=list)
+    """Backup archives (zip/tar family) found during the walk, populated
+    only with ``collect_archives``. Never diagnosed or repaired here;
+    the scan pipeline may mine them for donor material (an intact twin
+    or an older version of a corrupted file). A cloud-only placeholder
+    archive appears here only with ``allow_download`` (otherwise it is
+    left in ``skipped_cloud``)."""
     errors: list[tuple[Path, str]] = field(default_factory=list)
     """Paths that could not be examined, with the error message."""
 
@@ -131,7 +141,7 @@ def _resolve_stat(path: Path, lst: os.stat_result, *,
 
 
 def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
-                    allow_download: bool) -> None:
+                    allow_download: bool, collect_archives: bool) -> None:
     """Sort *path* into the appropriate bucket of *result*.
 
     The name-based filters run first: placeholder metadata already
@@ -139,6 +149,19 @@ def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
     ruled out without ever considering a download. Only ``.pptx`` /
     ``.pptm`` candidates are subject to the cloud-placeholder skip and
     download accounting.
+
+    With *collect_archives*, a backup archive (recognised by name via
+    :func:`pptrepair.archive.is_archive`) is recorded in
+    ``result.archives`` after the ``~$``/legacy name filters but before
+    the unrelated-suffix drop -- so an archive is captured while a
+    ``~$`` lock file over it still counts as a temp skip. An archive
+    obeys the same cloud-placeholder rule as a PowerPoint target:
+    reading it to mine members would download it, so a dataless one is
+    skipped (``skipped_cloud``) unless *allow_download*, in which case
+    it is additionally recorded in ``download_targets`` for the
+    read-ahead announcement. Without the flag an archive is just another
+    unrelated suffix and is ignored, leaving every existing bucket
+    unchanged.
     """
     if path.name.startswith(TEMP_PREFIX):
         result.skipped_temp.append(path)
@@ -147,6 +170,22 @@ def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
     if suffix in LEGACY_SUFFIXES:
         result.skipped_legacy.append(path)
         return
+    if collect_archives:
+        # Local import: pptrepair.archive imports names from this module,
+        # so a top-level import here would be a cycle.
+        from pptrepair.archive import is_archive
+        if is_archive(path):
+            if is_cloud_placeholder(st):
+                if not allow_download:
+                    # Mining the archive would hydrate it; skip like a
+                    # cloud-only PowerPoint target.
+                    result.skipped_cloud.append(path)
+                    return
+                # Reading it to mine members will make the sync client
+                # download it; recorded so the scan can announce it.
+                result.download_targets.append(path)
+            result.archives.append(path)
+            return
     if suffix not in TARGET_SUFFIXES:
         return  # unrelated suffixes are neither a target nor an error
     if is_cloud_placeholder(st):
@@ -181,7 +220,7 @@ def _enter_directory(result: WalkResult, path: Path, st: os.stat_result, *,
 
 
 def _walk_directory(root: Path, result: WalkResult, *, follow_symlinks: bool,
-                     allow_download: bool,
+                     allow_download: bool, collect_archives: bool,
                      visited: set[tuple[int, int]]) -> None:
     """Recursively walk *root* (already confirmed to be a directory).
 
@@ -230,12 +269,14 @@ def _walk_directory(root: Path, result: WalkResult, *, follow_symlinks: bool,
             if file_st is None:
                 continue  # symlink ignored, or following it failed
             _classify_file(result, file_path, file_st,
-                            allow_download=allow_download)
+                            allow_download=allow_download,
+                            collect_archives=collect_archives)
 
 
 def discover_targets(roots: Sequence[Path], *,
                      follow_symlinks: bool = False,
-                     allow_download: bool = False) -> WalkResult:
+                     allow_download: bool = False,
+                     collect_archives: bool = False) -> WalkResult:
     """Discover PowerPoint files under *roots* without opening any file.
 
     Implementation requirements:
@@ -258,6 +299,13 @@ def discover_targets(roots: Sequence[Path], *,
       ordinary candidates and are additionally recorded in
       ``download_targets`` (so callers can announce the impending
       download).
+    * With ``collect_archives=True`` backup archives (zip/tar family,
+      recognised by name) are recorded in ``archives`` instead of being
+      ignored as an unrelated suffix; a cloud-only placeholder archive
+      obeys the same rule as a placeholder target (``skipped_cloud``
+      without ``allow_download``, else ``archives`` + ``download_targets``).
+      Every other bucket, and the default ``collect_archives=False``
+      behaviour, is unchanged.
     * Symbolic links (both to files and to directories) found during
       the walk are ignored unless *follow_symlinks* is true. When
       following, a visited set of ``(st_dev, st_ino)`` directory
@@ -295,10 +343,12 @@ def discover_targets(roots: Sequence[Path], *,
                 _walk_directory(root, result,
                                  follow_symlinks=follow_symlinks,
                                  allow_download=allow_download,
+                                 collect_archives=collect_archives,
                                  visited=visited)
         elif stat.S_ISREG(root_st.st_mode):
             _classify_file(result, root, root_st,
-                            allow_download=allow_download)
+                            allow_download=allow_download,
+                            collect_archives=collect_archives)
         # Other entry types (sockets, devices, FIFOs) are neither files
         # nor directories we can classify; silently ignored.
 

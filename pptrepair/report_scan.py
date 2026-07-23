@@ -113,8 +113,9 @@ def _scan_summary_lines(result: "ScanResult", tr: Callable[[str], str],
         corrupted = result.corrupted()
         if corrupted:
             lines.append(tr("Corrupted files:"))
-            twin_map = _twin_candidates_map(result.outcomes)
-            lineage_map = _lineage_candidates_map(result.outcomes)
+            twin_map = _twin_candidates_map(result.outcomes, result.materials)
+            lineage_map = _lineage_candidates_map(
+                result.outcomes, result.materials)
             for outcome in corrupted:
                 lines.append(
                     f"  - {outcome.path}: {outcome.diagnosis.verdict.value}")
@@ -124,7 +125,7 @@ def _scan_summary_lines(result: "ScanResult", tr: Callable[[str], str],
                     _lineage_candidate_text_lines(
                         outcome.path, lineage_map, tr))
 
-        merge_groups = _merge_group_map(result.outcomes)
+        merge_groups = _merge_group_map(result.outcomes, result.materials)
         if merge_groups:
             lines.append(tr("Merge candidates:"))
             for group in merge_groups:
@@ -167,6 +168,13 @@ def _scan_summary_lines(result: "ScanResult", tr: Callable[[str], str],
                 "fingerprinted because of the per-run cap."
             ).format(n=result.fingerprints_skipped))
 
+    # Archive-material notes (unreadable archives/members) reuse the
+    # existing "Notes:" heading and are shown in every mode. Gated on a
+    # non-empty list, so a scan that mined no archive is byte-unchanged.
+    if result.material_notes:
+        lines.append(tr("Notes:"))
+        lines.extend(f"  - {note}" for note in result.material_notes)
+
     return lines
 
 
@@ -203,25 +211,35 @@ def render_scan_json(result: "ScanResult") -> str:
                       "fingerprint": str | null,
                       "twin_candidates": [    # present only when >= 1
                         {"path": str, "confidence": "high" | "medium"
-                                                     | "low", "size": int}
+                                                     | "low", "size": int,
+                         "origin_archive": str}  # archive members only
                       ],
                       "lineage_candidates": [    # present only when >= 1
                         {"path": str, "lineage_score": float,
-                         "media_ratio": float}
+                         "media_ratio": float,
+                         "origin_archive": str}  # archive members only
                       ]}, ...],
           "merge_groups": [{"size": int, "files": [str, ...]}, ...],
           "skipped_cloud": [str, ...],
           "skipped_legacy": [str, ...],
           "skipped_temp": [str, ...],
           "errors": [{"path": str, "error": str}, ...],
-          "report_dir": str | null
+          "report_dir": str | null,
+          "schema_version": 4,        # only with --search-archives
+          "archive_notes": [str, ...] # only with --search-archives
         }
 
     ``files`` covers every diagnosed file in walk order; ``errors``
     merges walk errors and per-file pipeline failures in that order.
     ``merge_groups`` lists every group of corrupted files sharing an
     exact byte size (see :func:`_merge_group_map`), regardless of
-    whether any file in ``files`` is itself unrelated.
+    whether any file in ``files`` is itself unrelated. A twin-/lineage-
+    candidate materialized from a backup archive is named by its
+    ``"<archive>::<member>"`` label and carries an ``origin_archive``
+    key (absent for on-disk candidates); ``schema_version`` (4) and
+    ``archive_notes`` appear only when the scan ran with
+    ``--search-archives`` (opt-in), leaving a default scan's JSON
+    unchanged.
     """
     return json.dumps(_scan_payload(result), indent=2)
 
@@ -238,8 +256,8 @@ def _scan_payload(result: "ScanResult") -> dict:
         if outcome.fingerprint_path is not None
     )
     errors = _collect_errors(result)
-    twin_map = _twin_candidates_map(result.outcomes)
-    lineage_map = _lineage_candidates_map(result.outcomes)
+    twin_map = _twin_candidates_map(result.outcomes, result.materials)
+    lineage_map = _lineage_candidates_map(result.outcomes, result.materials)
 
     payload = {
         "roots": [str(root) for root in result.roots],
@@ -261,7 +279,8 @@ def _scan_payload(result: "ScanResult") -> dict:
             _scan_file_entry(outcome, twin_map, lineage_map)
             for outcome in result.outcomes if outcome.diagnosis is not None
         ],
-        "merge_groups": _merge_groups_to_json(_merge_group_map(result.outcomes)),
+        "merge_groups": _merge_groups_to_json(
+            _merge_group_map(result.outcomes, result.materials)),
         "skipped_cloud": [str(path) for path in result.walk.skipped_cloud],
         "skipped_legacy": [str(path) for path in result.walk.skipped_legacy],
         "skipped_temp": [str(path) for path in result.walk.skipped_temp],
@@ -272,6 +291,12 @@ def _scan_payload(result: "ScanResult") -> dict:
         "report_dir": str(result.report_dir)
         if result.report_dir is not None else None,
     }
+    # Archive searching is an opt-in schema extension: only a scan that
+    # actually mined archives carries the version bump and the note
+    # array, so a default scan's JSON is byte-for-byte unchanged.
+    if result.search_archives:
+        payload["schema_version"] = 4
+        payload["archive_notes"] = list(result.material_notes)
     return payload
 
 
