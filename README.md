@@ -218,6 +218,7 @@ If you hit an unknown pattern, please review the fingerprint file yourself and c
 ### ver 1.3 (2026-07-23)
 - New `pptrepair merge` command reconstructs one restored file from any number of differently-damaged copies of the same presentation. Every adopted byte range is verified against the CRC-32 recorded by the file's own index (`full` results are byte-identical to the original — proven against a real intact twin), entries surviving in no copy whole are recombined across the 64 KiB corruption boundaries, and *different versions* of the same presentation can donate parts after an interactive confirmation (`hybrid` results clearly mark what came from another version). Donor parts are matched by content, not by part name, so slides and media renumbered by an insertion between versions are still found and restored to their correct position
 - `scan --report` / `repair-all` reports now list merge groups (same-size corrupted files with a ready-to-run `merge` command) and lineage candidates (likely other versions of a corrupted file, scored by shared embedded media). `repair_report.json` `schema_version` is now 3
+- Repaired and merged outputs are now also self-checked for *orphaned* slide/notes parts — a fourth real-world trigger of PowerPoint's repair dialog, discovered (and fixed) during v1.3 acceptance testing
 - Package version is now defined in one place (`pptrepair.__version__`) via setuptools dynamic metadata
 
 ### ver 1.2.1.1 (2026-07-22)
