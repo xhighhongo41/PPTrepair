@@ -58,6 +58,26 @@ adopts every donor entry this same unverified way. Adopting even one
 structurally rebuilt and part-verified, but not proven byte-identical to
 the original.
 
+The rebuild fallback keys its output to one of two namespaces. As long as
+``ppt/presentation.xml`` is *secured* under its reference name -- it
+survived in a copy, or a donor reproduced the recorded CRC-32 in the first
+pass -- the reference central directory's naming is trustworthy and
+*Mode A* places every recovered part by that name (the passes above). When
+it is not -- the plumbing was destroyed in every copy and its CRC-32,
+always changing between saved versions, matched no oracle -- the display
+structure has to be borrowed from a donor whose older naming the
+reference-named parts need not match; keeping the reference names would
+then orphan every newer-version part the borrowed structure never
+references. *Mode B* instead rekeys the whole package to the *primary
+donor* (the first donor carrying a readable ``ppt/presentation.xml``):
+each donor name is filled from an unchanged part a copy still held
+(provenance kept), from a donor entry the reference oracle vouches for
+(``method="donor"``), or from the donor's own CRC-32 alone
+(``method="donor_unverified"``), while any reference-named part the
+donor's structure does not carry is dropped rather than shipped as an
+orphan. Mode B always adopts the plumbing unverified, so it caps the run
+at ``"hybrid"``.
+
 Same-origin scoring only *selects* candidates and donors; the safety of
 every adopted byte range is decided by its per-entry CRC-32, so
 loosening the score thresholds never risks adopting foreign bytes. Every
@@ -79,8 +99,8 @@ from pathlib import Path
 
 from pptrepair.census import EntryResult, categorize, from_central_directory
 from pptrepair.classify import Diagnosis
-from pptrepair.integrity import (inspect_references, inspect_structure,
-                                 inspect_timing)
+from pptrepair.integrity import (inspect_orphans, inspect_references,
+                                 inspect_structure, inspect_timing)
 from pptrepair.origin import OriginScore, score_origin
 from pptrepair.rebuild import RebuildError, rebuild_package
 from pptrepair.repair import OutputExistsError
@@ -89,6 +109,11 @@ from pptrepair.scan import diagnose_file
 
 #: Default output-file suffix appended to the target's stem.
 MERGE_SUFFIX = ".merged.pptx"
+
+#: The package part a rebuild cannot proceed without; also the sentinel
+#: whose recovery under its reference name selects Mode A over Mode B (see
+#: the module docstring).
+_PRESENTATION_NAME = "ppt/presentation.xml"
 
 #: Local file header signature (``PK\x03\x04``) and its fixed 30-byte
 #: layout (signature, version-needed, flags, method, mod-time, mod-date,
@@ -511,20 +536,38 @@ def _run_splice(
 
     if any(prov.method == "missing" for prov in provenances):
         # Some entry survived in no copy. Before the rebuild fallback, try
-        # to rescue the still-missing entries from lineage donors in two
-        # passes. First pass (oracle-checked, content-addressed): the
-        # reference central directory records each entry's CRC-32, so a
-        # donor entry whose (CRC-32, uncompressed size) matches -- under
-        # any name, since PowerPoint may renumber slides between versions
-        # -- is adopted as verified once it reproduces that exact value (a
-        # donor-side edit is never adopted this way).
+        # to rescue the still-missing entries from lineage donors. First
+        # pass (oracle-checked, content-addressed): the reference central
+        # directory records each entry's CRC-32, so a donor entry whose
+        # (CRC-32, uncompressed size) matches -- under any name, since
+        # PowerPoint may renumber slides between versions -- is adopted as
+        # verified once it reproduces that exact value (a donor-side edit
+        # is never adopted this way).
         donor_payloads = _rescue_missing_via_donors(
             entries, provenances, donor_specs, notes)
-        # Second pass (unverified): an entry still missing -- typically
-        # plumbing XML whose CRC-32 necessarily differs between saved
-        # versions, so no oracle match was possible -- is adopted from a
-        # donor on the donor's own CRC-32 alone, which caps the run at the
-        # ``"hybrid"`` guarantee below.
+
+        # Namespace selection (see the module docstring). When
+        # ppt/presentation.xml is not secured under its reference name --
+        # it survived in no copy and matched no oracle, the real-world case
+        # where the plumbing XML is destroyed everywhere -- the display
+        # structure has to be borrowed from a donor whose older naming the
+        # reference-named parts need not match. Mode B then rekeys the
+        # whole package to that donor's names so no newer-version part is
+        # shipped as an orphan; otherwise Mode A places every part by its
+        # trustworthy reference name (below).
+        if _PRESENTATION_NAME not in adopted \
+                and _PRESENTATION_NAME not in donor_payloads:
+            primary_donor = _primary_donor(donor_specs)
+            if primary_donor is not None:
+                return _run_mode_b(
+                    entries, adopted, donor_payloads, provenances,
+                    primary_donor, output_path, notes)
+
+        # Mode A. Second pass (unverified): an entry still missing --
+        # typically plumbing XML whose CRC-32 necessarily differs between
+        # saved versions, so no oracle match was possible -- is adopted
+        # from a donor on the donor's own CRC-32 alone, which caps the run
+        # at the ``"hybrid"`` guarantee below.
         donor_payloads.update(
             _rescue_missing_unverified(entries, provenances, donor_specs))
         # Hand every recovered entry -- spliced or donor-supplied -- to the
@@ -671,6 +714,176 @@ def _rescue_missing_unverified(
             rescued[entry.name] = payload
             break
     return rescued
+
+
+def _primary_donor(
+        donor_specs: list[tuple[Path, Diagnosis, OriginScore]]
+) -> _DonorSource | None:
+    """Return the first donor that can supply ``ppt/presentation.xml``.
+
+    Donors are examined in the same priority order as
+    :func:`_build_donors` (closest saved version first). The primary donor
+    -- whose namespace Mode B adopts -- is the first one whose recorded
+    entries include ``ppt/presentation.xml`` and whose payload reads back
+    CRC-valid; None when no donor can supply the presentation part (Mode B
+    is then impossible and the caller stays on the Mode A path).
+    """
+    for donor in _build_donors(donor_specs):
+        if _PRESENTATION_NAME not in donor.recorded():
+            continue
+        if donor.read(_PRESENTATION_NAME) is not None:
+            return donor
+    return None
+
+
+def _run_mode_b(
+        entries: list[_RefEntry],
+        adopted: dict[str, tuple[tuple[int, int], bytes, bytes]],
+        donor_payloads: dict[str, bytes],
+        splice_provenances: list[EntryProvenance],
+        primary_donor: _DonorSource, output_path: Path,
+        notes: list[str]) -> tuple[Path | None, str, list[EntryProvenance]]:
+    """Reconstruct the package in *primary_donor*'s namespace (Mode B).
+
+    Reached when the splice and the oracle-checked first pass together left
+    ``ppt/presentation.xml`` unrecovered under its reference name, so the
+    display structure has to be borrowed from *primary_donor*. Keying the
+    output to the reference central directory's names would then orphan
+    every newer-version part the borrowed structure does not reference;
+    the output is keyed to the donor's own names instead. For each donor
+    name, in recorded order:
+
+    * (a) an unchanged part a copy still carried (already recovered under a
+      reference name, so verified) whose content matches the donor's
+      record is reused, keeping its original provenance;
+    * (b) otherwise, when the donor entry's ``(CRC-32, uncompressed size)``
+      equals a reference central-directory entry's, it is read and adopted
+      as verified (``method="donor"``, a rename noted when the reference
+      name differs);
+    * (c) failing both, it is adopted on the donor's own CRC-32 alone
+      (``method="donor_unverified"``), which caps the run at ``"hybrid"``;
+    * (d) an unreadable donor entry is skipped, and the rebuild trims any
+      reference to it.
+
+    Reference-named parts the donor's namespace does not carry -- and whose
+    content no donor name reused -- are dropped rather than shipped as
+    orphans, the drop recorded in *notes*. The returned provenances hold
+    one entry per output part plus a ``"missing"`` entry for every
+    reference part whose content reached the output under no name.
+    """
+    donor_recorded = primary_donor.recorded()
+    ref_by_name = {entry.name: entry for entry in entries}
+    ref_by_content: dict[tuple[int, int], str] = {}
+    for entry in entries:
+        ref_by_content.setdefault((entry.crc, entry.file_size), entry.name)
+
+    # Payloads already recovered under reference names (direct / crossover
+    # splice and the oracle-checked first pass). Each equals its reference
+    # entry byte-for-byte, so it can back a same-content donor name without
+    # re-reading the donor. Indexed by content for the case (a) lookup.
+    recovered_payloads: dict[str, bytes] = {
+        name: raw for name, (_iv, _seg, raw) in adopted.items()}
+    for name, payload in donor_payloads.items():
+        recovered_payloads.setdefault(name, payload)
+    recovered_by_content: dict[tuple[int, int], str] = {}
+    for name, payload in recovered_payloads.items():
+        key = (zlib.crc32(payload) & 0xFFFFFFFF, len(payload))
+        recovered_by_content.setdefault(key, name)
+
+    splice_prov_by_name = {prov.name: prov for prov in splice_provenances}
+
+    items: list[tuple[str, bytes, int]] = []
+    provenances: list[EntryProvenance] = []
+    used_recovered: set[str] = set()
+    unverified = False
+    for donor_name, (crc_d, size_d) in donor_recorded.items():
+        compress_type = (ref_by_name[donor_name].compress_type
+                         if donor_name in ref_by_name else _METHOD_DEFLATE)
+        key = ((crc_d, size_d) if crc_d is not None and size_d is not None
+               else None)
+        # (a) Reuse an unchanged part a copy still held, under the donor's
+        # name, carrying its original provenance over unchanged.
+        if key is not None and key in recovered_by_content:
+            src_name = recovered_by_content[key]
+            items.append((donor_name, recovered_payloads[src_name],
+                          compress_type))
+            provenances.append(
+                _reused_provenance(donor_name, src_name, splice_prov_by_name))
+            used_recovered.add(src_name)
+            continue
+        payload = primary_donor.read(donor_name)
+        if payload is None:
+            continue  # (d) Unreadable -> dropped; rebuild trims references.
+        if key is not None and key in ref_by_content \
+                and (zlib.crc32(payload) & 0xFFFFFFFF) == crc_d:
+            # (b) The reference oracle vouches for this content byte-for-byte.
+            items.append((donor_name, payload, compress_type))
+            provenances.append(
+                EntryProvenance(donor_name, primary_donor.path, "donor"))
+            ref_name = ref_by_content[key]
+            if ref_name != donor_name:
+                notes.append(
+                    f"entry {ref_name} recovered from donor's {donor_name} "
+                    "(renamed between versions)")
+        else:
+            # (c) No oracle match (plumbing XML, or a donor-side edit):
+            # trust the donor's own CRC-32 alone.
+            items.append((donor_name, payload, compress_type))
+            provenances.append(EntryProvenance(
+                donor_name, primary_donor.path, "donor_unverified"))
+            unverified = True
+
+    # Reference-named parts the donor's structure does not carry (added in
+    # the newer version, and reused under no donor name) are intentionally
+    # dropped instead of shipped as orphans the borrowed structure would
+    # never reference; record the loss rather than dropping it silently.
+    dropped = sorted(
+        name for name in recovered_payloads
+        if name not in donor_recorded and name not in used_recovered)
+    if dropped:
+        shown = ", ".join(dropped[:5])
+        notes.append(
+            f"structure comes from the donor; {len(dropped)} reference-named "
+            f"part(s) not referenced by it were dropped: {shown}")
+
+    notes.append(
+        f"structure adopted from donor {primary_donor.path.name} (Mode B): "
+        "parts are keyed to the donor's naming")
+
+    # Reference entries whose content reached the output under no name are
+    # recorded as missing; a name the output keeps, or renamed content it
+    # preserved elsewhere, is not (so no name is double-counted).
+    output_names = {name for name, _payload, _ct in items}
+    output_content = {(zlib.crc32(payload) & 0xFFFFFFFF, len(payload))
+                      for _name, payload, _ct in items}
+    for entry in entries:
+        if entry.name in output_names:
+            continue
+        if (entry.crc, entry.file_size) in output_content:
+            continue
+        provenances.append(EntryProvenance(entry.name, None, "missing"))
+
+    guarantee, out = _rebuild_from_entries(items, output_path, notes)
+    if guarantee == "partial" and unverified:
+        guarantee = "hybrid"
+    return out, guarantee, provenances
+
+
+def _reused_provenance(
+        donor_name: str, src_name: str,
+        splice_prov_by_name: dict[str, EntryProvenance]) -> EntryProvenance:
+    """Return *src_name*'s recovery re-provenanced under *donor_name*.
+
+    The reused part was already recovered under its reference name
+    *src_name*; Mode B ships it under the donor's *donor_name*, so the
+    original method/source/sources are carried over verbatim (defaulting to
+    a plain ``"direct"`` provenance should the source somehow be absent).
+    """
+    src = splice_prov_by_name.get(src_name)
+    if src is None:
+        return EntryProvenance(donor_name, None, "direct")
+    return EntryProvenance(donor_name, src.source, src.method,
+                           sources=src.sources)
 
 
 def _reference_layout(
@@ -1164,7 +1377,7 @@ def _append_integrity_notes(output_path: Path, notes: list[str]) -> None:
     """Self-check the rebuilt *output_path* and note any inconsistency.
 
     Mirrors :func:`pptrepair.repair._run_rebuild`: a positive count from
-    any of the three integrity inspectors is recorded as a note.
+    any of the four integrity inspectors is recorded as a note.
     """
     references = inspect_references(output_path)
     if references.dangling:
@@ -1182,3 +1395,8 @@ def _append_integrity_notes(output_path: Path, notes: list[str]) -> None:
         notes.append(
             f"integrity: {len(structure.missing)} missing structural "
             "relationship(s) in output")
+    orphans = inspect_orphans(output_path)
+    if orphans.orphans:
+        notes.append(
+            f"integrity: {len(orphans.orphans)} orphan slide/notes part(s) "
+            "in output")

@@ -17,8 +17,8 @@ from pptrepair.census import (CensusResult, from_central_directory,
 from pptrepair.classify import Diagnosis, Verdict, classify
 from pptrepair.extract import ExtractResult, extract_salvage
 from pptrepair.i18n import get_translator
-from pptrepair.integrity import (inspect_references, inspect_structure,
-                                 inspect_timing)
+from pptrepair.integrity import (inspect_orphans, inspect_references,
+                                 inspect_structure, inspect_timing)
 from pptrepair.rebuild import RebuildResult, rebuild_package
 from pptrepair.salvage import SalvagedEntry, SalvageReader, select_salvageable
 from pptrepair.scanner import scan_structure
@@ -363,9 +363,10 @@ def _run_rebuild(src: Path, salvaged: list[SalvagedEntry], output_path: Path,
 
     Besides the check-pipeline re-diagnosis, the artifact is
     self-checked with :func:`pptrepair.integrity.inspect_references`,
-    :func:`pptrepair.integrity.inspect_timing` and
-    :func:`pptrepair.integrity.inspect_structure`: a positive count on
-    any of the three means rebuild's own cleanup left something behind,
+    :func:`pptrepair.integrity.inspect_timing`,
+    :func:`pptrepair.integrity.inspect_structure` and
+    :func:`pptrepair.integrity.inspect_orphans`: a positive count on
+    any of the four means rebuild's own cleanup left something behind,
     which is a cleanup bug worth surfacing rather than silently
     shipping, so each appends its own warning.
 
@@ -411,6 +412,16 @@ def _run_rebuild(src: Path, salvaged: list[SalvagedEntry], output_path: Path,
         outcome.warnings.append(
             f"rebuild artifact is missing {outcome.recheck_structure_issues}"
             " required structural relationship(s)")
+
+    # Same self-check for orphan slides / notes slides: a part the rebuilt
+    # presentation structure references nowhere is unreachable and makes
+    # PowerPoint offer to repair the file.
+    orphans = inspect_orphans(output_path)
+    orphan_count = len(orphans.orphans)
+    if orphan_count > 0:
+        outcome.warnings.append(
+            f"rebuild artifact has {orphan_count} orphan slide/notes "
+            "part(s) referenced by nothing in the package")
 
 
 #: Chunk size (bytes) used when copying the leading archive during trim,

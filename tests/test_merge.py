@@ -21,6 +21,7 @@ from fixtures import (build_minimal_jpeg, build_minimal_pptx, find_eocd,
                       make_corrupted_copies, make_edited_version)
 
 from pptrepair import merge as merge_module
+from pptrepair.integrity import inspect_orphans
 from pptrepair.merge import merge_restore
 from pptrepair.origin import OriginScore
 from pptrepair.repair import OutputExistsError
@@ -909,3 +910,117 @@ def test_same_name_preferred_over_renamed_duplicate(tmp_path: Path) -> None:
     assert _read_member(outcome.output_path.read_bytes(), name) == jpeg_bytes
     assert not any("renamed" in note for note in outcome.notes)
     assert not any(dup_name in note for note in outcome.notes)
+
+
+#: A minimal, well-formed slide part used as a newer-version-only slide the
+#: old donor never carried, so Mode B has something to drop.
+_EXTRA_SLIDE = (
+    b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    b'<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/'
+    b'2006/main"><p:cSld><p:spTree/></p:cSld></p:sld>'
+)
+
+
+def test_mode_b_donor_namespace_avoids_orphans(tmp_path: Path) -> None:
+    """Broken plumbing routes the rebuild through Mode B, leaving no orphans.
+
+    This reproduces the real-data regression: the plumbing XML
+    (``ppt/presentation.xml``) is destroyed in every copy, so the display
+    structure has to be borrowed from the lineage donor -- an older saved
+    version. The newer target additionally carries one slide the donor never
+    had (``slide4``). Keyed to the reference central directory's names (the
+    old behaviour) that extra slide would survive into the output while the
+    borrowed presentation structure referenced only the donor's slides,
+    leaving it an orphan PowerPoint offers to repair.
+
+    Mode B instead rekeys the whole package to the donor's namespace: the
+    extra slide, absent from that namespace and reused under no donor name,
+    is dropped (and the drop noted), while the plumbing is adopted on the
+    donor's own CRC-32 alone (``hybrid``). ``slide2``, broken in both copies
+    but unchanged in the donor, is restored from the donor under its own
+    name. The result opens cleanly and :func:`inspect_orphans` finds nothing.
+
+    The donor's ``ppt/presentation.xml`` is edited so its CRC-32 differs
+    from the reference's; otherwise the oracle-checked first pass would
+    recover the plumbing under its reference name and keep the run in
+    Mode A (the case :func:`test_mode_a_renumbered_rescue_leaves_no_orphans`
+    covers).
+    """
+    original, base_donor = _lineage_versions()
+    # Newer version: the reference deck plus one slide the old donor lacks.
+    target = make_edited_version(
+        original, add={"ppt/slides/slide4.xml": _EXTRA_SLIDE})
+    # Old donor: same deck, but with a distinct-CRC presentation part so the
+    # plumbing can only be adopted unverified (which is what selects Mode B).
+    donor_pres = _read_member(base_donor, "ppt/presentation.xml").replace(
+        b"</p:presentation>", b"<!-- old structure --></p:presentation>")
+    assert donor_pres != _read_member(base_donor, "ppt/presentation.xml")
+    donor = make_edited_version(
+        base_donor, replace={"ppt/presentation.xml": donor_pres})
+
+    pres_start, pres_end = _entry_interval(target, "ppt/presentation.xml")
+    s2_start, s2_end = _entry_interval(target, "ppt/slides/slide2.xml")
+    copy_a, copy_b = make_corrupted_copies(target, [
+        [("zero_range", pres_start, pres_end),
+         ("zero_range", s2_start, s2_end)],
+        [("zero_range", pres_start, pres_end),
+         ("zero_range", s2_start, s2_end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    assert outcome.guarantee == "hybrid"
+    assert outcome.output_path is not None
+    with zipfile.ZipFile(outcome.output_path) as archive:
+        assert archive.testzip() is None
+    assert inspect_orphans(outcome.output_path).orphans == []
+    assert any("Mode B" in note for note in outcome.notes)
+    assert any(
+        "ppt/slides/slide4.xml" in note and "dropped" in note
+        for note in outcome.notes)
+
+
+def test_mode_a_renumbered_rescue_leaves_no_orphans(tmp_path: Path) -> None:
+    """Mode A (plumbing intact) restores a renumbered slide without orphaning.
+
+    Same renumbering material as the verified content-addressed rescue, with
+    the plumbing left intact in the copies: the reference central directory
+    stays authoritative, so ``slide2`` -- destroyed in both copies and living
+    in the donor only under ``slide99`` -- is restored under its *reference*
+    name and remains referenced by the surviving presentation structure. No
+    donor-name orphan is introduced and the run stays ``partial``.
+    """
+    original, _ = _lineage_versions()
+    name = "ppt/slides/slide2.xml"
+    donor_name = "ppt/slides/slide99.xml"
+    slide2_bytes = _read_member(original, name)
+    donor = make_edited_version(
+        original, remove=[name],
+        replace={"ppt/slides/slide1.xml": _LINEAGE_SLIDE1},
+        add={donor_name: slide2_bytes})
+
+    start, end = _entry_interval(original, name)
+    copy_a, copy_b = make_corrupted_copies(original, [
+        [("zero_range", start, end)],
+        [("zero_range", start, end)],
+    ])
+    path_a = _write(tmp_path, "a.pptx", copy_a)
+    path_b = _write(tmp_path, "b.pptx", copy_b)
+    path_donor = _write(tmp_path, "donor.pptx", donor)
+
+    outcome = merge_restore(
+        [path_a, path_b, path_donor], output=tmp_path / "out.pptx",
+        allow_lineage=True)
+
+    prov = _provenance(outcome, name)
+    assert prov.method == "donor"
+    assert prov.source == path_donor
+    assert outcome.guarantee == "partial"
+    assert outcome.output_path is not None
+    assert _read_member(outcome.output_path.read_bytes(), name) == slide2_bytes
+    assert inspect_orphans(outcome.output_path).orphans == []
