@@ -81,6 +81,7 @@ pyenv manages Python versions rather than environments: make sure `python` resol
 ```console
 $ pptrepair check presentation.pptx [more.pptx ...]
 $ pptrepair check --json presentation.pptx   # machine-readable output
+$ pptrepair check --lang ja presentation.pptx   # report language
 ```
 
 Example output for a truncated file:
@@ -138,6 +139,7 @@ Useful to know:
 
 * **Cloud-only files are never downloaded by default.** Placeholder files that exist only in the cloud (OneDrive Files On-Demand, iCloud Drive, and other clients built on the OS-standard placeholder mechanisms) are detected from metadata alone and skipped; the summary always states how many files were left unexamined. Only PowerPoint files count here — everything else is filtered out by name first, so a folder full of cloud-only photos or documents does not inflate the number. Pass `--allow-download` to have them downloaded and examined too — each file is announced on stderr as its download starts, so long scans stay visible (this may take long and use significant disk space). Clients with proprietary placeholder implementations — notably Google Drive for desktop on Windows — cannot be detected this way, so reading their files may still trigger a download.
 * Encrypted or legacy binary Office files (OLE compound documents) are recognized and reported as such rather than as corruption. Legacy `.ppt` and Office `~$` lock files are counted and skipped; symbolic links are ignored unless you pass `--follow-symlinks`.
+* **`--search-archives` also mines backup archives for restore material.** Zip and tar archives (`.zip`, `.tar`, `.tar.gz`/`.tgz`, `.tar.bz2`/`.tbz2`, `.tar.xz`/`.txz`) found during the walk are opened and every `.pptx`/`.pptm` inside is diagnosed — an intact twin or an older version of a corrupted file kept inside a backup then shows up among the restore/lineage/merge candidates, labelled `backup.zip::inner/deck.pptx`. Archived files are donor material only: they are never repaired, never counted as scanned or corrupted, and members are extracted one at a time to a temporary directory that is removed afterwards. Cloud-only archives follow the same rule as cloud-only PowerPoint files (skipped unless `--allow-download`). With the flag, the report JSON carries `schema_version: 4` and an `origin_archive` key on archive-derived candidates; without it, output is unchanged.
 * `--report DIR` writes `scan_report.txt`, machine-readable `scan_report.json`, and — for unknown corruption patterns — anonymous diagnostic fingerprints (see below). An existing report directory needs `--force`. `--lang` and `--json` work like in `repair`.
 * Exit codes: `0` — everything examined is intact, `1` — corruption found, `2` — some paths could not be examined.
 
@@ -185,18 +187,21 @@ OneDrive-style chunk corruption overwrites bytes in place and preserves the file
   restore candidate: Archive/deck1.pptx (same name and size)
 ```
 
-`scan_report.json` carries the same data under `twin_candidates` (with a `high` / `medium` / `low` confidence per candidate), and `repair-all` reports list candidates for every file left unrepaired; its `repair_report.json` `schema_version` is now 2. PPTrepair only points at candidates — verify their content before replacing anything by hand.
+`scan_report.json` carries the same data under `twin_candidates` (with a `high` / `medium` / `low` confidence per candidate), and `repair-all` reports list candidates for every file left unrepaired; its `repair_report.json` `schema_version` is now 2. With `--search-archives`, intact twins kept inside backup archives are listed too, labelled `backup.zip::deck.pptx`. PPTrepair only points at candidates — verify their content before replacing anything by hand.
 
 ### Merging several corrupted copies into one restored file
 
 ```console
 $ pptrepair merge main.pptx conflict-copy.pptx            # two or more copies
 $ pptrepair merge main.pptx copy2.pptx old-version.pptx --yes
+$ pptrepair merge main.pptx backup-2023.zip               # donors from a backup archive
 ```
 
 OneDrive corruption often leaves several differently-damaged copies of the same presentation behind — the working file plus a sync-conflict copy, for example. `merge` reconstructs one file from all of them: the first argument is the file being restored, every further argument is a possible donor. Each archive entry is taken from whichever copy still reproduces the CRC-32 checksum the file's own index recorded for it, so a wrong byte can never be adopted silently; when no single copy holds an entry whole, the pieces are recombined across the 64 KiB boundaries at which this corruption operates.
 
 Sources are vetted before use. An exact same-size copy is used automatically when its index matches closely; a same-size copy with a weaker match, or a *different version* of the same presentation (recognised mainly by byte-identical embedded media), is only used after an interactive confirmation that shows the evidence (`--allow-candidate` / `--yes` skip the prompts, e.g. for scripts).
+
+Any SRC after the first may also be a backup archive (`.zip`, `.tar`, `.tar.gz`/`.tgz`, `.tar.bz2`/`.tbz2`, `.tar.xz`/`.txz`): every `.pptx`/`.pptm` inside is extracted to a temporary directory and vetted exactly like a plain file, and is named `backup.zip::inner/deck.pptx` in prompts and reports (`--json` additionally records each source's `origin_archive`). Encrypted, damaged or unreadable members are skipped with a note. The file being restored itself cannot live inside an archive — extract it first.
 
 The result reports its guarantee level:
 
@@ -214,6 +219,11 @@ When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `n
 If you hit an unknown pattern, please review the fingerprint file yourself and consider attaching it to a [new issue](https://github.com/xhighhongo41/PPTrepair/issues/new/choose) using the *Unknown corruption pattern report* template. These reports are what future repair strategies get built from.
 
 ## Changelog
+
+### ver 1.3.1 (2026-07-23)
+- Backup archives can now supply restore material. `pptrepair merge` accepts zip/tar archives (`.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz` and their short forms) as additional SRC arguments, and `scan` / `repair-all` gained an opt-in `--search-archives` flag that mines archives found during the walk — an intact twin or an older version kept inside a backup shows up among the restore/lineage/merge candidates, labelled `backup.zip::inner/deck.pptx`. Archived files are donor material only: never repaired, never counted, and cloud-only archives are never downloaded without `--allow-download`. Verified against real corrupted files: byte-identical `full` restores from a twin inside a zip and inside a tar.gz
+- `check` now supports `--lang` like every other command
+- Internal: `cli.py` / `report.py` split into per-command modules (no behavior change); translation template refreshed
 
 ### ver 1.3 (2026-07-23)
 - New `pptrepair merge` command reconstructs one restored file from any number of differently-damaged copies of the same presentation. Every adopted byte range is verified against the CRC-32 recorded by the file's own index (`full` results are byte-identical to the original — proven against a real intact twin), entries surviving in no copy whole are recombined across the 64 KiB corruption boundaries, and *different versions* of the same presentation can donate parts after an interactive confirmation (`hybrid` results clearly mark what came from another version). Donor parts are matched by content, not by part name, so slides and media renumbered by an insertion between versions are still found and restored to their correct position
