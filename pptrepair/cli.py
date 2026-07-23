@@ -24,10 +24,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Callable
 
 import pptrepair
+from pptrepair import archive as archive_module
 from pptrepair import i18n
 from pptrepair import merge as merge_module
 from pptrepair import repair as repair_module
@@ -278,6 +280,20 @@ def run_merge(sources: list[str], output: str | None, force: bool,
       (stderr + exit 2), and every given path is validated to exist as
       a regular file the same way ``repair``/``salvage`` validate a
       single input, before anything is diagnosed.
+    * The first SRC (the target) can never itself be a backup archive
+      (:func:`pptrepair.archive.is_archive`); that is a translated usage
+      error (stderr + exit 2) instead of trying to diagnose the archive
+      file as a PowerPoint package.
+    * Every SRC after the target that *is* a backup archive is expanded,
+      under one :class:`tempfile.TemporaryDirectory` spanning the rest of
+      the run, into the plain ``.pptx``/``.pptm`` members it holds (see
+      :func:`_expand_archive_sources`); every other SRC is used
+      unchanged. An archive contributing no member is dropped with a
+      note; if fewer than two sources remain after expansion the run
+      falls back to the same usage error as too few raw SRC arguments.
+      A materialized member is named to the user, everywhere, only
+      through its ``"<archive>::<member>"`` label -- never through the
+      temporary path it was extracted to.
     * The first SRC is the target; :func:`pptrepair.scan.diagnose_file`
       diagnoses it, and an undiagnosable target is a fatal error (stderr
       + exit 2, mirroring ``check``/``repair``).
@@ -301,6 +317,9 @@ def run_merge(sources: list[str], output: str | None, force: bool,
       requires at least two sources); a synthetic ``"failed"``
       :class:`~pptrepair.merge.MergeOutcome` is reported instead, with
       no output produced.
+    * Every note collected while expanding archive sources is merged into
+      ``outcome.notes`` ahead of ``merge_restore``'s own notes, so it
+      reaches both the text summary and the ``--json`` output.
     * Prints :func:`_merge_json_payload` when *json_output* is set,
       otherwise :func:`_render_merge_summary` with the *lang* translator.
     * Exit code: 0 when ``outcome.guarantee`` is ``"full"``, ``"partial"``
@@ -323,69 +342,172 @@ def run_merge(sources: list[str], output: str | None, force: bool,
 
     tr = i18n.get_translator(lang)
     target_path = Path(sources[0])
-    other_paths = [Path(src) for src in sources[1:]]
-
-    target_diag, target_error = scan_module.diagnose_file(target_path)
-    if target_diag is None:
-        print(f"pptrepair: error: {target_path}: {target_error}",
-              file=sys.stderr)
+    if archive_module.is_archive(target_path):
+        message = tr(
+            "The merge target cannot be a file inside an archive: {path}. "
+            "Extract it to a plain file and pass that instead."
+        ).format(path=target_path)
+        print(f"pptrepair: error: {message}", file=sys.stderr)
         return EXIT_ERROR
 
-    scored, diagnose_warnings = _score_other_sources(target_diag, other_paths)
-    for warning in diagnose_warnings:
-        print(warning, file=sys.stderr)
+    with tempfile.TemporaryDirectory(prefix="pptrepair-merge-") as tmp_dir:
+        other_paths, display, origin, expand_notes = _expand_archive_sources(
+            [Path(src) for src in sources[1:]], Path(tmp_dir))
 
-    approved, used_candidate, used_lineage, select_warnings = _select_sources(
-        scored, allow_candidate=allow_candidate, yes=yes,
-        is_tty=sys.stdin.isatty(), tr=tr)
-    for warning in select_warnings:
-        print(warning, file=sys.stderr)
-
-    output_path = Path(output) if output is not None else None
-    if approved:
-        try:
-            outcome = merge_module.merge_restore(
-                [target_path, *approved], output=output_path, force=force,
-                allow_candidate=used_candidate, allow_lineage=used_lineage,
-                lang=lang)
-        except repair_module.OutputExistsError as exc:
-            print(f"pptrepair: error: {exc}", file=sys.stderr)
-            print(tr("Hint: pass --force to overwrite the existing output."),
+        if not other_paths:
+            # Every non-target SRC was either an archive with no usable
+            # member, or expansion left nothing: same shortage as too few
+            # raw SRC arguments.
+            print("pptrepair: error: merge requires at least two SRC files",
                   file=sys.stderr)
             return EXIT_ERROR
-    else:
-        # merge_restore itself requires at least two sources; with none
-        # approved there is nothing left to splice the target against.
-        outcome = merge_module.MergeOutcome(
-            output_path=None, guarantee="failed", provenances=[],
-            scores=[score for _path, _diag, score in scored],
-            notes=["no other usable source remained after selection"])
 
-    if json_output:
-        payload = _merge_json_payload(target_path, outcome, scored, approved)
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-    else:
-        print(_render_merge_summary(outcome, tr))
+        target_diag, target_error = scan_module.diagnose_file(target_path)
+        if target_diag is None:
+            print(f"pptrepair: error: {target_path}: {target_error}",
+                  file=sys.stderr)
+            return EXIT_ERROR
 
-    return EXIT_CORRUPT if outcome.guarantee == "failed" else EXIT_OK
+        scored, diagnose_warnings = _score_other_sources(
+            target_diag, other_paths, display)
+        for warning in diagnose_warnings:
+            print(warning, file=sys.stderr)
+
+        approved, used_candidate, used_lineage, select_warnings = (
+            _select_sources(
+                scored, allow_candidate=allow_candidate, yes=yes,
+                is_tty=sys.stdin.isatty(), tr=tr, display=display))
+        for warning in select_warnings:
+            print(warning, file=sys.stderr)
+
+        output_path = Path(output) if output is not None else None
+        if approved:
+            try:
+                outcome = merge_module.merge_restore(
+                    [target_path, *approved], output=output_path,
+                    force=force, allow_candidate=used_candidate,
+                    allow_lineage=used_lineage, lang=lang, display=display)
+            except repair_module.OutputExistsError as exc:
+                print(f"pptrepair: error: {exc}", file=sys.stderr)
+                print(tr(
+                    "Hint: pass --force to overwrite the existing output."),
+                    file=sys.stderr)
+                return EXIT_ERROR
+        else:
+            # merge_restore itself requires at least two sources; with none
+            # approved there is nothing left to splice the target against.
+            outcome = merge_module.MergeOutcome(
+                output_path=None, guarantee="failed", provenances=[],
+                scores=[score for _path, _diag, score in scored],
+                notes=["no other usable source remained after selection"])
+        # Archive-expansion notes happened first, chronologically.
+        outcome.notes = [*expand_notes, *outcome.notes]
+
+        if json_output:
+            payload = _merge_json_payload(
+                target_path, outcome, scored, approved, display, origin)
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print(_render_merge_summary(outcome, tr, display))
+
+        return EXIT_CORRUPT if outcome.guarantee == "failed" else EXIT_OK
+
+
+def _expand_archive_sources(
+    other_paths: list[Path], tmp_dir: Path
+) -> tuple[list[Path], dict[Path, str], dict[Path, str], list[str]]:
+    """Replace every archive SRC with its extracted usable members.
+
+    Each path in *other_paths* that :func:`pptrepair.archive.is_archive`
+    recognises as a backup archive is expanded, via
+    :func:`pptrepair.archive.list_members` and
+    :func:`pptrepair.archive.materialize`, into plain on-disk copies of
+    its ``.pptx``/``.pptm`` members under their own subdirectory of
+    *tmp_dir* (one subdirectory per archive, so destination names never
+    collide across archives); every other path is passed through
+    unchanged. An archive that yields no usable member contributes
+    nothing and is noted.
+
+    :returns: ``(expanded, display, origin, notes)`` --
+
+        * *expanded*: *other_paths* with each archive replaced by the
+          temporary paths of its extracted members, in encounter order;
+        * *display*: maps each temporary member path to its
+          ``"<archive>::<member>"`` label
+          (:meth:`pptrepair.archive.ArchiveMember.display`), so no
+          user-facing text ever names the temporary file directly;
+        * *origin*: maps each temporary member path to the archive
+          file's own path (as a string), for a JSON ``origin_archive``
+          field;
+        * *notes*: one English line per enumeration/extraction problem
+          (encrypted, corrupt or unreadable members, plus an archive
+          left with no usable member at all), in encounter order. Every
+          path named in a note is either the archive file itself or an
+          in-archive member label, never a temporary path.
+    """
+    expanded: list[Path] = []
+    display: dict[Path, str] = {}
+    origin: dict[Path, str] = {}
+    notes: list[str] = []
+    for index, path in enumerate(other_paths):
+        if not archive_module.is_archive(path):
+            expanded.append(path)
+            continue
+        members, list_notes = archive_module.list_members(path)
+        notes.extend(list_notes)
+        if not members:
+            if not list_notes:
+                notes.append(
+                    f"archive {path} has no usable .pptx/.pptm member; "
+                    "skipped")
+            continue
+        member_dir = tmp_dir / f"archive{index:04d}"
+        member_dir.mkdir()
+        extracted, materialize_notes = archive_module.materialize(
+            path, members, member_dir)
+        notes.extend(materialize_notes)
+        for member, dest_path in extracted.items():
+            expanded.append(dest_path)
+            display[dest_path] = member.display()
+            origin[dest_path] = str(path)
+    return expanded, display, origin, notes
+
+
+def _display_label(path: Path,
+                   display: dict[Path, str] | None) -> str | Path:
+    """Return *path*'s user-facing label.
+
+    When *display* maps *path* (a source materialized from inside an
+    archive) to its ``"<archive>::<member>"`` label, that label is
+    returned so the temporary on-disk path is never shown to the user;
+    otherwise *path* itself is returned unchanged.
+    """
+    if display is None:
+        return path
+    return display.get(path, path)
 
 
 def _score_other_sources(
-    target_diag: Diagnosis, others: list[Path]
+    target_diag: Diagnosis, others: list[Path],
+    display: dict[Path, str] | None = None,
 ) -> tuple[list[tuple[Path, Diagnosis, OriginScore]], list[str]]:
     """Diagnose and score every non-target source against *target_diag*.
 
     Returns the scored ``(path, diagnosis, score)`` triples, in source
     order, plus one stderr-ready (untranslated, ``pptrepair: error:``
     prefixed) warning line for every source that could not be diagnosed
-    -- excluded from scoring, but not fatal to the run.
+    -- excluded from scoring, but not fatal to the run. A source is named
+    in that warning through :func:`_display_label`, given *display*, so a
+    source materialized from an archive is never named by its temporary
+    path.
     """
     scored: list[tuple[Path, Diagnosis, OriginScore]] = []
     warnings: list[str] = []
     for path in others:
         diagnosis, error = scan_module.diagnose_file(path)
         if diagnosis is None:
-            warnings.append(f"pptrepair: error: {path}: {error}")
+            label = _display_label(path, display)
+            warnings.append(f"pptrepair: error: {label}: {error}")
             continue
         score = score_origin(target_diag, diagnosis)
         scored.append((path, diagnosis, score))
@@ -395,7 +517,7 @@ def _score_other_sources(
 def _select_sources(
     scored: list[tuple[Path, Diagnosis, OriginScore]], *,
     allow_candidate: bool, yes: bool, is_tty: bool,
-    tr: Callable[[str], str],
+    tr: Callable[[str], str], display: dict[Path, str] | None = None,
 ) -> tuple[list[Path], bool, bool, list[str]]:
     """Decide which scored sources the merge should use.
 
@@ -405,7 +527,8 @@ def _select_sources(
     *used_lineage* report whether at least one candidate-/lineage-tier
     source was approved (to pass through as ``allow_candidate``/
     ``allow_lineage``); *warnings* holds one translated line per source
-    left unused, ready to print to stderr.
+    left unused, ready to print to stderr, each source named through
+    :func:`_display_label` given *display*.
 
     An ``auto``-tier source is always used. A ``candidate``-tier source
     is used when *allow_candidate* or *yes* is set, or -- only when
@@ -425,7 +548,7 @@ def _select_sources(
             continue
         if score.tier == "candidate":
             use = allow_candidate or yes or (
-                is_tty and _confirm_source(path, score, tr))
+                is_tty and _confirm_source(path, score, tr, display))
             if use:
                 approved.append(path)
                 used_candidate = True
@@ -433,10 +556,10 @@ def _select_sources(
                 warnings.append(tr(
                     "Candidate-tier source not used: {path} (pass "
                     "--allow-candidate, --yes, or confirm the prompt to "
-                    "include it)").format(path=path))
+                    "include it)").format(path=_display_label(path, display)))
             continue
         if score.tier == "lineage":
-            use = yes or (is_tty and _confirm_source(path, score, tr))
+            use = yes or (is_tty and _confirm_source(path, score, tr, display))
             if use:
                 approved.append(path)
                 used_lineage = True
@@ -444,26 +567,29 @@ def _select_sources(
                 warnings.append(tr(
                     "Lineage-tier source not used: {path} (pass --yes "
                     "or confirm the prompt to include it)"
-                ).format(path=path))
+                ).format(path=_display_label(path, display)))
             continue
         warnings.append(tr(
             "Source not used (not the same origin): {path}"
-        ).format(path=path))
+        ).format(path=_display_label(path, display)))
     return approved, used_candidate, used_lineage, warnings
 
 
 def _confirm_source(path: Path, score: OriginScore,
-                    tr: Callable[[str], str]) -> bool:
+                    tr: Callable[[str], str],
+                    display: dict[Path, str] | None = None) -> bool:
     """Print *score*'s evidence for *path* and ask whether to use it.
 
-    Printed evidence: the file name, its tier, whether its size matches
-    the target, its triple/name/media ratios (as percentages) and its
-    lineage score, each label translated via *tr* (tier/match/ratio
-    values themselves stay untranslated, like verdict codes elsewhere in
-    this module). The actual y/N read is delegated to
-    :func:`_ask_yes_no`, isolated so tests can monkeypatch it.
+    Printed evidence: the file name (or, given *display*, its
+    ``"<archive>::<member>"`` label -- see :func:`_display_label`), its
+    tier, whether its size matches the target, its triple/name/media
+    ratios (as percentages) and its lineage score, each label translated
+    via *tr* (tier/match/ratio values themselves stay untranslated, like
+    verdict codes elsewhere in this module). The actual y/N read is
+    delegated to :func:`_ask_yes_no`, isolated so tests can monkeypatch
+    it.
     """
-    print(tr("Source: {path}").format(path=path))
+    print(tr("Source: {path}").format(path=_display_label(path, display)))
     print(tr("Tier: {tier}").format(tier=score.tier))
     print(tr("Size match: {value}").format(
         value="yes" if score.size_match else "no"))
@@ -494,6 +620,8 @@ def _ask_yes_no(prompt: str) -> bool:
 def _merge_json_payload(
     target_path: Path, outcome: "merge_module.MergeOutcome",
     scored: list[tuple[Path, Diagnosis, OriginScore]], approved: list[Path],
+    display: dict[Path, str] | None = None,
+    origin: dict[Path, str] | None = None,
 ) -> dict:
     """Build the JSON-schema dict for the merge command's ``--json`` output.
 
@@ -510,7 +638,8 @@ def _merge_json_payload(
           "sources": [
             {"path": str, "tier": str, "used": bool,
              "triple_ratio": float, "name_ratio": float,
-             "media_ratio": float, "lineage_score": float}, ...
+             "media_ratio": float, "lineage_score": float,
+             "origin_archive": str | null}, ...
           ],
           "notes": [str, ...]
         }
@@ -518,7 +647,12 @@ def _merge_json_payload(
     ``sources`` covers every non-target source that could be diagnosed
     and scored (in *scored*'s order), regardless of whether it was
     approved; a source excluded before diagnosis (e.g. it failed to
-    diagnose) is absent.
+    diagnose) is absent. A source's ``"path"`` is its
+    ``"<archive>::<member>"`` label (:func:`_display_label`) when
+    *display* maps it -- i.e. it was materialized from an archive SRC --
+    and its ``"origin_archive"`` is then that archive file's own path (a
+    plain source's is ``null``), from *origin*; the temporary path a
+    materialized source actually lives at never appears in either field.
     """
     approved_set = set(approved)
     provenance_counts = {
@@ -537,13 +671,14 @@ def _merge_json_payload(
         "provenance_counts": provenance_counts,
         "sources": [
             {
-                "path": str(path),
+                "path": str(_display_label(path, display)),
                 "tier": score.tier,
                 "used": path in approved_set,
                 "triple_ratio": score.triple_ratio,
                 "name_ratio": score.name_ratio,
                 "media_ratio": score.media_ratio,
                 "lineage_score": score.lineage_score,
+                "origin_archive": (origin or {}).get(path),
             }
             for path, _diagnosis, score in scored
         ],
@@ -552,8 +687,15 @@ def _merge_json_payload(
 
 
 def _render_merge_summary(outcome: "merge_module.MergeOutcome",
-                          tr: Callable[[str], str]) -> str:
-    """Render one merge outcome as a human-readable, translated summary."""
+                          tr: Callable[[str], str],
+                          display: dict[Path, str] | None = None) -> str:
+    """Render one merge outcome as a human-readable, translated summary.
+
+    Every entry-provenance source named in the summary is shown through
+    :func:`_display_label`, given *display*, so a source materialized
+    from an archive SRC is named by its ``"<archive>::<member>"`` label
+    rather than the temporary path it was extracted to.
+    """
     lines = [tr("=== Merge summary ===")]
     lines.append(
         tr("Guarantee: {guarantee}").format(guarantee=outcome.guarantee))
@@ -580,7 +722,7 @@ def _render_merge_summary(outcome: "merge_module.MergeOutcome",
     if source_counts:
         lines.append(tr("Entries by source:"))
         for source, count in source_counts.items():
-            lines.append(f"  {source}: {count}")
+            lines.append(f"  {_display_label(source, display)}: {count}")
 
     if outcome.guarantee == "hybrid":
         lines.append(tr(

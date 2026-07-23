@@ -300,3 +300,6 @@ msgstr "    这些文件可能是同一保存版本，或许可以用 pptrepair 
 msgid "  lineage candidate: {path} (score {score})"
 msgstr "  版本候选: {path}（分数 {score}）"
 
+msgid "The merge target cannot be a file inside an archive: {path}. Extract it to a plain file and pass that instead."
+msgstr "合并目标不能是压缩包内的文件: {path}。请先解压为普通文件后再指定。"
+

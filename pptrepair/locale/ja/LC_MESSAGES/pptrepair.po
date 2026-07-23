@@ -300,3 +300,6 @@ msgstr "    これらは同じ保存バージョンの可能性があり、pptre
 msgid "  lineage candidate: {path} (score {score})"
 msgstr "  別バージョン候補: {path}（スコア {score}）"
 
+msgid "The merge target cannot be a file inside an archive: {path}. Extract it to a plain file and pass that instead."
+msgstr "マージ対象にアーカイブ内のファイルを指定することはできません: {path}。展開してファイルとして指定してください。"
+

@@ -300,3 +300,6 @@ msgstr "    Diese Dateien könnten dieselbe gespeicherte Version sein und könnt
 msgid "  lineage candidate: {path} (score {score})"
 msgstr "  Abstammungskandidat: {path} (Wert {score})"
 
+msgid "The merge target cannot be a file inside an archive: {path}. Extract it to a plain file and pass that instead."
+msgstr "Das Merge-Ziel darf keine Datei innerhalb eines Archivs sein: {path}. Entpacken Sie es zu einer einfachen Datei und geben Sie diese stattdessen an."
+
