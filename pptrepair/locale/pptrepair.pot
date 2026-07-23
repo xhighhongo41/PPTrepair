@@ -23,6 +23,9 @@ msgstr ""
 msgid "=== Repair summary ==="
 msgstr ""
 
+msgid "=== Salvage summary ==="
+msgstr ""
+
 msgid "=== Scan summary ==="
 msgstr ""
 
@@ -53,7 +56,13 @@ msgstr ""
 msgid "Entries by source:"
 msgstr ""
 
+msgid "Entries recovered: {n}"
+msgstr ""
+
 msgid "Errors:"
+msgstr ""
+
+msgid "Evidence:"
 msgstr ""
 
 msgid "Failed: {n} file(s)"
@@ -75,6 +84,9 @@ msgid "Hint: pass --force to overwrite the existing output."
 msgstr ""
 
 msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
+msgstr ""
+
+msgid "Images carved: {n}"
 msgstr ""
 
 msgid "Last Modified By"
@@ -116,6 +128,9 @@ msgstr ""
 msgid "Not examined: {n} cloud-only file(s) were skipped without downloading."
 msgstr ""
 
+msgid "Note: carved images may contain unrelated data that overwrote the file."
+msgstr ""
+
 msgid "Note: these unresolved references existed in the original archive and were left untouched (the recovered file is byte-identical to the original)."
 msgstr ""
 
@@ -128,16 +143,31 @@ msgstr ""
 msgid "Notes:"
 msgstr ""
 
+msgid "Nothing could be salvaged from this file."
+msgstr ""
+
 msgid "Nothing to repair: the file is already an intact PowerPoint package."
+msgstr ""
+
+msgid "Nothing to salvage: the file is already an intact PowerPoint package."
 msgstr ""
 
 msgid "Output: {path}"
 msgstr ""
 
+msgid "Partial XML parts: {n}"
+msgstr ""
+
 msgid "Planned: {n} file(s)"
 msgstr ""
 
+msgid "PowerPoint may offer a one-time repair on first open."
+msgstr ""
+
 msgid "Re-check verdict: {verdict}"
+msgstr ""
+
+msgid "Reference integrity: {n} unresolved reference(s) in {m} part(s)"
 msgstr ""
 
 msgid "Removed {e} stale reference(s) from {p} rebuilt part(s)."
@@ -150,6 +180,9 @@ msgid "Repaired: {n} file(s)"
 msgstr ""
 
 msgid "Repairs:"
+msgstr ""
+
+msgid "Salvageable: {entries_ok}/{entries_total} entries, {slides_ok}/{slides_total} slides"
 msgstr ""
 
 msgid "Salvaged entries: {ok} of {total}"
@@ -185,10 +218,22 @@ msgstr ""
 msgid "Source: {path}"
 msgstr ""
 
+msgid "Structure integrity: {n} required relationship(s) missing"
+msgstr ""
+
+msgid "Text lines recovered: {n}"
+msgstr ""
+
+msgid "The merge target cannot be a file inside an archive: {path}. Extract it to a plain file and pass that instead."
+msgstr ""
+
 msgid "The recovery folder groups salvaged content by kind: images/ and media/ hold pictures, audio and video; texts/ holds best-effort recovered text; charts/ holds chart XML plus cached data; parts/ holds every salvaged part in its original, raw form."
 msgstr ""
 
 msgid "Tier: {tier}"
+msgstr ""
+
+msgid "Timing integrity: {n} inconsistent reference(s) in {m} part(s)"
 msgstr ""
 
 msgid "Title"
@@ -224,6 +269,9 @@ msgstr ""
 msgid "Warnings:"
 msgstr ""
 
+msgid "corrupted: archive body largely overwritten in place"
+msgstr ""
+
 msgid "corrupted: file is (almost) entirely zero-filled"
 msgstr ""
 
@@ -248,6 +296,9 @@ msgstr ""
 msgid "corrupted: mixture of two file versions"
 msgstr ""
 
+msgid "corrupted: overwritten with fragments of another ZIP archive"
+msgstr ""
+
 msgid "corrupted: unrecognized damage pattern"
 msgstr ""
 
@@ -255,6 +306,9 @@ msgid "dry run: nothing was written."
 msgstr ""
 
 msgid "intact PowerPoint package"
+msgstr ""
+
+msgid "no {required} relationship"
 msgstr ""
 
 msgid "not a ZIP-based file"
