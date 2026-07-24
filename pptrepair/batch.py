@@ -43,7 +43,7 @@ from pptrepair.i18n import get_translator
 from pptrepair.report import render_repair_text
 from pptrepair.repair import (EXTRACT_SUFFIX, REBUILD_SUFFIX, OutputExistsError,
                               RepairOutcome, predict_auto_mode, repair_file)
-from pptrepair.scan import FileOutcome, ScanResult, scan_paths
+from pptrepair.scan import ArchiveMaterial, FileOutcome, ScanResult, scan_paths
 
 
 @dataclass
@@ -387,7 +387,8 @@ def repair_paths(roots: Sequence[Path], *, output_dir: Path | None,
                  lang: str = "en",
                  progress: Callable[[FileOutcome], None] | None = None,
                  repair_progress: Callable[[BatchItem], None] | None = None,
-                 on_download: Callable[[Path], None] | None = None
+                 on_download: Callable[[Path], None] | None = None,
+                 material_progress: Callable[[ArchiveMaterial], None] | None = None
                  ) -> BatchResult:
     """Diagnose *roots* and repair every corrupted file found.
 
@@ -395,9 +396,10 @@ def repair_paths(roots: Sequence[Path], *, output_dir: Path | None,
     aggregate output directory and the report directory excluded from
     discovery); phase 2 walks ``scan.corrupted()`` in order, repairing
     each file into the aggregate output tree (or next to the source in
-    *in_place* mode). Callbacks stream progress: *progress* is forwarded
-    to the phase-1 scan, and *repair_progress* is invoked with each
-    :class:`BatchItem` as phase 2 produces it.
+    *in_place* mode). Callbacks stream progress: *progress* and
+    *material_progress* are forwarded to the phase-1 scan, and
+    *repair_progress* is invoked with each :class:`BatchItem` as phase 2
+    produces it.
 
     Implementation requirements:
 
@@ -419,9 +421,24 @@ def repair_paths(roots: Sequence[Path], *, output_dir: Path | None,
       ``counts()`` is unaffected (a skip is scan-layer bookkeeping, not
       a repair action), left at the default ``None`` this is a
       complete no-op.
+    * *material_progress* is forwarded to phase 1's :func:`scan_paths`
+      as-is (phase 2 never touches archive material); a no-op whenever
+      *search_archives* is False, or left at the default ``None``.
     * The returned :class:`BatchResult` records collision-fallback
       warnings and exposes per-action tallies via
       :meth:`BatchResult.counts`.
+
+    Coordinated cancellation: *progress*, *repair_progress*,
+    *on_download* and *material_progress* may all raise to abort the run
+    -- none of their exceptions are caught here, so they propagate to the
+    caller exactly like any other exception (see
+    :class:`pptrepair.cancel.OperationCancelled`). A cancellation raised
+    from *progress*/*on_download*/*material_progress* aborts during
+    phase 1, before phase 2 starts, so no repair is attempted; a
+    cancellation raised from *repair_progress* aborts partway through
+    phase 2 -- every artifact phase 2 already wrote for an earlier
+    corrupted file (and any report/fingerprint phase 1 wrote) is left in
+    place, not rolled back.
     """
     roots = [Path(root) for root in roots]
     effective_report_dir = None if dry_run else report_dir
@@ -439,6 +456,7 @@ def repair_paths(roots: Sequence[Path], *, output_dir: Path | None,
         max_file_bytes=max_file_bytes,
         progress=progress,
         on_download=on_download,
+        material_progress=material_progress,
     )
 
     corrupted = scan.corrupted()

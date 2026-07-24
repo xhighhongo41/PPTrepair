@@ -17,6 +17,7 @@ from fixtures import build_minimal_pptx, zero_prefix
 
 from pptrepair import scan as scan_module
 from pptrepair import walker as walker_module
+from pptrepair.cancel import OperationCancelled
 from pptrepair.cli import EXIT_CORRUPT, EXIT_ERROR, EXIT_OK, main
 from pptrepair.diagnostics import file_id
 from pptrepair.report import ISSUE_URL
@@ -444,6 +445,57 @@ def test_scan_paths_exclude_resolves_relative_and_absolute_paths(
     scanned_names = {outcome.path.name for outcome in result.outcomes}
     assert "kept.pptx" in scanned_names
     assert "excluded.pptx" not in scanned_names
+
+
+# --- scan_paths() coordinated cancellation --------------------------------
+
+
+def test_scan_paths_progress_cancellation_propagates_after_one_call(
+    tmp_path: Path,
+) -> None:
+    """A progress callback that raises OperationCancelled aborts the scan
+    immediately: the exception propagates uncaught, and no further file
+    is diagnosed after the one that triggered it."""
+    root = _mkroot(tmp_path)
+    for index in range(3):
+        _write(root, f"a{index}.pptx",
+              build_minimal_pptx(media_bytes=_MEDIA_BYTES, seed=index))
+
+    calls: list[scan_module.FileOutcome] = []
+
+    def _cancel_on_first(outcome: scan_module.FileOutcome) -> None:
+        calls.append(outcome)
+        raise OperationCancelled("user requested cancellation")
+
+    with pytest.raises(OperationCancelled):
+        scan_module.scan_paths([root], progress=_cancel_on_first)
+
+    assert len(calls) == 1
+
+
+def test_scan_paths_progress_cancellation_leaves_no_report_files(
+    tmp_path: Path,
+) -> None:
+    """Cancelling via progress before scan_paths returns leaves the
+    report directory created (it is made up front) but never produces
+    scan_report.txt/.json, since those are rendered by the caller only
+    after scan_paths returns successfully."""
+    root = _mkroot(tmp_path)
+    for index in range(3):
+        _write(root, f"a{index}.pptx",
+              build_minimal_pptx(media_bytes=_MEDIA_BYTES, seed=index))
+    report_dir = tmp_path / "report"
+
+    def _cancel_on_first(outcome: scan_module.FileOutcome) -> None:
+        raise OperationCancelled("user requested cancellation")
+
+    with pytest.raises(OperationCancelled):
+        scan_module.scan_paths([root], report_dir=report_dir,
+                               progress=_cancel_on_first)
+
+    assert report_dir.exists()
+    assert not (report_dir / "scan_report.txt").exists()
+    assert not (report_dir / "scan_report.json").exists()
 
 
 # --- --max-file-size -----------------------------------------------------

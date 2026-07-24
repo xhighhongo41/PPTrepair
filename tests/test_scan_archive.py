@@ -22,7 +22,9 @@ import pytest
 from fixtures import (build_minimal_pptx, header_offset, make_corrupted_copies,
                       make_edited_version, truncate, zero_prefix)
 
+from pptrepair import scan as scan_module
 from pptrepair import walker as walker_module
+from pptrepair.cancel import OperationCancelled
 from pptrepair.cli import EXIT_CORRUPT, EXIT_OK, main
 
 #: Shorthand for the capsys fixture type, to keep signatures short.
@@ -425,3 +427,50 @@ def test_no_temporary_extraction_path_leaks(
     label = f"{archive_path}::deep/folder/broken.pptx"
     assert label in out
     assert label in report_txt
+
+
+# --- 9. material_progress: per-member callback, coordinated cancellation -----
+
+
+def test_material_progress_called_once_per_member(tmp_path: Path) -> None:
+    """material_progress is invoked once per mined archive member, in the
+    same order and with the same objects as ``ScanResult.materials``."""
+    _write(_root := _mkroot(tmp_path), "normal.pptx",
+          build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+    archive_path = _root / "backup.zip"
+    _write_zip(archive_path, {
+        "backup/one.pptx": build_minimal_pptx(media_bytes=_MEDIA_BYTES, seed=1),
+        "backup/two.pptx": build_minimal_pptx(media_bytes=_MEDIA_BYTES, seed=2),
+    })
+
+    calls = []
+    result = scan_module.scan_paths([_root], search_archives=True,
+                                    material_progress=calls.append)
+
+    assert len(result.materials) == 2
+    assert calls == result.materials
+
+
+def test_material_progress_cancellation_propagates(tmp_path: Path) -> None:
+    """A material_progress callback that raises OperationCancelled aborts
+    archive mining right after the first member: the exception propagates
+    uncaught, after exactly one call."""
+    _write(_root := _mkroot(tmp_path), "normal.pptx",
+          build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+    archive_path = _root / "backup.zip"
+    _write_zip(archive_path, {
+        "backup/one.pptx": build_minimal_pptx(media_bytes=_MEDIA_BYTES, seed=1),
+        "backup/two.pptx": build_minimal_pptx(media_bytes=_MEDIA_BYTES, seed=2),
+    })
+
+    calls = []
+
+    def _cancel_on_first(material: scan_module.ArchiveMaterial) -> None:
+        calls.append(material)
+        raise OperationCancelled("user requested cancellation")
+
+    with pytest.raises(OperationCancelled):
+        scan_module.scan_paths([_root], search_archives=True,
+                               material_progress=_cancel_on_first)
+
+    assert len(calls) == 1
