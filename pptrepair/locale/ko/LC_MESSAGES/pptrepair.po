@@ -84,6 +84,9 @@ msgstr "계열"
 msgid "Skipped: {n} Office temp file(s)"
 msgstr "건너뜀: Office 임시 파일 {n}개"
 
+msgid "Skipped: {n} file(s) over the size limit"
+msgstr "건너뜀: 크기 상한을 초과한 파일 {n}개"
+
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "건너뜀: 레거시 .ppt 파일 {n}개"
 

@@ -84,6 +84,9 @@ msgstr "Reihe"
 msgid "Skipped: {n} Office temp file(s)"
 msgstr "Übersprungen: {n} Office-Temporärdatei(en)"
 
+msgid "Skipped: {n} file(s) over the size limit"
+msgstr "Übersprungen: {n} Datei(en) über der Größenbegrenzung"
+
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "Übersprungen: {n} veraltete .ppt-Datei(en)"
 

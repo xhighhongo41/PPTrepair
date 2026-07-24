@@ -231,11 +231,11 @@ def diagnose_archive_materials(
 def _apply_exclusions(walk: WalkResult, exclude: Sequence[Path]) -> WalkResult:
     """Return a copy of *walk* with every path under *exclude* removed.
 
-    Applied to all six path buckets (``targets`` / ``skipped_legacy`` /
+    Applied to all seven path buckets (``targets`` / ``skipped_legacy`` /
     ``skipped_temp`` / ``skipped_cloud`` / ``download_targets`` /
-    ``archives``) plus ``errors`` (matched on its path element).
-    *walker* itself is never touched; this only post-filters its output.
-    Comparison resolves
+    ``archives`` / ``skipped_oversize``) plus ``errors`` (matched on its
+    path element). *walker* itself is never touched; this only
+    post-filters its output. Comparison resolves
     both sides with ``Path.resolve()``, a best-effort symlink-following
     normalisation, so an exclusion given as a relative path or through
     a symlinked ancestor still matches.
@@ -260,6 +260,7 @@ def _apply_exclusions(walk: WalkResult, exclude: Sequence[Path]) -> WalkResult:
         archives=_filter(walk.archives),
         errors=[(path, message) for path, message in walk.errors
                if not _is_excluded(path)],
+        skipped_oversize=_filter(walk.skipped_oversize),
     )
 
 
@@ -271,6 +272,7 @@ def scan_paths(roots: Sequence[Path], *,
                include_filenames: bool = False,
                search_archives: bool = False,
                exclude: Sequence[Path] = (),
+               max_file_bytes: int | None = None,
                progress: Callable[[FileOutcome], None] | None = None,
                on_download: Callable[[Path], None] | None = None
                ) -> ScanResult:
@@ -284,7 +286,10 @@ def scan_paths(roots: Sequence[Path], *,
       (``parents=True``) up front; create ``diagnostics/`` lazily on
       the first fingerprint.
     * Discover targets via :func:`discover_targets` with
-      *follow_symlinks* / *allow_download* passed through.
+      *follow_symlinks* / *allow_download* / *max_file_bytes* passed
+      through; a candidate over the limit is excluded before it ever
+      reaches the diagnosis loop (see ``WalkResult.skipped_oversize``).
+      Left at the default ``None`` this is a complete no-op.
     * *search_archives*: opt-in only. When True, backup archives found
       during the walk are enumerated and their members diagnosed as
       donor *material* (:func:`diagnose_archive_materials`), stored on
@@ -333,7 +338,8 @@ def scan_paths(roots: Sequence[Path], *,
 
     walk = discover_targets(roots, follow_symlinks=follow_symlinks,
                             allow_download=allow_download,
-                            collect_archives=search_archives)
+                            collect_archives=search_archives,
+                            max_file_bytes=max_file_bytes)
     if exclude:
         walk = _apply_exclusions(walk, exclude)
     result = ScanResult(roots=[Path(root) for root in roots],

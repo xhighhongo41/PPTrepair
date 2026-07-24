@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -39,6 +40,44 @@ from pptrepair.cli_batch import run_repair_all, run_scan
 from pptrepair.cli_single import run_check, run_repair, run_salvage
 from pptrepair.exit_codes import EXIT_CORRUPT, EXIT_ERROR, EXIT_OK
 from pptrepair.origin import OriginScore, score_origin
+
+#: Grammar accepted by ``--max-file-size``: a plain byte count, or a
+#: decimal magnitude with a binary (1024-based) K/M/G/T multiplier
+#: suffix and an optional trailing "B", case-insensitive.
+_SIZE_RE = re.compile(r"^(?P<value>\d+(?:\.\d+)?)(?P<unit>[KkMmGgTt]?)[Bb]?$")
+
+#: Byte multiplier per (uppercased) unit letter of :data:`_SIZE_RE`.
+_SIZE_MULTIPLIERS = {"": 1, "K": 1024, "M": 1024 ** 2,
+                     "G": 1024 ** 3, "T": 1024 ** 4}
+
+
+def _parse_max_file_size(text: str) -> int:
+    """Parse a ``--max-file-size`` value into a byte count.
+
+    Accepts a plain integer byte count (``"12345"``) or a decimal
+    magnitude followed by a ``K``/``M``/``G``/``T`` binary-multiplier
+    suffix (base 1024, case-insensitive) with an optional trailing
+    ``B`` (``"500M"``, ``"2G"``, ``"1.5K"``, ``"2gb"``). The scaled
+    value is floored to an :class:`int`.
+
+    :raises argparse.ArgumentTypeError: when *text* does not match the
+        accepted grammar, or resolves to a non-positive byte count --
+        used directly as an ``argparse`` ``type=`` callable, so
+        ``argparse`` reports the message as a usage error.
+    """
+    match = _SIZE_RE.fullmatch(text.strip())
+    if match is None:
+        raise argparse.ArgumentTypeError(
+            f"invalid size {text!r}: expected a byte count or a number "
+            "with a K/M/G/T suffix, e.g. 500M, 2G, 1.5K"
+        )
+    multiplier = _SIZE_MULTIPLIERS[match.group("unit").upper()]
+    size = int(float(match.group("value")) * multiplier)
+    if size <= 0:
+        raise argparse.ArgumentTypeError(
+            f"invalid size {text!r}: must be a positive number of bytes"
+        )
+    return size
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -217,6 +256,11 @@ def build_parser() -> argparse.ArgumentParser:
                           "only; archived files are never counted or "
                           "repaired (default: ignore archives)"
                       ))
+    scan.add_argument("--max-file-size", metavar="SIZE",
+                      type=_parse_max_file_size, default=None,
+                      help="skip files larger than SIZE (bytes or with "
+                           "K/M/G/T suffix, e.g. 500M, 2G; default: no "
+                           "limit)")
 
     repair_all = subparsers.add_parser(
         "repair-all",
@@ -287,6 +331,11 @@ def build_parser() -> argparse.ArgumentParser:
                                 "are never counted or repaired (default: "
                                 "ignore archives)"
                             ))
+    repair_all.add_argument("--max-file-size", metavar="SIZE",
+                            type=_parse_max_file_size, default=None,
+                            help="skip files larger than SIZE (bytes or "
+                                 "with K/M/G/T suffix, e.g. 500M, 2G; "
+                                 "default: no limit)")
     return parser
 
 
@@ -777,12 +826,12 @@ def main(argv: list[str] | None = None) -> int:
         return run_scan(args.roots, args.report, args.force, args.show_all,
                         args.lang, args.json_output, args.follow_symlinks,
                         args.include_filenames, args.allow_download,
-                        args.search_archives)
+                        args.search_archives, args.max_file_size)
     if args.command == "repair-all":
         return run_repair_all(
             args.roots, args.output_dir, args.in_place, args.report,
             args.force, args.show_all, args.dry_run, args.lang,
             args.json_output, args.follow_symlinks, args.include_filenames,
-            args.allow_download, args.search_archives)
+            args.allow_download, args.search_archives, args.max_file_size)
     parser.error(f"unknown command: {args.command}")
     return EXIT_ERROR

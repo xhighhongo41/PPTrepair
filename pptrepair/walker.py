@@ -83,6 +83,11 @@ class WalkResult:
     left in ``skipped_cloud``)."""
     errors: list[tuple[Path, str]] = field(default_factory=list)
     """Paths that could not be examined, with the error message."""
+    skipped_oversize: list[Path] = field(default_factory=list)
+    """PowerPoint files that would otherwise be a ``target`` or
+    ``download_target`` but exceed ``max_file_bytes`` (populated only
+    when that limit is given); left in ``skipped_oversize`` and never
+    added to ``targets`` or ``download_targets``."""
 
 
 def is_cloud_placeholder(st: os.stat_result) -> bool:
@@ -141,7 +146,8 @@ def _resolve_stat(path: Path, lst: os.stat_result, *,
 
 
 def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
-                    allow_download: bool, collect_archives: bool) -> None:
+                    allow_download: bool, collect_archives: bool,
+                    max_file_bytes: int | None = None) -> None:
     """Sort *path* into the appropriate bucket of *result*.
 
     The name-based filters run first: placeholder metadata already
@@ -149,6 +155,17 @@ def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
     ruled out without ever considering a download. Only ``.pptx`` /
     ``.pptm`` candidates are subject to the cloud-placeholder skip and
     download accounting.
+
+    With *max_file_bytes* given, a ``.pptx``/``.pptm`` candidate that
+    would otherwise become a ``target`` (or ``download_target``) is
+    instead recorded in ``result.skipped_oversize`` when its size
+    (``st.st_size``, already at hand) is strictly greater than the
+    limit; a size equal to the limit still passes through. The check
+    runs after the cloud-placeholder skip -- a placeholder left
+    un-downloaded (``not allow_download``) keeps landing in
+    ``skipped_cloud`` regardless of its size -- so only a candidate that
+    would actually be diagnosed is ever subject to it. Backup archives
+    (``collect_archives``) are unaffected by *max_file_bytes*.
 
     With *collect_archives*, a backup archive (recognised by name via
     :func:`pptrepair.archive.is_archive`) is recorded in
@@ -188,10 +205,17 @@ def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
             return
     if suffix not in TARGET_SUFFIXES:
         return  # unrelated suffixes are neither a target nor an error
-    if is_cloud_placeholder(st):
-        if not allow_download:
-            result.skipped_cloud.append(path)
-            return
+    is_placeholder = is_cloud_placeholder(st)
+    if is_placeholder and not allow_download:
+        result.skipped_cloud.append(path)
+        return
+    if max_file_bytes is not None and st.st_size > max_file_bytes:
+        # Big enough to skip -- never reaches targets/download_targets,
+        # so it is neither diagnosed nor (if it was a placeholder)
+        # downloaded.
+        result.skipped_oversize.append(path)
+        return
+    if is_placeholder:
         # Reading this target will make the sync client download it;
         # recorded so the CLI can announce the download.
         result.download_targets.append(path)
@@ -221,7 +245,8 @@ def _enter_directory(result: WalkResult, path: Path, st: os.stat_result, *,
 
 def _walk_directory(root: Path, result: WalkResult, *, follow_symlinks: bool,
                      allow_download: bool, collect_archives: bool,
-                     visited: set[tuple[int, int]]) -> None:
+                     visited: set[tuple[int, int]],
+                     max_file_bytes: int | None = None) -> None:
     """Recursively walk *root* (already confirmed to be a directory).
 
     Uses ``os.walk`` for the traversal itself but takes over both the
@@ -270,13 +295,15 @@ def _walk_directory(root: Path, result: WalkResult, *, follow_symlinks: bool,
                 continue  # symlink ignored, or following it failed
             _classify_file(result, file_path, file_st,
                             allow_download=allow_download,
-                            collect_archives=collect_archives)
+                            collect_archives=collect_archives,
+                            max_file_bytes=max_file_bytes)
 
 
 def discover_targets(roots: Sequence[Path], *,
                      follow_symlinks: bool = False,
                      allow_download: bool = False,
-                     collect_archives: bool = False) -> WalkResult:
+                     collect_archives: bool = False,
+                     max_file_bytes: int | None = None) -> WalkResult:
     """Discover PowerPoint files under *roots* without opening any file.
 
     Implementation requirements:
@@ -306,6 +333,15 @@ def discover_targets(roots: Sequence[Path], *,
       without ``allow_download``, else ``archives`` + ``download_targets``).
       Every other bucket, and the default ``collect_archives=False``
       behaviour, is unchanged.
+    * With *max_file_bytes* given, a ``.pptx``/``.pptm`` candidate whose
+      size (``st_size``) is strictly greater than the limit is recorded
+      in ``skipped_oversize`` instead of ``targets``/``download_targets``
+      (a size equal to the limit still passes); the check runs after
+      classification and the cloud-placeholder skip, so only a file that
+      would otherwise actually be diagnosed is ever affected, and backup
+      archives are exempt. Left at the default ``None`` (no limit) this
+      is a complete no-op, byte-for-byte unchanged from before this
+      parameter existed.
     * Symbolic links (both to files and to directories) found during
       the walk are ignored unless *follow_symlinks* is true. When
       following, a visited set of ``(st_dev, st_ino)`` directory
@@ -344,11 +380,13 @@ def discover_targets(roots: Sequence[Path], *,
                                  follow_symlinks=follow_symlinks,
                                  allow_download=allow_download,
                                  collect_archives=collect_archives,
-                                 visited=visited)
+                                 visited=visited,
+                                 max_file_bytes=max_file_bytes)
         elif stat.S_ISREG(root_st.st_mode):
             _classify_file(result, root, root_st,
                             allow_download=allow_download,
-                            collect_archives=collect_archives)
+                            collect_archives=collect_archives,
+                            max_file_bytes=max_file_bytes)
         # Other entry types (sockets, devices, FIFOs) are neither files
         # nor directories we can classify; silently ignored.
 

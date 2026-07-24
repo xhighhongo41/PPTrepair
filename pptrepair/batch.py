@@ -383,6 +383,7 @@ def repair_paths(roots: Sequence[Path], *, output_dir: Path | None,
                  force: bool = False, dry_run: bool = False,
                  follow_symlinks: bool = False, allow_download: bool = False,
                  include_filenames: bool = False, search_archives: bool = False,
+                 max_file_bytes: int | None = None,
                  lang: str = "en",
                  progress: Callable[[FileOutcome], None] | None = None,
                  repair_progress: Callable[[BatchItem], None] | None = None,
@@ -407,12 +408,17 @@ def repair_paths(roots: Sequence[Path], *, output_dir: Path | None,
       None) in *in_place* mode; *in_place* and a None *output_dir* are
       only valid together.
     * *force* / *follow_symlinks* / *allow_download* / *include_filenames*
-      / *search_archives* / *lang* / *on_download* keep their
-      :func:`scan_paths` / :func:`repair_file` meanings. *search_archives*
-      is passed to phase 1 only: the mined archive material feeds the
-      report's donor-candidate sections, but phase 2 repairs strictly
-      ``scan.corrupted()`` (on-disk files), so no archive member is ever
-      itself repaired.
+      / *search_archives* / *max_file_bytes* / *lang* / *on_download*
+      keep their :func:`scan_paths` / :func:`repair_file` meanings.
+      *search_archives* is passed to phase 1 only: the mined archive
+      material feeds the report's donor-candidate sections, but phase 2
+      repairs strictly ``scan.corrupted()`` (on-disk files), so no
+      archive member is ever itself repaired. *max_file_bytes* is
+      likewise phase-1 only: a file it excludes never becomes a
+      ``scan.corrupted()`` entry, so phase 2 never sees it either;
+      ``counts()`` is unaffected (a skip is scan-layer bookkeeping, not
+      a repair action), left at the default ``None`` this is a
+      complete no-op.
     * The returned :class:`BatchResult` records collision-fallback
       warnings and exposes per-action tallies via
       :meth:`BatchResult.counts`.
@@ -430,6 +436,7 @@ def repair_paths(roots: Sequence[Path], *, output_dir: Path | None,
         include_filenames=include_filenames,
         search_archives=search_archives,
         exclude=exclude,
+        max_file_bytes=max_file_bytes,
         progress=progress,
         on_download=on_download,
     )

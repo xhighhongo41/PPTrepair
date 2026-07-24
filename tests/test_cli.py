@@ -313,3 +313,33 @@ def test_check_json_reports_timing_and_structure_integrity(
     assert clean_entry["structure_integrity"] == {
         "missing_count": 0, "items": [],
     }
+
+
+# --- _parse_max_file_size (--max-file-size argparse type) -----------------
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("12345", 12345),
+    ("500M", 524288000),
+    ("2G", 2147483648),
+    ("1.5K", 1536),
+    ("2gb", 2147483648),
+])
+def test_parse_max_file_size_accepts_valid_input(
+    text: str, expected: int
+) -> None:
+    """Plain byte counts and K/M/G/T-suffixed magnitudes parse correctly."""
+    from pptrepair.cli import _parse_max_file_size
+
+    assert _parse_max_file_size(text) == expected
+
+
+@pytest.mark.parametrize("text", ["abc", "", "-1", "0", "1X"])
+def test_parse_max_file_size_rejects_invalid_input(text: str) -> None:
+    """Malformed grammar and non-positive sizes raise ArgumentTypeError."""
+    import argparse
+
+    from pptrepair.cli import _parse_max_file_size
+
+    with pytest.raises(argparse.ArgumentTypeError):
+        _parse_max_file_size(text)

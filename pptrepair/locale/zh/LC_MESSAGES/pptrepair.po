@@ -84,6 +84,9 @@ msgstr "系列"
 msgid "Skipped: {n} Office temp file(s)"
 msgstr "已跳过: {n} 个 Office 临时文件"
 
+msgid "Skipped: {n} file(s) over the size limit"
+msgstr "已跳过: 超过大小上限的文件 {n} 个"
+
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "已跳过: {n} 个旧版 .ppt 文件"
 

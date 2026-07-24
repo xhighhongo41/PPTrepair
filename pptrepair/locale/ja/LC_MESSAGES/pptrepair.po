@@ -84,6 +84,9 @@ msgstr "系列"
 msgid "Skipped: {n} Office temp file(s)"
 msgstr "スキップ: Officeの一時ファイル {n} 件"
 
+msgid "Skipped: {n} file(s) over the size limit"
+msgstr "スキップ: サイズ上限を超えるファイル {n} 件"
+
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "スキップ: レガシー .ppt ファイル {n} 件"
 

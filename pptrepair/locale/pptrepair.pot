@@ -203,6 +203,9 @@ msgstr ""
 msgid "Skipped: {n} Office temp file(s)"
 msgstr ""
 
+msgid "Skipped: {n} file(s) over the size limit"
+msgstr ""
+
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr ""
 

@@ -149,7 +149,7 @@ def test_json_output_schema_and_no_progress_lines_mixed_in(
         "fingerprints_skipped",
     }
     assert set(summary["skipped"]) == {
-        "legacy", "office_temp", "cloud_placeholder"}
+        "legacy", "office_temp", "cloud_placeholder", "oversize"}
     assert summary["scanned"] == 2
     assert summary["verdicts"] == {"normal": 1, "head_zero_fill": 1}
 
@@ -444,3 +444,60 @@ def test_scan_paths_exclude_resolves_relative_and_absolute_paths(
     scanned_names = {outcome.path.name for outcome in result.outcomes}
     assert "kept.pptx" in scanned_names
     assert "excluded.pptx" not in scanned_names
+
+
+# --- --max-file-size -----------------------------------------------------
+
+
+def test_max_file_size_skips_oversize_file_text_and_json(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """--max-file-size keeps a small file and skips an oversize one --
+    the oversize file is neither diagnosed nor listed as corrupted."""
+    root = _mkroot(tmp_path)
+    small_path = _write(
+        root, "small.pptx", build_minimal_pptx(media_bytes=1000))
+    big_path = _write(root, "big.pptx", b"x" * 20000)
+
+    exit_code = main(["scan", str(root), "--max-file-size", "10000"])
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert "Skipped: 1 file(s) over the size limit" in out
+    assert "Scanned: 1 file(s)" in out
+
+    exit_code_json = main(
+        ["scan", str(root), "--max-file-size", "10000", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code_json == EXIT_OK
+    assert payload["summary"]["skipped"]["oversize"] == 1
+    assert payload["skipped_oversize"] == [str(big_path)]
+    assert payload["summary"]["scanned"] == 1
+    assert all(entry["path"] != str(big_path) for entry in payload["files"])
+    assert str(small_path) in {entry["path"] for entry in payload["files"]}
+
+
+def test_max_file_size_default_no_limit_scans_every_file(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """Without --max-file-size, no file is ever skipped_oversize."""
+    root = _mkroot(tmp_path)
+    _write(root, "small.pptx", build_minimal_pptx(media_bytes=1000))
+    _write(root, "big.pptx", b"x" * 20000)
+
+    exit_code = main(["scan", str(root), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == EXIT_CORRUPT  # big.pptx is NOT_A_ZIP, not skipped
+    assert payload["summary"]["skipped"]["oversize"] == 0
+    assert payload["skipped_oversize"] == []
+    assert payload["summary"]["scanned"] == 2
+
+
+@pytest.mark.parametrize("bad_value", ["abc", "-1", "0"])
+def test_max_file_size_rejects_invalid_argument(
+    tmp_path: Path, bad_value: str
+) -> None:
+    """An invalid --max-file-size value is a usage error (exit 2)."""
+    root = _mkroot(tmp_path)
+    with pytest.raises(SystemExit) as exc_info:
+        main(["scan", str(root), "--max-file-size", bad_value])
+    assert exc_info.value.code == 2
