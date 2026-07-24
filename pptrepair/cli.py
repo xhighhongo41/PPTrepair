@@ -336,6 +336,16 @@ def build_parser() -> argparse.ArgumentParser:
                             help="skip files larger than SIZE (bytes or "
                                  "with K/M/G/T suffix, e.g. 500M, 2G; "
                                  "default: no limit)")
+
+    subparsers.add_parser(
+        "gui",
+        help="launch the graphical interface (requires the [gui] extra)",
+        description=(
+            "Launch the PySide6 desktop interface. Requires the optional "
+            "[gui] extra (PySide6); install it with "
+            "`pip install 'pptrepair[gui]'`."
+        ),
+    )
     return parser
 
 
@@ -806,6 +816,31 @@ def _render_merge_summary(outcome: "merge_module.MergeOutcome",
     return "\n".join(lines)
 
 
+def run_gui() -> int:
+    """Launch the PySide6 desktop interface (the ``gui`` subcommand).
+
+    :mod:`pptrepair.gui.app` (and, transitively, PySide6) is imported
+    lazily here rather than at this module's top level, so that
+    :mod:`pptrepair.cli` -- and every other subcommand -- keeps working
+    in an environment where the optional ``[gui]`` extra was never
+    installed.
+
+    :returns: :func:`pptrepair.gui.app.main`'s exit code on success, or
+        :data:`EXIT_ERROR` -- after printing an installation hint to
+        stderr -- when PySide6/the ``[gui]`` extra is not installed.
+    """
+    try:
+        from pptrepair.gui.app import main as gui_main
+    except ImportError:
+        print(
+            "pptrepair: error: PySide6 is not installed. Install the "
+            "GUI extra with: pip install 'pptrepair[gui]'",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    return gui_main()
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns the process exit code."""
     parser = build_parser()
@@ -833,5 +868,7 @@ def main(argv: list[str] | None = None) -> int:
             args.force, args.show_all, args.dry_run, args.lang,
             args.json_output, args.follow_symlinks, args.include_filenames,
             args.allow_download, args.search_archives, args.max_file_size)
+    if args.command == "gui":
+        return run_gui()
     parser.error(f"unknown command: {args.command}")
     return EXIT_ERROR

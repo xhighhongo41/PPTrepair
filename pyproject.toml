@@ -22,10 +22,11 @@ classifiers = [
 pptrepair = "pptrepair.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pytest-qt"]
+gui = ["PySide6>=6.8"]
 
 [tool.setuptools]
-packages = ["pptrepair"]
+packages = ["pptrepair", "pptrepair.gui"]
 
 [tool.setuptools.dynamic]
 version = {attr = "pptrepair.__version__"}
