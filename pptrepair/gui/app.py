@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
 import pptrepair
@@ -25,6 +26,10 @@ def main() -> int:
     :returns: the Qt event loop's exit code, suitable for use as the
         process exit code.
     """
+    # Set once, ahead of any QSettings() construction (see
+    # pptrepair.gui.settings.Settings), so QSettings' own
+    # organisation/application-based default storage path is stable.
+    QCoreApplication.setOrganizationName("PPTrepair")
     app = QApplication(sys.argv)
     app.setApplicationName("PPTrepair")
     app.setApplicationVersion(pptrepair.__version__)

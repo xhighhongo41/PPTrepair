@@ -16,9 +16,11 @@ from pathlib import Path
 from PySide6.QtCore import QMimeData
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QKeySequence
 from PySide6.QtWidgets import (
+    QDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -29,6 +31,7 @@ from PySide6.QtWidgets import (
 import pptrepair
 from pptrepair.gui.results import ResultsPanel
 from pptrepair.gui.run_options import RunOptionsPanel
+from pptrepair.gui.settings import Settings, SettingsDialog
 from pptrepair.gui.source_panel import SourcePanel
 from pptrepair.gui.sources import AddResult, SourceKind, SourceListModel
 from pptrepair.gui.worker import GuiScanResult, ScanRequest, ScanWorker
@@ -42,10 +45,10 @@ class MainWindow(QMainWindow):
 
     Hosts the source list panel, a run-options panel, an (initially
     hidden) progress row with a Cancel button, an (initially hidden)
-    results panel, and a Scan/Repair action row, plus a File/Help menu
-    bar and status bar. All user-facing strings are plain English
-    literals for now; gettext-based translation is planned for a later
-    milestone.
+    results panel, and a Scan/Repair action row, plus a
+    File/Run/Settings/Help menu bar and status bar. All user-facing
+    strings are plain English literals for now; gettext-based
+    translation is planned for a later milestone.
     """
 
     def __init__(self) -> None:
@@ -60,6 +63,11 @@ class MainWindow(QMainWindow):
         self._scan_worker: ScanWorker | None = None
         self._files_diagnosed = 0
         self._materials_mined = 0
+
+        #: Persisted preferences (QSettings-backed), loaded once here
+        #: and applied to the run-options panel below; also reached
+        #: through the Preferences dialog and the recent-folders menu.
+        self._settings = Settings()
 
         self._sources = SourceListModel(self)
         self._build_central_widget()
@@ -88,6 +96,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._source_panel, stretch=2)
 
         self._run_options = RunOptionsPanel()
+        self._run_options.apply_settings(self._settings)
         layout.addWidget(self._run_options)
 
         layout.addWidget(self._build_progress_row())
@@ -140,7 +149,7 @@ class MainWindow(QMainWindow):
         return row
 
     def _build_menu_bar(self) -> None:
-        """Populate the menu bar's File and Help menus."""
+        """Populate the menu bar's File, Run, Settings and Help menus."""
         file_menu = self.menuBar().addMenu("File")
 
         add_files_action = QAction("Add Files…", self)
@@ -151,6 +160,8 @@ class MainWindow(QMainWindow):
         add_folder_action = QAction("Add Folder…", self)
         add_folder_action.triggered.connect(self._source_panel.add_folder)
         file_menu.addAction(add_folder_action)
+
+        self._recent_folders_menu = self._build_recent_folders_menu(file_menu)
 
         file_menu.addAction(self._build_separator())
 
@@ -166,11 +177,94 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
+        self._build_run_menu()
+
+        settings_menu = self.menuBar().addMenu("Settings")
+        preferences_action = QAction("Preferences…", self)
+        preferences_action.setShortcut(QKeySequence.StandardKey.Preferences)
+        preferences_action.setMenuRole(QAction.MenuRole.PreferencesRole)
+        preferences_action.triggered.connect(self._show_preferences_dialog)
+        settings_menu.addAction(preferences_action)
+
         help_menu = self.menuBar().addMenu("Help")
         about_action = QAction("About PPTrepair", self)
         about_action.setMenuRole(QAction.MenuRole.AboutRole)
         about_action.triggered.connect(self._show_about_dialog)
         help_menu.addAction(about_action)
+
+    def _build_recent_folders_menu(self, file_menu: QMenu) -> QMenu:
+        """Return the "Recent Folders" submenu, rebuilt on every show.
+
+        Built through ``file_menu.addMenu(title)`` -- which both
+        inserts and returns a *new*, ``file_menu``-owned ``QMenu`` --
+        rather than constructing a standalone :class:`QMenu` and
+        handing it to ``addMenu(QMenu)``: the latter's own returned
+        (and here otherwise-unused) ``QAction`` has been observed to
+        end up in an invalid, already-deleted state, corrupting later
+        traversal of ``file_menu.actions()`` -- the same class of
+        issue :meth:`_build_separator` already works around.
+
+        Wired to :attr:`QMenu.aboutToShow` rather than kept in sync
+        incrementally, so its contents always reflect the latest
+        :attr:`_settings` state regardless of what changed it.
+
+        :param file_menu: the File menu to add this submenu to.
+        """
+        menu = file_menu.addMenu("Recent Folders")
+        menu.aboutToShow.connect(self._rebuild_recent_folders_menu)
+        return menu
+
+    def _rebuild_recent_folders_menu(self) -> None:
+        """Repopulate the Recent Folders submenu from :attr:`_settings`."""
+        menu = self._recent_folders_menu
+        menu.clear()
+
+        folders = self._settings.recent_folders()
+        if not folders:
+            empty_action = QAction("(empty)", menu)
+            empty_action.setEnabled(False)
+            menu.addAction(empty_action)
+            return
+
+        for folder in folders:
+            action = QAction(folder, menu)
+            # Bind *folder* as a default argument so every action
+            # closes over its own path rather than the loop variable.
+            action.triggered.connect(
+                lambda checked=False, folder=folder:
+                self._add_recent_folder(folder))
+            menu.addAction(action)
+
+        menu.addAction(self._build_separator())
+        clear_action = QAction("Clear Menu", menu)
+        clear_action.triggered.connect(self._settings.clear_recent_folders)
+        menu.addAction(clear_action)
+
+    def _build_run_menu(self) -> None:
+        """Build the Run menu, mirroring the Scan/Repair/Cancel buttons.
+
+        Every action shares the button's own slot, and
+        :meth:`_sync_scan_button`/:meth:`_set_running` keep the
+        actions' enabled state in lockstep with the buttons'.
+        """
+        run_menu = self.menuBar().addMenu("Run")
+
+        self._scan_action = QAction("Scan", self)
+        self._scan_action.setShortcut(QKeySequence("Ctrl+R"))
+        self._scan_action.setEnabled(False)
+        self._scan_action.triggered.connect(self._start_scan)
+        run_menu.addAction(self._scan_action)
+
+        self._repair_action = QAction("Repair", self)
+        self._repair_action.setEnabled(False)
+        self._repair_action.setToolTip("Repair comes in a later milestone")
+        run_menu.addAction(self._repair_action)
+
+        self._cancel_action = QAction("Cancel", self)
+        self._cancel_action.setShortcut(QKeySequence("Esc"))
+        self._cancel_action.setEnabled(False)
+        self._cancel_action.triggered.connect(self._cancel_scan)
+        run_menu.addAction(self._cancel_action)
 
     def _build_separator(self) -> QAction:
         """Build a menu separator action parented to this window.
@@ -197,6 +291,16 @@ class MainWindow(QMainWindow):
             "stored on OneDrive.\n"
             "Licensed under the GNU General Public License v3.0.",
         )
+
+    def _show_preferences_dialog(self) -> None:
+        """Open the Preferences dialog and re-apply the run options on OK.
+
+        Cancelling the dialog leaves :attr:`_settings` -- and hence the
+        run-options panel -- untouched.
+        """
+        dialog = SettingsDialog(self._settings, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._run_options.apply_settings(self._settings)
 
     # -- scan lifecycle ------------------------------------------------
 
@@ -225,6 +329,7 @@ class MainWindow(QMainWindow):
         request = ScanRequest(
             roots=roots,
             archives=archives,
+            follow_symlinks=self._settings.follow_symlinks(),
             allow_download=self._run_options.allow_download(),
             max_file_bytes=self._run_options.max_file_bytes(),
         )
@@ -253,6 +358,7 @@ class MainWindow(QMainWindow):
         """Ask the running worker to stop, if any."""
         if self._scan_worker is not None:
             self._cancel_button.setEnabled(False)
+            self._cancel_action.setEnabled(False)
             self._scan_worker.cancel()
             self.statusBar().showMessage("Cancelling…")
 
@@ -260,15 +366,17 @@ class MainWindow(QMainWindow):
         """Toggle the UI between the idle and scanning states.
 
         Disables the source and run-options panels and shows the
-        progress row while *running*; the Scan button's own enabled
-        state is derived through :meth:`_sync_scan_button` (which also
-        accounts for whether any sources are present).
+        progress row while *running*; the Scan button's (and its Run
+        menu counterpart's) own enabled state is derived through
+        :meth:`_sync_scan_button` (which also accounts for whether any
+        sources are present).
         """
         self._source_panel.setEnabled(not running)
         self._run_options.set_enabled_for_running(running)
         self._progress_row.setVisible(running)
         if running:
             self._cancel_button.setEnabled(True)
+            self._cancel_action.setEnabled(True)
         self._sync_scan_button()
 
     def _finish_ui(self, status_message: str) -> None:
@@ -282,10 +390,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(status_message)
 
     def _sync_scan_button(self, *_args: object) -> None:
-        """Enable Scan only when sources exist and no scan is running."""
+        """Enable Scan (button and Run-menu action) with sources present.
+
+        Enabled only when at least one source is accumulated and no
+        scan is currently running.
+        """
         running = self._scan_worker is not None
-        self._scan_button.setEnabled(
-            self._sources.rowCount() > 0 and not running)
+        enabled = self._sources.rowCount() > 0 and not running
+        self._scan_button.setEnabled(enabled)
+        self._scan_action.setEnabled(enabled)
 
     # -- worker signal handlers (UI thread) ----------------------------
 
@@ -351,7 +464,35 @@ class MainWindow(QMainWindow):
     def _on_sources_added(self, result: object) -> None:
         """Summarise a panel/menu add on the status bar."""
         assert isinstance(result, AddResult)
+        self._register_add_result(result)
+
+    def _add_recent_folder(self, folder: str) -> None:
+        """Add *folder* to the sources, chosen from the Recent Folders menu.
+
+        :param folder: one of the paths returned by
+            :meth:`~pptrepair.gui.settings.Settings.recent_folders`.
+        """
+        result = self._sources.add_paths([Path(folder)])
+        self._register_add_result(result)
+
+    def _register_add_result(self, result: AddResult) -> None:
+        """Report *result* on the status bar and remember any new folders.
+
+        Shared by every way sources can be added -- drag-and-drop, the
+        "Add Files…"/"Add Folder…" dialogs and the Recent Folders
+        submenu -- so a freshly added folder is pushed onto
+        :attr:`_settings`'s most-recently-used list exactly once,
+        regardless of how it was added. A path already present (a
+        duplicate, per :attr:`AddResult.duplicates`) is left where it
+        is in that list.
+
+        :param result: the outcome of one
+            :meth:`~pptrepair.gui.sources.SourceListModel.add_paths` call.
+        """
         self.statusBar().showMessage(self._format_add_result(result))
+        for entry in result.added:
+            if entry.kind is SourceKind.FOLDER:
+                self._settings.push_recent_folder(entry.path)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         """Accept a drag that carries at least one local file URL.
@@ -378,7 +519,7 @@ class MainWindow(QMainWindow):
             return
         event.acceptProposedAction()
         result = self._sources.add_paths(paths)
-        self.statusBar().showMessage(self._format_add_result(result))
+        self._register_add_result(result)
 
     @staticmethod
     def _has_local_file_urls(mime_data: QMimeData) -> bool:

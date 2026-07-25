@@ -1,15 +1,18 @@
-"""Scan-results table model and panel for the desktop application.
+"""Scan-results table/tree models and panel for the desktop application.
 
 Renders the outcome of one scan -- diagnosed files, skipped files and
-donor material mined from archives -- as a flat, colour-coded table,
-with a one-line summary above it. Everything here runs on the UI
-thread; the panel is fed a :class:`~pptrepair.gui.worker.GuiScanResult`
-that the worker produced off-thread.
+donor material mined from archives -- as a flat, colour-coded table on
+one tab, and the twin-/lineage-/merge-restoration candidates computed
+from that same outcome as a tree on a second tab, with a one-line
+summary above both. Everything here runs on the UI thread; the panel
+is fed a :class:`~pptrepair.gui.worker.GuiScanResult` that the worker
+produced off-thread.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
@@ -18,14 +21,33 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
     QLabel,
+    QStackedWidget,
     QTableView,
+    QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from pptrepair.classify import Verdict
 from pptrepair.gui.worker import GuiScanResult
+
+# The three candidate-computation functions below are report.py's own
+# algorithms (kept intentionally separate from its text/JSON
+# rendering) reused here so the GUI's Candidates tab shows exactly the
+# same twin/lineage/merge candidates as ``pptrepair scan``'s report.
+# Importing these private names -- and the private result dataclass
+# _LineageCandidate, needed only for type hints -- is an intentional
+# same-package reuse, not a public API.
+from pptrepair.report_candidates import (
+    _lineage_candidates_map,
+    _LineageCandidate,
+    _merge_group_map,
+    _twin_candidates_map,
+)
 from pptrepair.scan import ArchiveMaterial, FileOutcome, ScanResult
+from pptrepair.twin import TwinCandidate
 from pptrepair.walker import WalkResult
 
 #: Table column headers, in order.
@@ -114,6 +136,89 @@ def _build_rows(result: GuiScanResult) -> list[_ResultRow]:
         rows.extend(_skip_rows(scan.walk))
     rows.extend(_row_for_material(material) for material in result.materials)
     return rows
+
+
+# --------------------------------------------------------------------------
+# Candidates tree
+# --------------------------------------------------------------------------
+
+
+def _twin_candidate_label(path: Path, candidate: TwinCandidate) -> str:
+    """Render one twin-candidate item's text: "target -> candidate".
+
+    *candidate*'s display name is its ``"<archive>::<member>"`` label
+    when it was materialized from an archive, else its plain path.
+    """
+    display = (candidate.member_label if candidate.member_label is not None
+               else str(candidate.path))
+    return f"{path} → {display}"
+
+
+def _lineage_candidate_label(path: Path, candidate: _LineageCandidate) -> str:
+    """Render one lineage-candidate item's text, with its lineage score."""
+    return (f"{path} → {candidate.display} "
+            f"(score {candidate.score.lineage_score:.2f})")
+
+
+def _build_twin_branch(
+    twin_map: dict[Path, list[TwinCandidate]],
+) -> QTreeWidgetItem | None:
+    """Return the "Twin candidates" top-level item, or None when empty."""
+    if not twin_map:
+        return None
+    root = QTreeWidgetItem(["Twin candidates"])
+    for path, candidates in twin_map.items():
+        for candidate in candidates:
+            QTreeWidgetItem(root, [_twin_candidate_label(path, candidate)])
+    return root
+
+
+def _build_lineage_branch(
+    lineage_map: dict[Path, list[_LineageCandidate]],
+) -> QTreeWidgetItem | None:
+    """Return the "Lineage candidates" top-level item, or None when empty."""
+    if not lineage_map:
+        return None
+    root = QTreeWidgetItem(["Lineage candidates"])
+    for path, candidates in lineage_map.items():
+        for candidate in candidates:
+            QTreeWidgetItem(
+                root, [_lineage_candidate_label(path, candidate)])
+    return root
+
+
+def _build_merge_branch(groups: list[dict]) -> QTreeWidgetItem | None:
+    """Return the "Merge groups" top-level item, or None when empty.
+
+    Each group is shown as "group (size <bytes>)", with one child
+    item per member file (each rendered through its own display name).
+    """
+    if not groups:
+        return None
+    root = QTreeWidgetItem(["Merge groups"])
+    for group in groups:
+        group_item = QTreeWidgetItem(root, [f"group (size {group['size']})"])
+        for merge_file in group["files"]:
+            QTreeWidgetItem(group_item, [merge_file.display])
+    return root
+
+
+def _build_candidate_branches(result: GuiScanResult) -> list[QTreeWidgetItem]:
+    """Build every non-empty candidate branch for *result*.
+
+    Computes the twin/lineage/merge candidate maps from the scan
+    outcome (empty when *result* carries no on-disk scan) plus any
+    mined archive materials, through the same functions
+    :mod:`pptrepair.report_candidates` uses for the text/JSON reports.
+    """
+    outcomes = result.scan.outcomes if result.scan is not None else []
+    materials = result.materials
+    branches = (
+        _build_twin_branch(_twin_candidates_map(outcomes, materials)),
+        _build_lineage_branch(_lineage_candidates_map(outcomes, materials)),
+        _build_merge_branch(_merge_group_map(outcomes, materials)),
+    )
+    return [branch for branch in branches if branch is not None]
 
 
 class ScanResultsModel(QAbstractTableModel):
@@ -245,29 +350,45 @@ def _summary_text(result: GuiScanResult) -> str:
     return head
 
 
-class ResultsPanel(QWidget):
-    """Summary label above a scan-results :class:`QTableView`.
+#: Placeholder text shown on the Candidates tab when a scan found no
+#: twin, lineage or merge candidates at all.
+_NO_CANDIDATES_TEXT = "(no candidates found)"
 
-    Fed a :class:`GuiScanResult` through :meth:`show_result`; the Path
-    column stretches to fill the width. Starts empty and can be reset
-    through :meth:`clear`.
+
+class ResultsPanel(QWidget):
+    """Summary label above a "Files"/"Candidates" tab widget.
+
+    Fed a :class:`GuiScanResult` through :meth:`show_result`: the
+    "Files" tab holds the flat, colour-coded results table (its Path
+    column stretching to fill the width); the "Candidates" tab holds a
+    tree of twin-/lineage-/merge-restoration candidates computed from
+    that same result, falling back to a placeholder label when none
+    were found. Starts empty and can be reset through :meth:`clear`;
+    the last result shown is kept for :meth:`last_result`, so a later
+    milestone's repair step can act on it without re-scanning.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        """Build the summary label and results table.
+        """Build the summary label and the Files/Candidates tabs.
 
         :param parent: optional Qt parent widget.
         """
         super().__init__(parent)
         self._summary = ""
+        self._last_result: GuiScanResult | None = None
 
         self._summary_label = QLabel("")
         self._model = ScanResultsModel(self)
         self._table = self._build_table()
+        self._candidates_stack = self._build_candidates_stack()
+
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._table, "Files")
+        self._tabs.addTab(self._candidates_stack, "Candidates")
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._summary_label)
-        layout.addWidget(self._table)
+        layout.addWidget(self._tabs)
 
     def _build_table(self) -> QTableView:
         """Return the read-only results table bound to the model."""
@@ -284,23 +405,62 @@ class ResultsPanel(QWidget):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         return table
 
+    def _build_candidates_stack(self) -> QStackedWidget:
+        """Return the Candidates tab's tree/placeholder toggle widget."""
+        self._candidates_tree = QTreeWidget()
+        self._candidates_tree.setHeaderHidden(True)
+
+        self._candidates_placeholder = QLabel(_NO_CANDIDATES_TEXT)
+        self._candidates_placeholder.setAlignment(
+            Qt.AlignmentFlag.AlignCenter)
+
+        stack = QStackedWidget()
+        stack.addWidget(self._candidates_tree)
+        stack.addWidget(self._candidates_placeholder)
+        return stack
+
     def show_result(self, result: GuiScanResult) -> None:
-        """Display *result*: rebuild the table and refresh the summary.
+        """Display *result*: rebuild both tabs and refresh the summary.
 
         Runs on the UI thread.
 
         :param result: the scan outcome to render.
         """
+        self._last_result = result
         self._model.set_result(result)
         self._summary = _summary_text(result)
         self._summary_label.setText(self._summary)
+        self._show_candidates(result)
+
+    def _show_candidates(self, result: GuiScanResult) -> None:
+        """Rebuild the Candidates tree, or fall back to the placeholder."""
+        self._candidates_tree.clear()
+        branches = _build_candidate_branches(result)
+        if not branches:
+            self._candidates_stack.setCurrentWidget(
+                self._candidates_placeholder)
+            return
+        self._candidates_tree.addTopLevelItems(branches)
+        self._candidates_tree.expandAll()
+        self._candidates_stack.setCurrentWidget(self._candidates_tree)
 
     def summary_text(self) -> str:
         """Return the currently displayed summary line (empty when clear)."""
         return self._summary
 
+    def last_result(self) -> GuiScanResult | None:
+        """Return the most recently displayed result, or None before one is.
+
+        Kept so a later milestone's repair step can act on the same
+        scan without asking the user to run it again.
+        """
+        return self._last_result
+
     def clear(self) -> None:
-        """Reset to the empty state (no rows, no summary)."""
+        """Reset to the empty state (no rows, no candidates, no summary)."""
+        self._last_result = None
         self._model.set_result(GuiScanResult(scan=None))
         self._summary = ""
         self._summary_label.setText("")
+        self._candidates_tree.clear()
+        self._candidates_stack.setCurrentWidget(self._candidates_placeholder)

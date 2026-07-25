@@ -6,8 +6,9 @@ be downloaded, and an optional per-file size ceiling. Only the download
 and size settings are consumed by the current scan milestone; the
 repair mode and output destination are captured here (and read back
 through the property accessors) but wired into the actual repair in a
-later milestone. Defaults are hard-coded for now; persisting them via
-``QSettings`` is planned for the next step.
+later milestone. Every control's initial value comes from
+:meth:`RunOptionsPanel.apply_settings`, which the host window calls
+with the persisted :class:`~pptrepair.gui.settings.Settings`.
 
 All accessors and mutators on :class:`RunOptionsPanel` run on the UI
 thread, like every Qt widget.
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -34,6 +36,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+if TYPE_CHECKING:  # avoid a runtime import cycle with settings.py
+    from pptrepair.gui.settings import Settings
+
 
 class RepairMode(enum.Enum):
     """How the repair stage should treat the accumulated sources."""
@@ -49,6 +54,25 @@ _UNIT_FACTORS = {
     "MB": 1024 ** 2,
     "GB": 1024 ** 3,
 }
+
+
+def _bytes_to_spin_unit(value: int) -> tuple[int, str]:
+    """Convert a byte count back to a (spin value, unit) pair.
+
+    The inverse of the multiplication :meth:`RunOptionsPanel.max_file_bytes`
+    performs: prefers GB when *value* divides evenly into gibibytes,
+    falling back to MB (rounded, then clamped to the spin box's 1-9999
+    range) otherwise. Also reused by
+    :class:`~pptrepair.gui.settings.SettingsDialog` for its own,
+    identically-scaled size fields.
+
+    :param value: a positive byte count (a max-file-size ceiling).
+    """
+    gb_value, remainder = divmod(value, _UNIT_FACTORS["GB"])
+    if remainder == 0 and 1 <= gb_value <= 9999:
+        return gb_value, "GB"
+    mb_value = max(1, min(9999, round(value / _UNIT_FACTORS["MB"])))
+    return mb_value, "MB"
 
 
 class RunOptionsPanel(QWidget):
@@ -222,6 +246,42 @@ class RunOptionsPanel(QWidget):
             return None
         factor = _UNIT_FACTORS[self._unit_combo.currentText()]
         return self._size_spin.value() * factor
+
+    # -- settings integration -------------------------------------------
+
+    def apply_settings(self, settings: Settings) -> None:
+        """Initialise every control from *settings*'s persisted defaults.
+
+        Called once at startup (right after this panel is
+        constructed, with the freshly loaded
+        :class:`~pptrepair.gui.settings.Settings`) and again whenever
+        the user confirms the Preferences dialog, so a stored-default
+        change takes effect immediately. Runs on the UI thread.
+
+        :param settings: the settings store to read the defaults from.
+        """
+        mode_index = self._mode_combo.findData(
+            RepairMode(settings.repair_mode()))
+        if mode_index >= 0:
+            self._mode_combo.setCurrentIndex(mode_index)
+
+        if settings.output_in_place():
+            self._in_place_radio.setChecked(True)
+        else:
+            self._output_edit.setText(settings.output_dir())
+            self._into_folder_radio.setChecked(True)
+
+        self._download_check.setChecked(settings.allow_download())
+
+        max_bytes = settings.max_file_bytes()
+        self._no_limit_check.setChecked(max_bytes is None)
+        if max_bytes is not None:
+            spin_value, unit = _bytes_to_spin_unit(max_bytes)
+            self._size_spin.setValue(spin_value)
+            self._unit_combo.setCurrentText(unit)
+
+        self._sync_output_enabled()
+        self._sync_limit_enabled()
 
     # -- running-state control -----------------------------------------
 
