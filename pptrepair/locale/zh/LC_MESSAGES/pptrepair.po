@@ -671,4 +671,45 @@ msgstr "已跳过 {n} 个"
 
 msgid "{n} unsupported item(s) rejected"
 msgstr "已拒绝 {n} 个不支持的项目"
+msgid "Quick Guide"
+msgstr "快速指南"
+
+msgid "Open GitHub Page"
+msgstr "打开 GitHub 页面"
+
+msgid "Report Unknown Corruption…"
+msgstr "报告未知损坏…"
+
+msgid "License Information"
+msgstr "许可信息"
+
+msgid "PPTrepair diagnoses and repairs PowerPoint files damaged while stored on OneDrive."
+msgstr "PPTrepair 诊断并修复在 OneDrive 存储期间损坏的 PowerPoint 文件。"
+
+msgid "1. Drop .pptx/.pptm files onto the window, or add a folder (scanned recursively for matching files)."
+msgstr "1. 将 .pptx/.pptm 文件拖放到窗口中，或添加一个文件夹(将递归扫描)。"
+
+msgid "2. Backup archives can also be dropped as donor material for multi-source repair."
+msgstr "2. 备份归档文件也可以拖放，作为多源修复的素材来源。"
+
+msgid "3. Click Scan to diagnose everything, then review the Files and Candidates tabs."
+msgstr "3. 点击“Scan”诊断全部内容，然后查看 Files 和 Candidates 标签页。"
+
+msgid "4. Pick Single-file or Multi-source repair mode."
+msgstr "4. 选择 Single-file 或 Multi-source 修复模式。"
+
+msgid "5. Choose in-place or folder output, then click Repair."
+msgstr "5. 选择原地修复或输出文件夹，然后点击“Repair”。"
+
+msgid "6. Multi-source repair asks you to approve donors mined from other copies and archives before repairing."
+msgstr "6. 多源修复会要求您先批准从其他副本和归档文件中挖掘出的素材来源，再进行修复。"
+
+msgid "PPTrepair is licensed under the GNU General Public License v3.0."
+msgstr "PPTrepair 依据 GNU 通用公共许可证 v3.0 授权。"
+
+msgid "This application uses Qt for Python (PySide6), licensed under the GNU LGPL v3."
+msgstr "本应用程序使用 Qt for Python（PySide6），依据 GNU LGPL v3 授权。"
+
+msgid "See the LICENSE file in the GitHub repository for details."
+msgstr "详情请参阅 GitHub 仓库中的 LICENSE 文件。"
 

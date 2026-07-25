@@ -671,4 +671,45 @@ msgstr "{n} übersprungen"
 
 msgid "{n} unsupported item(s) rejected"
 msgstr "{n} nicht unterstützte(s) Element(e) abgelehnt"
+msgid "Quick Guide"
+msgstr "Kurzanleitung"
+
+msgid "Open GitHub Page"
+msgstr "GitHub-Seite öffnen"
+
+msgid "Report Unknown Corruption…"
+msgstr "Unbekannte Beschädigung melden…"
+
+msgid "License Information"
+msgstr "Lizenzinformationen"
+
+msgid "PPTrepair diagnoses and repairs PowerPoint files damaged while stored on OneDrive."
+msgstr "PPTrepair diagnostiziert und repariert PowerPoint-Dateien, die während der Speicherung in OneDrive beschädigt wurden."
+
+msgid "1. Drop .pptx/.pptm files onto the window, or add a folder (scanned recursively for matching files)."
+msgstr "1. Ziehen Sie .pptx-/.pptm-Dateien auf das Fenster oder fügen Sie einen Ordner hinzu (wird rekursiv durchsucht)."
+
+msgid "2. Backup archives can also be dropped as donor material for multi-source repair."
+msgstr "2. Backup-Archive können ebenfalls als Spendermaterial für die Multi-Source-Reparatur abgelegt werden."
+
+msgid "3. Click Scan to diagnose everything, then review the Files and Candidates tabs."
+msgstr "3. Klicken Sie auf „Scan“, um alles zu diagnostizieren, und prüfen Sie dann die Reiter „Files“ und „Candidates“."
+
+msgid "4. Pick Single-file or Multi-source repair mode."
+msgstr "4. Wählen Sie den Reparaturmodus „Single-file“ oder „Multi-source“."
+
+msgid "5. Choose in-place or folder output, then click Repair."
+msgstr "5. Wählen Sie „in place“ oder einen Ausgabeordner und klicken Sie auf „Repair“."
+
+msgid "6. Multi-source repair asks you to approve donors mined from other copies and archives before repairing."
+msgstr "6. Bei der Multi-Source-Reparatur müssen Sie vor der Reparatur die aus anderen Kopien und Archiven ermittelten Spender bestätigen."
+
+msgid "PPTrepair is licensed under the GNU General Public License v3.0."
+msgstr "PPTrepair ist unter der GNU General Public License v3.0 lizenziert."
+
+msgid "This application uses Qt for Python (PySide6), licensed under the GNU LGPL v3."
+msgstr "Diese Anwendung verwendet Qt for Python (PySide6), lizenziert unter der GNU LGPL v3."
+
+msgid "See the LICENSE file in the GitHub repository for details."
+msgstr "Details finden Sie in der Datei LICENSE im GitHub-Repository."
 

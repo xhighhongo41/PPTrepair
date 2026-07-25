@@ -56,9 +56,14 @@ from pptrepair.gui.worker import (
     ScanRequest,
     ScanWorker,
 )
+from pptrepair.report import ISSUE_URL
 
 #: How long (ms) window-close waits for a running worker to stop.
 _CLOSE_WAIT_MS = 5000
+
+#: The project's GitHub repository, opened by the Help menu's
+#: "Open GitHub Page" action.
+_GITHUB_URL = "https://github.com/xhighhongo41/PPTrepair"
 
 
 class MainWindow(QMainWindow):
@@ -239,6 +244,27 @@ class MainWindow(QMainWindow):
         settings_menu.addAction(preferences_action)
 
         help_menu = self.menuBar().addMenu(tr("Help"))
+
+        quick_guide_action = QAction(tr("Quick Guide"), self)
+        quick_guide_action.triggered.connect(self._show_quick_guide_dialog)
+        help_menu.addAction(quick_guide_action)
+
+        help_menu.addAction(self._build_separator())
+
+        github_action = QAction(tr("Open GitHub Page"), self)
+        github_action.triggered.connect(self._open_github_page)
+        help_menu.addAction(github_action)
+
+        report_action = QAction(tr("Report Unknown Corruption…"), self)
+        report_action.triggered.connect(self._open_report_issue_page)
+        help_menu.addAction(report_action)
+
+        help_menu.addAction(self._build_separator())
+
+        license_action = QAction(tr("License Information"), self)
+        license_action.triggered.connect(self._show_license_dialog)
+        help_menu.addAction(license_action)
+
         about_action = QAction(tr("About PPTrepair"), self)
         about_action.setMenuRole(QAction.MenuRole.AboutRole)
         about_action.triggered.connect(self._show_about_dialog)
@@ -332,6 +358,60 @@ class MainWindow(QMainWindow):
         separator = QAction(self)
         separator.setSeparator(True)
         return separator
+
+    def _show_quick_guide_dialog(self) -> None:
+        """Show a short usage guide covering the scan/repair workflow."""
+        QMessageBox.information(
+            self,
+            tr("Quick Guide"),
+            tr("PPTrepair diagnoses and repairs PowerPoint files damaged "
+               "while stored on OneDrive.")
+            + "\n\n"
+            + tr("1. Drop .pptx/.pptm files onto the window, or add a "
+                 "folder (scanned recursively for matching files).")
+            + "\n"
+            + tr("2. Backup archives can also be dropped as donor "
+                 "material for multi-source repair.")
+            + "\n"
+            + tr("3. Click Scan to diagnose everything, then review the "
+                 "Files and Candidates tabs.")
+            + "\n"
+            + tr("4. Pick Single-file or Multi-source repair mode.")
+            + "\n"
+            + tr("5. Choose in-place or folder output, then click "
+                 "Repair.")
+            + "\n"
+            + tr("6. Multi-source repair asks you to approve donors "
+                 "mined from other copies and archives before "
+                 "repairing."),
+        )
+
+    def _open_github_page(self) -> None:
+        """Open the PPTrepair GitHub repository in the default browser."""
+        QDesktopServices.openUrl(QUrl(_GITHUB_URL))
+
+    def _open_report_issue_page(self) -> None:
+        """Open a GitHub issue template for reporting unknown corruption.
+
+        Points at :data:`pptrepair.report.ISSUE_URL`, the same template
+        the CLI's own reports refer users to.
+        """
+        QDesktopServices.openUrl(QUrl(ISSUE_URL))
+
+    def _show_license_dialog(self) -> None:
+        """Show PPTrepair's and its GUI dependency's licensing terms."""
+        QMessageBox.information(
+            self,
+            tr("License Information"),
+            tr("PPTrepair is licensed under the GNU General Public "
+               "License v3.0.")
+            + "\n\n"
+            + tr("This application uses Qt for Python (PySide6), "
+                 "licensed under the GNU LGPL v3.")
+            + "\n\n"
+            + tr("See the LICENSE file in the GitHub repository for "
+                 "details."),
+        )
 
     def _show_about_dialog(self) -> None:
         """Show an About dialog with the app name, version and license."""

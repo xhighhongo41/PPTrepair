@@ -671,4 +671,45 @@ msgstr "{n} omitido(s)"
 
 msgid "{n} unsupported item(s) rejected"
 msgstr "{n} elemento(s) no compatible(s) rechazado(s)"
+msgid "Quick Guide"
+msgstr "Guía rápida"
+
+msgid "Open GitHub Page"
+msgstr "Abrir página de GitHub"
+
+msgid "Report Unknown Corruption…"
+msgstr "Reportar daño desconocido…"
+
+msgid "License Information"
+msgstr "Información de licencia"
+
+msgid "PPTrepair diagnoses and repairs PowerPoint files damaged while stored on OneDrive."
+msgstr "PPTrepair diagnostica y repara archivos de PowerPoint dañados mientras estaban almacenados en OneDrive."
+
+msgid "1. Drop .pptx/.pptm files onto the window, or add a folder (scanned recursively for matching files)."
+msgstr "1. Arrastre archivos .pptx/.pptm a la ventana, o agregue una carpeta (se explora de forma recursiva)."
+
+msgid "2. Backup archives can also be dropped as donor material for multi-source repair."
+msgstr "2. También puede arrastrar archivos de copia de seguridad como material donante para la reparación multiorigen."
+
+msgid "3. Click Scan to diagnose everything, then review the Files and Candidates tabs."
+msgstr "3. Haga clic en \"Scan\" para diagnosticar todo y revise las pestañas Files y Candidates."
+
+msgid "4. Pick Single-file or Multi-source repair mode."
+msgstr "4. Elija el modo de reparación Single-file o Multi-source."
+
+msgid "5. Choose in-place or folder output, then click Repair."
+msgstr "5. Elija reparar en el mismo lugar o una carpeta de salida y haga clic en \"Repair\"."
+
+msgid "6. Multi-source repair asks you to approve donors mined from other copies and archives before repairing."
+msgstr "6. La reparación multiorigen le pedirá aprobar los donantes extraídos de otras copias y archivos antes de reparar."
+
+msgid "PPTrepair is licensed under the GNU General Public License v3.0."
+msgstr "PPTrepair tiene licencia GNU General Public License v3.0."
+
+msgid "This application uses Qt for Python (PySide6), licensed under the GNU LGPL v3."
+msgstr "Esta aplicación utiliza Qt for Python (PySide6), con licencia GNU LGPL v3."
+
+msgid "See the LICENSE file in the GitHub repository for details."
+msgstr "Consulte el archivo LICENSE en el repositorio de GitHub para más detalles."
 

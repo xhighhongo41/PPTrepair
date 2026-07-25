@@ -44,6 +44,24 @@ msgstr ""
 msgid ", {n} error(s)"
 msgstr ""
 
+msgid "1. Drop .pptx/.pptm files onto the window, or add a folder (scanned recursively for matching files)."
+msgstr ""
+
+msgid "2. Backup archives can also be dropped as donor material for multi-source repair."
+msgstr ""
+
+msgid "3. Click Scan to diagnose everything, then review the Files and Candidates tabs."
+msgstr ""
+
+msgid "4. Pick Single-file or Multi-source repair mode."
+msgstr ""
+
+msgid "5. Choose in-place or folder output, then click Repair."
+msgstr ""
+
+msgid "6. Multi-source repair asks you to approve donors mined from other copies and archives before repairing."
+msgstr ""
+
 msgid "=== Merge summary ==="
 msgstr ""
 
@@ -227,6 +245,9 @@ msgstr ""
 msgid "Last Modified By"
 msgstr ""
 
+msgid "License Information"
+msgstr ""
+
 msgid "Licensed under the GNU General Public License v3.0."
 msgstr ""
 
@@ -326,6 +347,9 @@ msgstr ""
 msgid "Nothing to salvage: the file is already an intact PowerPoint package."
 msgstr ""
 
+msgid "Open GitHub Page"
+msgstr ""
+
 msgid "Open Output Folder"
 msgstr ""
 
@@ -333,6 +357,12 @@ msgid "Output"
 msgstr ""
 
 msgid "Output: {path}"
+msgstr ""
+
+msgid "PPTrepair diagnoses and repairs PowerPoint files damaged while stored on OneDrive."
+msgstr ""
+
+msgid "PPTrepair is licensed under the GNU General Public License v3.0."
 msgstr ""
 
 msgid "Partial XML parts: {n}"
@@ -354,6 +384,9 @@ msgid "Preferences"
 msgstr ""
 
 msgid "Preferences…"
+msgstr ""
+
+msgid "Quick Guide"
 msgstr ""
 
 msgid "Quit"
@@ -425,6 +458,9 @@ msgstr ""
 msgid "Repairs:"
 msgstr ""
 
+msgid "Report Unknown Corruption…"
+msgstr ""
+
 msgid "Review the donors for each corrupted file, then click Repair."
 msgstr ""
 
@@ -459,6 +495,9 @@ msgid "Scanning…"
 msgstr ""
 
 msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
+msgstr ""
+
+msgid "See the LICENSE file in the GitHub repository for details."
 msgstr ""
 
 msgid "Series"
@@ -525,6 +564,9 @@ msgid "The repair stopped unexpectedly:\n{message}"
 msgstr ""
 
 msgid "The scan stopped unexpectedly:\n{message}"
+msgstr ""
+
+msgid "This application uses Qt for Python (PySide6), licensed under the GNU LGPL v3."
 msgstr ""
 
 msgid "Tier: {tier}"
