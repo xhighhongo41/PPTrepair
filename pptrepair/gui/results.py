@@ -35,7 +35,12 @@ from PySide6.QtWidgets import (
 
 from pptrepair.batch import BatchItem, BatchResult
 from pptrepair.classify import Verdict
-from pptrepair.gui.worker import GuiScanResult
+from pptrepair.gui.worker import (
+    GuiScanResult,
+    MergeItemOutcome,
+    MultiRepairResult,
+)
+from pptrepair.repair import RepairOutcome
 
 # The three candidate-computation functions below are report.py's own
 # algorithms (kept intentionally separate from its text/JSON
@@ -386,6 +391,50 @@ def _repair_row_for_item(item: BatchItem) -> _RepairRow:
     return _RepairRow(source, action, output, category)
 
 
+def _merge_row_for_item(item: MergeItemOutcome) -> _RepairRow:
+    """Build the repair-table row for one multi-source merge outcome.
+
+    A successful merge reads as ``"merged"`` (green) with its artifact
+    path in the Output column; a failed one reads as ``"merge failed"``
+    (red) with the failure reason there instead.
+    """
+    source = str(item.target)
+    if item.success:
+        output = str(item.output_path) if item.output_path is not None else ""
+        return _RepairRow(source, "merged", output, "repaired")
+    return _RepairRow(source, "merge failed", item.detail, "problem")
+
+
+def _repair_row_for_outcome(outcome: RepairOutcome) -> _RepairRow:
+    """Build the repair-table row for one fallback :class:`RepairOutcome`.
+
+    A successful single-file repair reads as ``"repaired (<mode>)"``
+    (green) with its artifact path; an unsuccessful one reads as
+    ``"failed"`` (when it raised, mode ``"failed"``) or ``"unrepairable"``
+    (red), with nothing written.
+    """
+    source = str(outcome.src)
+    output = (str(outcome.output_path)
+              if outcome.output_path is not None else "")
+    if outcome.success:
+        return _RepairRow(source, f"repaired ({outcome.mode})", output,
+                          "repaired")
+    action = "failed" if outcome.mode == "failed" else "unrepairable"
+    return _RepairRow(source, action, output, "problem")
+
+
+def _multi_repair_rows(
+        merges: list[MergeItemOutcome],
+        fallbacks: list[RepairOutcome]) -> list[_RepairRow]:
+    """Flatten a multi-source run's merges and fallbacks into table rows.
+
+    Merges first (in run order), then the donor-less fallback repairs.
+    """
+    rows = [_merge_row_for_item(item) for item in merges]
+    rows.extend(_repair_row_for_outcome(outcome) for outcome in fallbacks)
+    return rows
+
+
 class RepairResultsModel(QAbstractTableModel):
     """Flat table model over the :class:`BatchItem` list of one repair run.
 
@@ -412,6 +461,18 @@ class RepairResultsModel(QAbstractTableModel):
         """
         self.beginResetModel()
         self._rows = [_repair_row_for_item(item) for item in result.items]
+        self.endResetModel()
+
+    def set_multi_result(self, result: MultiRepairResult) -> None:
+        """Rebuild every row from one multi-source repair *result*.
+
+        Wrapped in ``beginResetModel``/``endResetModel`` so any attached
+        view refreshes wholesale. Runs on the UI thread.
+
+        :param result: the multi-source repair outcome to display.
+        """
+        self.beginResetModel()
+        self._rows = _multi_repair_rows(result.merges, result.fallbacks)
         self.endResetModel()
 
     def clear(self) -> None:
@@ -498,6 +559,27 @@ def _repair_summary_text(result: BatchResult) -> str:
     if counts["failed"]:
         text += f", failed {counts['failed']}"
     return text
+
+
+def _multi_repair_summary_text(result: MultiRepairResult) -> str:
+    """Compose the one-line summary shown above a multi-source repair table.
+
+    E.g. ``"Merged 2, merge failed 1, fallback repaired 1"``, with each
+    zero-count clause omitted.
+    """
+    merged = sum(1 for item in result.merges if item.success)
+    merge_failed = len(result.merges) - merged
+    repaired = sum(1 for outcome in result.fallbacks if outcome.success)
+    fallback_failed = len(result.fallbacks) - repaired
+
+    parts = [f"Merged {merged}"]
+    if merge_failed:
+        parts.append(f"merge failed {merge_failed}")
+    if result.fallbacks:
+        parts.append(f"fallback repaired {repaired}")
+        if fallback_failed:
+            parts.append(f"fallback failed {fallback_failed}")
+    return ", ".join(parts)
 
 
 def _summary_text(result: GuiScanResult) -> str:
@@ -662,6 +744,20 @@ class ResultsPanel(QWidget):
         """
         self._repair_model.set_result(result)
         self._summary = _repair_summary_text(result)
+        self._summary_label.setText(self._summary)
+        self._tabs.setCurrentWidget(self._repair_table)
+
+    def show_multi_repair_result(self, result: MultiRepairResult) -> None:
+        """Display a multi-source *result*: rebuild the Repair tab and show it.
+
+        Runs on the UI thread. Like :meth:`show_repair_result`, it does
+        not touch the Files/Candidates tabs or :meth:`last_result` -- the
+        scan those tabs reflect is the one this repair ran against.
+
+        :param result: the multi-source repair outcome to render.
+        """
+        self._repair_model.set_multi_result(result)
+        self._summary = _multi_repair_summary_text(result)
         self._summary_label.setText(self._summary)
         self._tabs.setCurrentWidget(self._repair_table)
 

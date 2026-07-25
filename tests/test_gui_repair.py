@@ -215,22 +215,29 @@ def test_repair_button_enables_after_scan_in_single_mode(
     assert main_window._repair_action.isEnabled()
 
 
-def test_repair_button_disabled_for_multi_source_mode(
+def test_repair_button_enabled_for_both_repair_modes(
     main_window: MainWindow, qtbot: QtBot, tmp_path: Path
 ) -> None:
-    """Switching to Multi-source repair disables Repair; back re-enables it."""
+    """Repair stays enabled in single and multi-source mode after a scan.
+
+    Multi-source repair now shares the same start condition as
+    single-file repair (a scan that found at least one corrupted file),
+    so switching modes no longer disables the Repair action, and it
+    carries no "not yet" tooltip in either mode.
+    """
     root = _mkroot(tmp_path)
     _write(root, "bad.pptx", _rebuildable_truncated())
     main_window._sources.add_paths([root])
     _scan_and_wait(main_window, qtbot)
     assert main_window._repair_button.isEnabled()
+    assert main_window._repair_button.toolTip() == ""
 
     multi_index = main_window._run_options._mode_combo.findData(
         RepairMode.MULTI)
     main_window._run_options._mode_combo.setCurrentIndex(multi_index)
-    assert not main_window._repair_button.isEnabled()
-    assert main_window._repair_button.toolTip() != ""
-    assert not main_window._repair_action.isEnabled()
+    assert main_window._repair_button.isEnabled()
+    assert main_window._repair_action.isEnabled()
+    assert main_window._repair_button.toolTip() == ""
 
     single_index = main_window._run_options._mode_combo.findData(
         RepairMode.SINGLE)

@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (
 
 import pptrepair
 from pptrepair.batch import BatchResult
+from pptrepair.gui.donor_dialog import DonorApprovalDialog
+from pptrepair.gui.merge_plan import build_target_plans
 from pptrepair.gui.results import ResultsPanel
 from pptrepair.gui.run_options import RepairMode, RunOptionsPanel
 from pptrepair.gui.settings import Settings, SettingsDialog
@@ -45,6 +47,9 @@ from pptrepair.gui.source_panel import SourcePanel
 from pptrepair.gui.sources import AddResult, SourceKind, SourceListModel
 from pptrepair.gui.worker import (
     GuiScanResult,
+    MultiRepairRequest,
+    MultiRepairResult,
+    MultiRepairWorker,
     RepairRequest,
     RepairWorker,
     ScanRequest,
@@ -54,9 +59,9 @@ from pptrepair.gui.worker import (
 #: How long (ms) window-close waits for a running worker to stop.
 _CLOSE_WAIT_MS = 5000
 
-#: Tooltip shown on the Repair button/action while multi-source repair
-#: (a later milestone) is selected in the run-options panel.
-_MULTI_SOURCE_TOOLTIP = "Multi-source repair comes in the next milestone"
+#: Status-bar message shown when the source list changes after a scan, so
+#: a stale result can no longer be repaired against a changed set.
+_SOURCES_CHANGED_MESSAGE = "Sources changed — please scan again"
 
 
 class MainWindow(QMainWindow):
@@ -89,6 +94,15 @@ class MainWindow(QMainWindow):
         self._repair_worker: RepairWorker | None = None
         self._repair_checked = 0
         self._repair_processed = 0
+
+        #: The running multi-source (merge) repair worker, or None when
+        #: idle. Only ever touched on the UI thread; a scan, a single
+        #: repair and a multi-source repair never run concurrently.
+        self._multi_repair_worker: MultiRepairWorker | None = None
+        self._merge_processed = 0
+        self._merge_total = 0
+        self._fallback_processed = 0
+        self._fallback_total = 0
         #: The folder "Open Output Folder" should reveal, set right
         #: before starting a repair (see :meth:`_compute_open_target`);
         #: None until the first repair of this session starts.
@@ -103,17 +117,12 @@ class MainWindow(QMainWindow):
         self._build_central_widget()
         self._build_menu_bar()
 
-        self._sources.rowsInserted.connect(self._sync_scan_button)
-        self._sources.rowsRemoved.connect(self._sync_scan_button)
-        self._sources.modelReset.connect(self._sync_scan_button)
-        # RunOptionsPanel does not yet expose a public "mode changed"
-        # signal of its own (see its module docstring: the repair mode
-        # is only "captured" for now) -- reaching into its mode combo, a
-        # plain public QComboBox even though the attribute holding it is
-        # private, is the least invasive way to re-evaluate the Repair
-        # button the instant the user switches modes.
-        self._run_options._mode_combo.currentIndexChanged.connect(
-            self._sync_repair_button)
+        self._sources.rowsInserted.connect(self._on_sources_changed)
+        self._sources.rowsRemoved.connect(self._on_sources_changed)
+        self._sources.modelReset.connect(self._on_sources_changed)
+        # Re-evaluate the Repair button the instant the user switches
+        # repair modes, through RunOptionsPanel's own public signal.
+        self._run_options.mode_changed.connect(self._sync_repair_button)
         self._sync_scan_button()
         self._sync_repair_button()
 
@@ -359,7 +368,7 @@ class MainWindow(QMainWindow):
         sources into FILE/FOLDER roots and explicit ARCHIVE donor
         material.
         """
-        if self._scan_worker is not None or self._repair_worker is not None:
+        if self._busy():
             return  # a scan or repair is already running
 
         entries = self._sources.entries()
@@ -402,9 +411,40 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Scanning…")
         worker.start()
 
+    def _busy(self) -> bool:
+        """Return True while any scan/repair worker is running.
+
+        The single "is anything running?" predicate the action buttons,
+        the start guards and the cancel path all share, so a scan, a
+        single-file repair and a multi-source repair are mutually
+        exclusive.
+        """
+        return (self._scan_worker is not None
+                or self._repair_worker is not None
+                or self._multi_repair_worker is not None)
+
+    def _on_sources_changed(self, *_args: object) -> None:
+        """Re-evaluate the Scan button and drop a now-stale scan result.
+
+        Wired to the source model's row-insert/remove/reset signals. When
+        the source list changes after a scan produced a result, that
+        result no longer describes the current sources, so it is cleared
+        (disabling Repair) and the user is told to scan again -- this
+        prevents a repair from acting on a stale scan. A change while a
+        scan/repair is running, or before any result exists, only
+        refreshes the Scan button.
+        """
+        self._sync_scan_button()
+        if not self._busy() and self._results_panel.last_result() is not None:
+            self._results_panel.clear()
+            self._results_panel.hide()
+            self.statusBar().showMessage(_SOURCES_CHANGED_MESSAGE)
+        self._sync_repair_button()
+
     def _cancel_scan(self) -> None:
         """Ask the running worker (scan or repair) to stop, if any."""
-        worker = self._scan_worker or self._repair_worker
+        worker = (self._scan_worker or self._repair_worker
+                  or self._multi_repair_worker)
         if worker is not None:
             self._cancel_button.setEnabled(False)
             self._cancel_action.setEnabled(False)
@@ -446,8 +486,7 @@ class MainWindow(QMainWindow):
         Enabled only when at least one source is accumulated and neither
         a scan nor a repair is currently running.
         """
-        running = self._scan_worker is not None or self._repair_worker is not None
-        enabled = self._sources.rowCount() > 0 and not running
+        enabled = self._sources.rowCount() > 0 and not self._busy()
         self._scan_button.setEnabled(enabled)
         self._scan_action.setEnabled(enabled)
 
@@ -514,21 +553,27 @@ class MainWindow(QMainWindow):
     # -- repair lifecycle ------------------------------------------------
 
     def _start_repair(self) -> None:
+        """Dispatch to the single-file or multi-source repair flow.
+
+        Guarded against re-entry while a scan or repair already runs (the
+        Repair button/action are already disabled then, but the guard
+        stays here too since this slot doubles as a Run-menu handler).
+        The run-options panel's current repair mode chooses the flow.
+        """
+        if self._busy():
+            return  # a scan or repair is already running
+        if self._run_options.repair_mode() is RepairMode.MULTI:
+            self._start_multi_repair()
+        else:
+            self._start_single_repair()
+
+    def _start_single_repair(self) -> None:
         """Build a :class:`RepairRequest` and start the background worker.
 
-        Guarded against re-entry while a scan or repair already runs,
-        and against a repair mode other than single-file (the Repair
-        button/action are already disabled in both cases, but the guard
-        stays here too since this slot doubles as a Run-menu handler).
         Splits the sources into FILE/FOLDER roots to diagnose and repair;
         an explicit ARCHIVE source is reported on the status bar and
         otherwise ignored (donor material is a multi-source concern).
         """
-        if self._scan_worker is not None or self._repair_worker is not None:
-            return  # a scan or repair is already running
-        if self._run_options.repair_mode() is not RepairMode.SINGLE:
-            return  # multi-source repair comes in a later milestone
-
         entries = self._sources.entries()
         roots = tuple(
             entry.path for entry in entries
@@ -667,31 +712,159 @@ class MainWindow(QMainWindow):
         self._sync_scan_button()
         self._sync_repair_button()
 
+    # -- multi-source (merge) repair lifecycle -------------------------
+
+    def _start_multi_repair(self) -> None:
+        """Review donors, then start a :class:`MultiRepairWorker`.
+
+        Computes the per-target donor plans from the last scan, shows the
+        :class:`~pptrepair.gui.donor_dialog.DonorApprovalDialog` for the
+        user to confirm, and -- on acceptance -- splits the approved plans
+        into merges (a target with at least one checked donor) and
+        donor-less fallbacks (repaired on their own bytes), then launches
+        the worker. Returns without starting anything if there is nothing
+        corrupted to repair, no output folder was chosen, or the dialog
+        was cancelled.
+        """
+        scan_result = self._results_panel.last_result()
+        if scan_result is None or scan_result.scan is None:
+            return
+
+        plans = build_target_plans(scan_result)
+        if not plans:
+            QMessageBox.information(
+                self, "Nothing to repair",
+                "The last scan found no corrupted files to repair.")
+            return
+
+        in_place = self._run_options.in_place()
+        output_dir = self._run_options.output_dir()
+        if not in_place and output_dir is None:
+            QMessageBox.warning(
+                self, "No output folder",
+                'Choose an output folder before repairing, or switch to '
+                '"Repair in place".')
+            return
+
+        dialog = DonorApprovalDialog(plans, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        approved = dialog.approved_plans()
+
+        merges = tuple(plan for plan in approved if plan.donors)
+        fallback_targets = tuple(
+            plan.target for plan in approved if not plan.donors)
+        roots = tuple(Path(root) for root in scan_result.scan.roots)
+
+        request = MultiRepairRequest(
+            merges=merges,
+            fallback_targets=fallback_targets,
+            roots=roots,
+            output_dir=output_dir,
+            in_place=in_place,
+            lang=self._settings.language(),
+        )
+        self._repair_open_target = self._compute_open_target(
+            roots, in_place, output_dir)
+
+        self._merge_processed = 0
+        self._merge_total = len(merges)
+        self._fallback_processed = 0
+        self._fallback_total = len(fallback_targets)
+        self._open_output_button.setEnabled(False)
+        self._open_output_button.hide()
+
+        worker = MultiRepairWorker(request, self)
+        worker.merge_done.connect(self._on_merge_done)
+        worker.file_repaired.connect(self._on_multi_file_repaired)
+        worker.finished_ok.connect(self._on_multi_finished_ok)
+        worker.failed.connect(self._on_multi_failed)
+        worker.cancelled.connect(self._on_multi_cancelled)
+        worker.finished.connect(self._on_multi_worker_finished)
+        self._multi_repair_worker = worker
+
+        self._set_running(True)
+        self._progress_label.setText("Merging…")
+        self.statusBar().showMessage("Repairing…")
+        worker.start()
+
+    def _on_merge_done(self, item: object) -> None:
+        """Count one finished merge and refresh the progress readout."""
+        self._merge_processed += 1
+        self._progress_label.setText(
+            f"Merging… {self._merge_processed}/{self._merge_total}")
+        target = getattr(item, "target", None)
+        success = getattr(item, "success", None)
+        if target is not None:
+            verb = "merged" if success else "merge failed"
+            self.statusBar().showMessage(f"{verb}: {Path(target).name}")
+
+    def _on_multi_file_repaired(self, outcome: object) -> None:
+        """Count one finished fallback repair and refresh the readout."""
+        self._fallback_processed += 1
+        self._progress_label.setText(
+            f"Repairing… {self._fallback_processed}/{self._fallback_total}")
+        src = getattr(outcome, "src", None)
+        if src is not None:
+            self.statusBar().showMessage(f"Repaired {Path(src).name}")
+
+    def _on_multi_finished_ok(self, result: object) -> None:
+        """Show the merge results and restore the idle UI after a clean run."""
+        assert isinstance(result, MultiRepairResult)
+        self._results_panel.show_multi_repair_result(result)
+        self._results_panel.show()
+        self._open_output_button.setEnabled(True)
+        self._open_output_button.show()
+        self._finish_ui(self._results_panel.summary_text())
+
+    def _on_multi_cancelled(self) -> None:
+        """Restore the idle UI after a cancelled multi-source repair.
+
+        Every artifact already written before the cancellation point is
+        left in place (see :meth:`MultiRepairWorker.cancel`'s contract);
+        this status message deliberately does not claim otherwise.
+        """
+        self._finish_ui("Repair cancelled")
+
+    def _on_multi_failed(self, message: str) -> None:
+        """Report an unexpected multi-repair failure and restore the UI."""
+        self._finish_ui(f"Repair failed: {message}")
+        QMessageBox.warning(
+            self, "Repair failed",
+            f"The repair stopped unexpectedly:\n{message}")
+
+    def _on_multi_worker_finished(self) -> None:
+        """Drop the finished multi-repair worker and re-sync the buttons.
+
+        Wired to :attr:`QThread.finished`, which fires after the worker's
+        own terminal signal, so the result has already been consumed by
+        the time the object is scheduled for deletion.
+        """
+        worker = self._multi_repair_worker
+        self._multi_repair_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        self._sync_scan_button()
+        self._sync_repair_button()
+
     def _sync_repair_button(self, *_args: object) -> None:
         """Enable Repair (button and Run-menu action) when a run can start.
 
         Enabled only when the last scan result (see
         :meth:`~pptrepair.gui.results.ResultsPanel.last_result`) found at
-        least one corrupted on-disk file, neither a scan nor a repair is
-        currently running, and the run-options panel is set to
-        single-file repair mode -- multi-source repair is a later
-        milestone, so the controls are disabled (with an explanatory
-        tooltip) whenever that mode is selected instead.
+        least one corrupted on-disk file and neither a scan nor a repair
+        is currently running. Both repair modes -- single-file and
+        multi-source -- can start from the same result, so the mode no
+        longer gates the button.
         """
-        running = self._scan_worker is not None or self._repair_worker is not None
         scan_result = self._results_panel.last_result()
         corrupted = 0
         if scan_result is not None and scan_result.scan is not None:
             corrupted = len(scan_result.scan.corrupted())
-        single_mode = self._run_options.repair_mode() is RepairMode.SINGLE
 
-        enabled = corrupted > 0 and not running and single_mode
+        enabled = corrupted > 0 and not self._busy()
         self._repair_button.setEnabled(enabled)
         self._repair_action.setEnabled(enabled)
-
-        tooltip = "" if single_mode else _MULTI_SOURCE_TOOLTIP
-        self._repair_button.setToolTip(tooltip)
-        self._repair_action.setToolTip(tooltip)
 
     def _open_output_folder(self) -> None:
         """Reveal the last completed repair's output folder.
@@ -807,7 +980,8 @@ class MainWindow(QMainWindow):
 
         :param event: Qt's close event.
         """
-        for worker in (self._scan_worker, self._repair_worker):
+        for worker in (self._scan_worker, self._repair_worker,
+                       self._multi_repair_worker):
             if worker is not None and worker.isRunning():
                 worker.cancel()
                 worker.wait(_CLOSE_WAIT_MS)

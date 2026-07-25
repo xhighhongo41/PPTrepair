@@ -20,6 +20,7 @@ import enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -81,8 +82,15 @@ class RunOptionsPanel(QWidget):
     Exposes the user's choices through :meth:`repair_mode`,
     :meth:`in_place`, :meth:`output_dir`, :meth:`allow_download` and
     :meth:`max_file_bytes`; :meth:`set_enabled_for_running` greys the
-    whole panel out while a scan is in progress.
+    whole panel out while a scan is in progress. Emits
+    :attr:`mode_changed` whenever the repair mode selection changes, so
+    the host window can re-evaluate the Repair action without reaching
+    into the private mode combo.
     """
+
+    #: Emitted with the newly selected :class:`RepairMode` whenever the
+    #: repair-mode combo changes (by the user or programmatically).
+    mode_changed = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         """Build the option controls with their hard-coded defaults.
@@ -187,6 +195,11 @@ class RunOptionsPanel(QWidget):
         self._in_place_radio.toggled.connect(self._sync_output_enabled)
         self._into_folder_radio.toggled.connect(self._sync_output_enabled)
         self._no_limit_check.toggled.connect(self._sync_limit_enabled)
+        self._mode_combo.currentIndexChanged.connect(self._emit_mode_changed)
+
+    def _emit_mode_changed(self, *_args: object) -> None:
+        """Re-broadcast a repair-mode combo change as :attr:`mode_changed`."""
+        self.mode_changed.emit(self.repair_mode())
 
     # -- interactive slots ---------------------------------------------
 
