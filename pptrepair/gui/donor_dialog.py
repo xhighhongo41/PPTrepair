@@ -70,14 +70,28 @@ class DonorApprovalDialog(QDialog):
         layout.addWidget(QLabel(tr(
             "Review the donors for each corrupted file, then click Repair.")))
         layout.addWidget(self._tree)
-        note = QLabel(tr(
-            "Auto-tier donors are byte-identical copies and are selected "
-            "by default. Candidate- and lineage-tier donors are only "
-            "cross-checked entry by entry, not proven identical, so "
-            "review them before including them."))
-        note.setWordWrap(True)
-        layout.addWidget(note)
+        layout.addWidget(self._build_tier_legend())
         layout.addWidget(self._build_button_box())
+
+    def _build_tier_legend(self) -> QLabel:
+        """Return the small, muted label explaining the ``[tier]`` tags.
+
+        Each donor row is suffixed with its trust tier (see the module
+        docstring); this legend spells out what the three tags mean, so
+        the user does not have to guess before checking a box.
+        """
+        legend = QLabel("\n".join([
+            tr("[auto] — verified same-origin donor (byte-level CRC "
+               "evidence). Trusted and pre-checked."),
+            tr("[candidate] — probably the same origin, but not fully "
+               "verified. Check to use."),
+            tr("[lineage] — a different version of the same document; "
+               "merged content may differ slightly. Check only if that "
+               "is acceptable."),
+        ]))
+        legend.setWordWrap(True)
+        legend.setStyleSheet("color: gray; font-size: 11px;")
+        return legend
 
     def _build_tree(self) -> QTreeWidget:
         """Return the target/donor tree, one branch per plan."""

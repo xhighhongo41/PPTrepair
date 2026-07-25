@@ -201,6 +201,15 @@ msgstr "복구 결과:"
 msgid "corrupted: overwritten with fragments of another ZIP archive"
 msgstr "손상됨: 다른 ZIP 아카이브의 조각으로 덮어써졌습니다"
 
+msgid "[auto] — verified same-origin donor (byte-level CRC evidence). Trusted and pre-checked."
+msgstr "[auto] — 동일 원본으로 검증된 제공 소스(바이트 단위 CRC 증거). 신뢰할 수 있으며 기본적으로 선택되어 있습니다."
+
+msgid "[candidate] — probably the same origin, but not fully verified. Check to use."
+msgstr "[candidate] — 아마도 동일 원본이지만 완전히 검증되지는 않았습니다. 사용하려면 선택하세요."
+
+msgid "[lineage] — a different version of the same document; merged content may differ slightly. Check only if that is acceptable."
+msgstr "[lineage] — 같은 문서의 다른 버전입니다. 병합된 내용이 조금 다를 수 있습니다. 허용 가능한 경우에만 선택하세요."
+
 msgid "corrupted: archive body largely overwritten in place"
 msgstr "손상됨: 아카이브 본문의 대부분이 제자리에서 덮어써졌습니다"
 
@@ -380,9 +389,6 @@ msgstr "모든 파일"
 
 msgid "Archives are used only by multi-source repair; ignored in this mode"
 msgstr "아카이브는 다중 소스 복구에서만 사용되며, 이 모드에서는 무시됩니다"
-
-msgid "Auto-tier donors are byte-identical copies and are selected by default. Candidate- and lineage-tier donors are only cross-checked entry by entry, not proven identical, so review them before including them."
-msgstr "auto 등급 제공 소스는 바이트 단위로 동일한 사본이며 기본적으로 선택되어 있습니다. candidate 및 lineage 등급 제공 소스는 항목별로만 교차 검증되며 동일함이 증명되지 않으므로, 포함하기 전에 검토하세요."
 
 msgid "Browse…"
 msgstr "찾아보기…"

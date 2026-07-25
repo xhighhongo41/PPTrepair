@@ -201,6 +201,15 @@ msgstr "Reparaturen:"
 msgid "corrupted: overwritten with fragments of another ZIP archive"
 msgstr "beschädigt: mit Fragmenten eines anderen ZIP-Archivs überschrieben"
 
+msgid "[auto] — verified same-origin donor (byte-level CRC evidence). Trusted and pre-checked."
+msgstr "[auto] — verifizierte Quelle gleichen Ursprungs (CRC-Nachweis auf Byteebene). Vertrauenswürdig und bereits ausgewählt."
+
+msgid "[candidate] — probably the same origin, but not fully verified. Check to use."
+msgstr "[candidate] — vermutlich derselbe Ursprung, aber nicht vollständig verifiziert. Zum Verwenden auswählen."
+
+msgid "[lineage] — a different version of the same document; merged content may differ slightly. Check only if that is acceptable."
+msgstr "[lineage] — eine andere Version desselben Dokuments; der zusammengeführte Inhalt kann leicht abweichen. Nur auswählen, wenn das akzeptabel ist."
+
 msgid "corrupted: archive body largely overwritten in place"
 msgstr "beschädigt: Archivkörper größtenteils an Ort und Stelle überschrieben"
 
@@ -380,9 +389,6 @@ msgstr "Alle Dateien"
 
 msgid "Archives are used only by multi-source repair; ignored in this mode"
 msgstr "Archive werden nur bei der Mehrquellen-Reparatur verwendet; in diesem Modus werden sie ignoriert"
-
-msgid "Auto-tier donors are byte-identical copies and are selected by default. Candidate- and lineage-tier donors are only cross-checked entry by entry, not proven identical, so review them before including them."
-msgstr "Quellen der Stufe auto sind byteidentische Kopien und standardmäßig ausgewählt. Quellen der Stufen candidate und lineage werden nur eintragsweise quergeprüft, ohne dass Identität nachgewiesen ist; prüfen Sie sie daher, bevor Sie sie einschließen."
 
 msgid "Browse…"
 msgstr "Durchsuchen…"

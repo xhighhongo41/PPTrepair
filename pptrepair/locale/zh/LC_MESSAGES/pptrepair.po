@@ -201,6 +201,15 @@ msgstr "修复结果:"
 msgid "corrupted: overwritten with fragments of another ZIP archive"
 msgstr "损坏: 被另一个ZIP压缩包的碎片覆盖"
 
+msgid "[auto] — verified same-origin donor (byte-level CRC evidence). Trusted and pre-checked."
+msgstr "[auto] — 已验证的同源提供源（有字节级CRC证据）。可信，且已默认勾选。"
+
+msgid "[candidate] — probably the same origin, but not fully verified. Check to use."
+msgstr "[candidate] — 可能是同一来源，但未完全验证。需要使用请勾选。"
+
+msgid "[lineage] — a different version of the same document; merged content may differ slightly. Check only if that is acceptable."
+msgstr "[lineage] — 同一文档的不同版本；合并后的内容可能略有差异。仅在可接受的情况下勾选。"
+
 msgid "corrupted: archive body largely overwritten in place"
 msgstr "损坏: 压缩包主体大部分被就地覆盖"
 
@@ -380,9 +389,6 @@ msgstr "所有文件"
 
 msgid "Archives are used only by multi-source repair; ignored in this mode"
 msgstr "压缩包仅在多来源修复中使用；此模式下将被忽略"
-
-msgid "Auto-tier donors are byte-identical copies and are selected by default. Candidate- and lineage-tier donors are only cross-checked entry by entry, not proven identical, so review them before including them."
-msgstr "auto级别的提供源是逐字节相同的副本，默认已选中。candidate和lineage级别的提供源仅逐项交叉校验，并未证明完全相同，请在纳入前仔细核对。"
 
 msgid "Browse…"
 msgstr "浏览…"

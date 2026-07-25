@@ -23,7 +23,10 @@ pptrepair = "pptrepair.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-qt"]
-gui = ["PySide6>=6.8"]
+gui = [
+    "PySide6>=6.8",
+    "pyobjc-framework-Cocoa>=10 ; sys_platform == 'darwin'",
+]
 
 [tool.setuptools]
 packages = ["pptrepair", "pptrepair.gui"]

@@ -201,6 +201,15 @@ msgstr "修復結果:"
 msgid "corrupted: overwritten with fragments of another ZIP archive"
 msgstr "破損: 別のZIPアーカイブの断片で上書きされています"
 
+msgid "[auto] — verified same-origin donor (byte-level CRC evidence). Trusted and pre-checked."
+msgstr "[auto] — 同一原本と検証済みの提供元（バイト単位のCRC照合による証拠）。信頼できるため既定でチェック済みです。"
+
+msgid "[candidate] — probably the same origin, but not fully verified. Check to use."
+msgstr "[candidate] — おそらく同一原本と思われますが、完全には検証されていません。使用する場合はチェックしてください。"
+
+msgid "[lineage] — a different version of the same document; merged content may differ slightly. Check only if that is acceptable."
+msgstr "[lineage] — 同じ文書の別バージョンです。マージ後の内容がわずかに異なる場合があります。許容できる場合のみチェックしてください。"
+
 msgid "corrupted: archive body largely overwritten in place"
 msgstr "破損: アーカイブ本体の大部分がその場で上書きされています"
 
@@ -380,9 +389,6 @@ msgstr "すべてのファイル"
 
 msgid "Archives are used only by multi-source repair; ignored in this mode"
 msgstr "アーカイブはマルチソース修復でのみ使用されます。このモードでは無視されます"
-
-msgid "Auto-tier donors are byte-identical copies and are selected by default. Candidate- and lineage-tier donors are only cross-checked entry by entry, not proven identical, so review them before including them."
-msgstr "auto判定の提供元はバイト単位で同一なコピーであり、既定でチェック済みです。candidate/lineage判定の提供元はエントリごとの照合のみで同一性は保証されないため、含める前に確認してください。"
 
 msgid "Browse…"
 msgstr "参照…"

@@ -101,9 +101,6 @@ msgstr ""
 msgid "Archives are used only by multi-source repair; ignored in this mode"
 msgstr ""
 
-msgid "Auto-tier donors are byte-identical copies and are selected by default. Candidate- and lineage-tier donors are only cross-checked entry by entry, not proven identical, so review them before including them."
-msgstr ""
-
 msgid "Browse…"
 msgstr ""
 
@@ -609,6 +606,15 @@ msgid "Warning: part of the output comes from a different version and is not gua
 msgstr ""
 
 msgid "Warnings:"
+msgstr ""
+
+msgid "[auto] — verified same-origin donor (byte-level CRC evidence). Trusted and pre-checked."
+msgstr ""
+
+msgid "[candidate] — probably the same origin, but not fully verified. Check to use."
+msgstr ""
+
+msgid "[lineage] — a different version of the same document; merged content may differ slightly. Check only if that is acceptable."
 msgstr ""
 
 msgid "corrupted: archive body largely overwritten in place"

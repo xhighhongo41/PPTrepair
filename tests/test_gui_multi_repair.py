@@ -37,7 +37,7 @@ PySide6 = pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QDialog, QLabel
 from pytestqt.qtbot import QtBot
 
 from pptrepair.batch import plan_output_bases, repair_paths
@@ -271,6 +271,19 @@ def test_donor_dialog_no_donor_plan_yields_empty_selection(
     assert approved.donors == ()
     assert approved.allow_candidate is False
     assert approved.allow_lineage is False
+
+
+def test_donor_dialog_shows_tier_legend(qtbot: QtBot) -> None:
+    """The dialog shows a legend explaining each of the three tier tags."""
+    dialog = DonorApprovalDialog([_tiered_plan()])
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    labels_text = "\n".join(
+        label.text() for label in dialog.findChildren(QLabel))
+    assert "[auto]" in labels_text
+    assert "[candidate]" in labels_text
+    assert "[lineage]" in labels_text
 
 
 # --------------------------------------------------------------------------

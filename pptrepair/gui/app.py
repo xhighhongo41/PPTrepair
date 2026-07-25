@@ -19,6 +19,33 @@ from pptrepair.gui.main_window import MainWindow
 from pptrepair.gui.settings import Settings
 
 
+def _set_macos_menu_bar_name(name: str) -> None:
+    """Rename the macOS application menu from "Python" to *name*.
+
+    An unbundled Python process has no .app Info.plist, so macOS
+    falls back to the interpreter bundle's CFBundleName ("Python").
+    Rewriting the in-memory info dictionary through PyObjC before
+    AppKit builds the menu bar fixes the label. No-op on other
+    platforms, or when pyobjc is unavailable (the menu then simply
+    keeps its default label).
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        from Foundation import NSBundle
+    except ImportError:
+        return
+
+    bundle = NSBundle.mainBundle()
+    if bundle is None:
+        return
+    info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+    if info is None:
+        return
+    info["CFBundleName"] = name
+    info["CFBundleDisplayName"] = name
+
+
 def main() -> int:
     """Run the PPTrepair desktop application.
 
@@ -29,6 +56,10 @@ def main() -> int:
     :returns: the Qt event loop's exit code, suitable for use as the
         process exit code.
     """
+    # Must run before QApplication is constructed, which is when AppKit
+    # reads CFBundleName to build the menu bar's application menu.
+    _set_macos_menu_bar_name("PPTrepair")
+
     # Set once, ahead of any QSettings() construction (see
     # pptrepair.gui.settings.Settings), so QSettings' own
     # organisation/application-based default storage path is stable.
