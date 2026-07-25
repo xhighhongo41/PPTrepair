@@ -1,20 +1,28 @@
 """The PPTrepair desktop application's main window.
 
-Owns the whole scan lifecycle on the UI thread: it builds a
-:class:`~pptrepair.gui.worker.ScanRequest` from the accumulated
-sources, starts a :class:`~pptrepair.gui.worker.ScanWorker` on a
-background thread, and reacts to that worker's signals (all delivered
-here on the UI thread via Qt's queued connections) to stream progress,
-show results, and re-enable the UI. Cancellation and window-close are
-handled cooperatively so a running scan never leaves a dangling thread.
+Owns the whole scan and single-file-repair lifecycle on the UI thread:
+it builds a :class:`~pptrepair.gui.worker.ScanRequest` /
+:class:`~pptrepair.gui.worker.RepairRequest` from the accumulated
+sources, starts a :class:`~pptrepair.gui.worker.ScanWorker` /
+:class:`~pptrepair.gui.worker.RepairWorker` on a background thread, and
+reacts to that worker's signals (all delivered here on the UI thread
+via Qt's queued connections) to stream progress, show results, and
+re-enable the UI. Cancellation and window-close are handled
+cooperatively so a running worker never leaves a dangling thread.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QKeySequence
+from PySide6.QtCore import QMimeData, QUrl
+from PySide6.QtGui import (
+    QAction,
+    QDesktopServices,
+    QDragEnterEvent,
+    QDropEvent,
+    QKeySequence,
+)
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -29,15 +37,26 @@ from PySide6.QtWidgets import (
 )
 
 import pptrepair
+from pptrepair.batch import BatchResult
 from pptrepair.gui.results import ResultsPanel
-from pptrepair.gui.run_options import RunOptionsPanel
+from pptrepair.gui.run_options import RepairMode, RunOptionsPanel
 from pptrepair.gui.settings import Settings, SettingsDialog
 from pptrepair.gui.source_panel import SourcePanel
 from pptrepair.gui.sources import AddResult, SourceKind, SourceListModel
-from pptrepair.gui.worker import GuiScanResult, ScanRequest, ScanWorker
+from pptrepair.gui.worker import (
+    GuiScanResult,
+    RepairRequest,
+    RepairWorker,
+    ScanRequest,
+    ScanWorker,
+)
 
 #: How long (ms) window-close waits for a running worker to stop.
 _CLOSE_WAIT_MS = 5000
+
+#: Tooltip shown on the Repair button/action while multi-source repair
+#: (a later milestone) is selected in the run-options panel.
+_MULTI_SOURCE_TOOLTIP = "Multi-source repair comes in the next milestone"
 
 
 class MainWindow(QMainWindow):
@@ -45,8 +64,8 @@ class MainWindow(QMainWindow):
 
     Hosts the source list panel, a run-options panel, an (initially
     hidden) progress row with a Cancel button, an (initially hidden)
-    results panel, and a Scan/Repair action row, plus a
-    File/Run/Settings/Help menu bar and status bar. All user-facing
+    results panel, and a Scan/Repair/Open Output Folder action row, plus
+    a File/Run/Settings/Help menu bar and status bar. All user-facing
     strings are plain English literals for now; gettext-based
     translation is planned for a later milestone.
     """
@@ -58,11 +77,22 @@ class MainWindow(QMainWindow):
         self.resize(900, 600)
         self.setAcceptDrops(True)
 
-        #: The running worker, or None when idle. Only ever touched on
-        #: the UI thread; doubles as the "is a scan running?" flag.
+        #: The running scan worker, or None when idle. Only ever touched
+        #: on the UI thread; doubles as the "is a scan running?" flag.
         self._scan_worker: ScanWorker | None = None
         self._files_diagnosed = 0
         self._materials_mined = 0
+
+        #: The running repair worker, or None when idle. Only ever
+        #: touched on the UI thread; doubles as the "is a repair
+        #: running?" flag. A scan and a repair never run concurrently.
+        self._repair_worker: RepairWorker | None = None
+        self._repair_checked = 0
+        self._repair_processed = 0
+        #: The folder "Open Output Folder" should reveal, set right
+        #: before starting a repair (see :meth:`_compute_open_target`);
+        #: None until the first repair of this session starts.
+        self._repair_open_target: Path | None = None
 
         #: Persisted preferences (QSettings-backed), loaded once here
         #: and applied to the run-options panel below; also reached
@@ -76,7 +106,16 @@ class MainWindow(QMainWindow):
         self._sources.rowsInserted.connect(self._sync_scan_button)
         self._sources.rowsRemoved.connect(self._sync_scan_button)
         self._sources.modelReset.connect(self._sync_scan_button)
+        # RunOptionsPanel does not yet expose a public "mode changed"
+        # signal of its own (see its module docstring: the repair mode
+        # is only "captured" for now) -- reaching into its mode combo, a
+        # plain public QComboBox even though the attribute holding it is
+        # private, is the least invasive way to re-evaluate the Repair
+        # button the instant the user switches modes.
+        self._run_options._mode_combo.currentIndexChanged.connect(
+            self._sync_repair_button)
         self._sync_scan_button()
+        self._sync_repair_button()
 
         self.statusBar().showMessage("Ready")
 
@@ -86,7 +125,7 @@ class MainWindow(QMainWindow):
         """Assemble the stacked central layout.
 
         Top to bottom: source panel, run-options panel, progress row,
-        results panel and the Scan/Repair action row.
+        results panel and the Scan/Repair/Open Output Folder action row.
         """
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -132,7 +171,7 @@ class MainWindow(QMainWindow):
         return self._progress_row
 
     def _build_action_row(self) -> QHBoxLayout:
-        """Return the bottom Scan/Repair button row."""
+        """Return the bottom Scan/Repair/Open Output Folder button row."""
         row = QHBoxLayout()
         row.addStretch(1)
 
@@ -143,8 +182,16 @@ class MainWindow(QMainWindow):
 
         self._repair_button = QPushButton("Repair")
         self._repair_button.setEnabled(False)
-        self._repair_button.setToolTip("Repair comes in a later milestone")
+        self._repair_button.clicked.connect(self._start_repair)
         row.addWidget(self._repair_button)
+
+        # Hidden until a repair completes successfully (see
+        # _on_repair_finished_ok); there is nothing to open before then.
+        self._open_output_button = QPushButton("Open Output Folder")
+        self._open_output_button.setEnabled(False)
+        self._open_output_button.hide()
+        self._open_output_button.clicked.connect(self._open_output_folder)
+        row.addWidget(self._open_output_button)
 
         return row
 
@@ -257,7 +304,7 @@ class MainWindow(QMainWindow):
 
         self._repair_action = QAction("Repair", self)
         self._repair_action.setEnabled(False)
-        self._repair_action.setToolTip("Repair comes in a later milestone")
+        self._repair_action.triggered.connect(self._start_repair)
         run_menu.addAction(self._repair_action)
 
         self._cancel_action = QAction("Cancel", self)
@@ -307,12 +354,13 @@ class MainWindow(QMainWindow):
     def _start_scan(self) -> None:
         """Build a :class:`ScanRequest` and start the background worker.
 
-        Guarded against re-entry while a scan already runs (the Scan
-        button is also disabled for the duration). Splits the sources
-        into FILE/FOLDER roots and explicit ARCHIVE donor material.
+        Guarded against re-entry while a scan or repair already runs
+        (the Scan button is also disabled for the duration). Splits the
+        sources into FILE/FOLDER roots and explicit ARCHIVE donor
+        material.
         """
-        if self._scan_worker is not None:
-            return  # a scan is already running
+        if self._scan_worker is not None or self._repair_worker is not None:
+            return  # a scan or repair is already running
 
         entries = self._sources.entries()
         roots = tuple(
@@ -355,21 +403,23 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _cancel_scan(self) -> None:
-        """Ask the running worker to stop, if any."""
-        if self._scan_worker is not None:
+        """Ask the running worker (scan or repair) to stop, if any."""
+        worker = self._scan_worker or self._repair_worker
+        if worker is not None:
             self._cancel_button.setEnabled(False)
             self._cancel_action.setEnabled(False)
-            self._scan_worker.cancel()
+            worker.cancel()
             self.statusBar().showMessage("Cancelling…")
 
     def _set_running(self, running: bool) -> None:
-        """Toggle the UI between the idle and scanning states.
+        """Toggle the UI between the idle and running (scan/repair) states.
 
         Disables the source and run-options panels and shows the
-        progress row while *running*; the Scan button's (and its Run
-        menu counterpart's) own enabled state is derived through
-        :meth:`_sync_scan_button` (which also accounts for whether any
-        sources are present).
+        progress row while *running*; the Scan/Repair buttons' (and
+        their Run menu counterparts') own enabled state is derived
+        through :meth:`_sync_scan_button`/:meth:`_sync_repair_button`
+        (which also account for sources present / a repairable scan
+        result / the selected repair mode).
         """
         self._source_panel.setEnabled(not running)
         self._run_options.set_enabled_for_running(running)
@@ -378,13 +428,14 @@ class MainWindow(QMainWindow):
             self._cancel_button.setEnabled(True)
             self._cancel_action.setEnabled(True)
         self._sync_scan_button()
+        self._sync_repair_button()
 
     def _finish_ui(self, status_message: str) -> None:
-        """Return the UI to the idle state after a scan ends.
+        """Return the UI to the idle state after a scan or repair ends.
 
         Called on every terminal outcome (success, cancel, failure);
         the worker object itself is cleaned up separately in
-        :meth:`_on_worker_finished`.
+        :meth:`_on_worker_finished`/:meth:`_on_repair_worker_finished`.
         """
         self._set_running(False)
         self.statusBar().showMessage(status_message)
@@ -392,10 +443,10 @@ class MainWindow(QMainWindow):
     def _sync_scan_button(self, *_args: object) -> None:
         """Enable Scan (button and Run-menu action) with sources present.
 
-        Enabled only when at least one source is accumulated and no
-        scan is currently running.
+        Enabled only when at least one source is accumulated and neither
+        a scan nor a repair is currently running.
         """
-        running = self._scan_worker is not None
+        running = self._scan_worker is not None or self._repair_worker is not None
         enabled = self._sources.rowCount() > 0 and not running
         self._scan_button.setEnabled(enabled)
         self._scan_action.setEnabled(enabled)
@@ -447,7 +498,7 @@ class MainWindow(QMainWindow):
             f"The scan stopped unexpectedly:\n{message}")
 
     def _on_worker_finished(self) -> None:
-        """Drop the finished worker and re-evaluate the Scan button.
+        """Drop the finished scan worker and re-evaluate the action buttons.
 
         Wired to :attr:`QThread.finished`, which fires after the
         worker's own terminal signal, so the result has already been
@@ -458,6 +509,200 @@ class MainWindow(QMainWindow):
         if worker is not None:
             worker.deleteLater()
         self._sync_scan_button()
+        self._sync_repair_button()
+
+    # -- repair lifecycle ------------------------------------------------
+
+    def _start_repair(self) -> None:
+        """Build a :class:`RepairRequest` and start the background worker.
+
+        Guarded against re-entry while a scan or repair already runs,
+        and against a repair mode other than single-file (the Repair
+        button/action are already disabled in both cases, but the guard
+        stays here too since this slot doubles as a Run-menu handler).
+        Splits the sources into FILE/FOLDER roots to diagnose and repair;
+        an explicit ARCHIVE source is reported on the status bar and
+        otherwise ignored (donor material is a multi-source concern).
+        """
+        if self._scan_worker is not None or self._repair_worker is not None:
+            return  # a scan or repair is already running
+        if self._run_options.repair_mode() is not RepairMode.SINGLE:
+            return  # multi-source repair comes in a later milestone
+
+        entries = self._sources.entries()
+        roots = tuple(
+            entry.path for entry in entries
+            if entry.kind in (SourceKind.FILE, SourceKind.FOLDER)
+        )
+        if not roots:
+            return
+        has_archives = any(
+            entry.kind is SourceKind.ARCHIVE for entry in entries)
+
+        in_place = self._run_options.in_place()
+        output_dir = self._run_options.output_dir()
+        if not in_place and output_dir is None:
+            QMessageBox.warning(
+                self, "No output folder",
+                'Choose an output folder before repairing, or switch to '
+                '"Repair in place".')
+            return
+
+        request = RepairRequest(
+            roots=roots,
+            output_dir=output_dir,
+            in_place=in_place,
+            follow_symlinks=self._settings.follow_symlinks(),
+            allow_download=self._run_options.allow_download(),
+            max_file_bytes=self._run_options.max_file_bytes(),
+            lang=self._settings.language(),
+        )
+        self._repair_open_target = self._compute_open_target(
+            roots, in_place, output_dir)
+
+        self._repair_checked = 0
+        self._repair_processed = 0
+        self._open_output_button.setEnabled(False)
+        self._open_output_button.hide()
+
+        worker = RepairWorker(request, self)
+        worker.file_scanned.connect(self._on_repair_file_scanned)
+        worker.file_repaired.connect(self._on_repair_file_repaired)
+        worker.download_started.connect(self._on_download_started)
+        worker.finished_ok.connect(self._on_repair_finished_ok)
+        worker.failed.connect(self._on_repair_failed)
+        worker.cancelled.connect(self._on_repair_cancelled)
+        worker.finished.connect(self._on_repair_worker_finished)
+        self._repair_worker = worker
+
+        self._set_running(True)
+        self._progress_label.setText("Repairing…")
+        if has_archives:
+            self.statusBar().showMessage(
+                "Archives are used only by multi-source repair; "
+                "ignored in this mode")
+        else:
+            self.statusBar().showMessage("Repairing…")
+        worker.start()
+
+    @staticmethod
+    def _compute_open_target(
+        roots: tuple[Path, ...], in_place: bool, output_dir: Path | None
+    ) -> Path:
+        """Return the folder "Open Output Folder" should reveal for a run.
+
+        The aggregate output directory in aggregate mode; in *in_place*
+        mode, the first root itself when it is a directory, else that
+        root's own parent directory (a file root's artifact is written
+        next to the file, not inside it).
+
+        :param roots: the run's FILE/FOLDER roots, as passed to
+            :class:`RepairRequest` (never empty).
+        :param in_place: the run's :attr:`RepairRequest.in_place`.
+        :param output_dir: the run's :attr:`RepairRequest.output_dir`
+            (required, i.e. not None, when *in_place* is False).
+        """
+        if not in_place:
+            assert output_dir is not None
+            return output_dir
+        first = roots[0]
+        return first if first.is_dir() else first.parent
+
+    def _on_repair_file_scanned(self, outcome: object) -> None:
+        """Count one diagnosed file during a repair's checking phase."""
+        self._repair_checked += 1
+        self._progress_label.setText(
+            f"Checking… {self._repair_checked} file(s)")
+        path = getattr(outcome, "path", None)
+        if path is not None:
+            self.statusBar().showMessage(f"Checking {Path(path).name}")
+
+    def _on_repair_file_repaired(self, item: object) -> None:
+        """Count one processed file during a repair's repairing phase."""
+        self._repair_processed += 1
+        self._progress_label.setText(
+            f"Repairing… {self._repair_processed} file(s) processed")
+        action = getattr(item, "action", None)
+        source = getattr(item, "source", None)
+        path = getattr(source, "path", None) if source is not None else None
+        if path is not None and action is not None:
+            self.statusBar().showMessage(f"{action}: {Path(path).name}")
+
+    def _on_repair_finished_ok(self, result: object) -> None:
+        """Show the repair results and restore the idle UI after a clean run."""
+        assert isinstance(result, BatchResult)
+        self._results_panel.show_repair_result(result)
+        self._results_panel.show()
+        self._open_output_button.setEnabled(True)
+        self._open_output_button.show()
+        self._finish_ui(self._results_panel.summary_text())
+
+    def _on_repair_cancelled(self) -> None:
+        """Restore the idle UI after a cancelled repair.
+
+        Any artifact already written before the cancellation point is
+        left in place (see :meth:`RepairWorker.cancel`'s own contract);
+        this status message deliberately does not claim otherwise.
+        """
+        self._finish_ui("Repair cancelled")
+
+    def _on_repair_failed(self, message: str) -> None:
+        """Report an unexpected repair-worker failure and restore the UI."""
+        self._finish_ui(f"Repair failed: {message}")
+        QMessageBox.warning(
+            self, "Repair failed",
+            f"The repair stopped unexpectedly:\n{message}")
+
+    def _on_repair_worker_finished(self) -> None:
+        """Drop the finished repair worker and re-evaluate the action buttons.
+
+        Wired to :attr:`QThread.finished`, which fires after the
+        worker's own terminal signal, so the result has already been
+        consumed by the time the object is scheduled for deletion.
+        """
+        worker = self._repair_worker
+        self._repair_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        self._sync_scan_button()
+        self._sync_repair_button()
+
+    def _sync_repair_button(self, *_args: object) -> None:
+        """Enable Repair (button and Run-menu action) when a run can start.
+
+        Enabled only when the last scan result (see
+        :meth:`~pptrepair.gui.results.ResultsPanel.last_result`) found at
+        least one corrupted on-disk file, neither a scan nor a repair is
+        currently running, and the run-options panel is set to
+        single-file repair mode -- multi-source repair is a later
+        milestone, so the controls are disabled (with an explanatory
+        tooltip) whenever that mode is selected instead.
+        """
+        running = self._scan_worker is not None or self._repair_worker is not None
+        scan_result = self._results_panel.last_result()
+        corrupted = 0
+        if scan_result is not None and scan_result.scan is not None:
+            corrupted = len(scan_result.scan.corrupted())
+        single_mode = self._run_options.repair_mode() is RepairMode.SINGLE
+
+        enabled = corrupted > 0 and not running and single_mode
+        self._repair_button.setEnabled(enabled)
+        self._repair_action.setEnabled(enabled)
+
+        tooltip = "" if single_mode else _MULTI_SOURCE_TOOLTIP
+        self._repair_button.setToolTip(tooltip)
+        self._repair_action.setToolTip(tooltip)
+
+    def _open_output_folder(self) -> None:
+        """Reveal the last completed repair's output folder.
+
+        A no-op before any repair has completed in this session (see
+        :attr:`_repair_open_target`); the button itself stays hidden
+        until then, so this only guards direct calls (e.g. from tests).
+        """
+        if self._repair_open_target is not None:
+            QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(self._repair_open_target)))
 
     # -- drag and drop / add reporting ---------------------------------
 
@@ -554,16 +799,16 @@ class MainWindow(QMainWindow):
     # -- shutdown ------------------------------------------------------
 
     def closeEvent(self, event: object) -> None:
-        """Stop a running scan before the window closes.
+        """Stop a running scan or repair before the window closes.
 
-        Requests cancellation and blocks (briefly) for the worker to
-        unwind so the process never exits with a live scan thread. Runs
-        on the UI thread.
+        Requests cancellation and blocks (briefly) for each worker to
+        unwind so the process never exits with a live scan/repair
+        thread. Runs on the UI thread.
 
         :param event: Qt's close event.
         """
-        worker = self._scan_worker
-        if worker is not None and worker.isRunning():
-            worker.cancel()
-            worker.wait(_CLOSE_WAIT_MS)
+        for worker in (self._scan_worker, self._repair_worker):
+            if worker is not None and worker.isRunning():
+                worker.cancel()
+                worker.wait(_CLOSE_WAIT_MS)
         super().closeEvent(event)

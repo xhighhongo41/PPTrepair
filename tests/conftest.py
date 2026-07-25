@@ -3,9 +3,10 @@
 Guards against a collection-time failure of the GUI test modules
 (``tests/test_gui_skeleton.py``, ``tests/test_gui_sources.py``,
 ``tests/test_gui_scan.py``, ``tests/test_gui_settings.py``,
-``tests/test_gui_candidates.py``) -- and, transitively, of the
-pytest-qt plugin's own Qt-binding detection -- in an environment where
-the optional ``[gui]`` extra (PySide6) is not installed.
+``tests/test_gui_candidates.py``, ``tests/test_gui_repair.py``) -- and,
+transitively, of the pytest-qt plugin's own Qt-binding detection -- in
+an environment where the optional ``[gui]`` extra (PySide6) is not
+installed.
 """
 
 from __future__ import annotations
@@ -20,3 +21,4 @@ if importlib.util.find_spec("PySide6") is None:
     collect_ignore.append("test_gui_scan.py")
     collect_ignore.append("test_gui_settings.py")
     collect_ignore.append("test_gui_candidates.py")
+    collect_ignore.append("test_gui_repair.py")

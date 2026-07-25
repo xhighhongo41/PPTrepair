@@ -1,12 +1,15 @@
-"""Scan-results table/tree models and panel for the desktop application.
+"""Scan/repair-results table/tree models and panel for the desktop app.
 
 Renders the outcome of one scan -- diagnosed files, skipped files and
 donor material mined from archives -- as a flat, colour-coded table on
-one tab, and the twin-/lineage-/merge-restoration candidates computed
-from that same outcome as a tree on a second tab, with a one-line
-summary above both. Everything here runs on the UI thread; the panel
-is fed a :class:`~pptrepair.gui.worker.GuiScanResult` that the worker
-produced off-thread.
+a "Files" tab, the twin-/lineage-/merge-restoration candidates computed
+from that same outcome as a tree on a "Candidates" tab, and the outcome
+of one single-file repair run as a flat, colour-coded table on a
+"Repair" tab, with a one-line summary shown above all three. Everything
+here runs on the UI thread; the panel is fed a
+:class:`~pptrepair.gui.worker.GuiScanResult` (:meth:`show_result`) or a
+:class:`~pptrepair.batch.BatchResult` (:meth:`show_repair_result`) that
+the matching worker produced off-thread.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pptrepair.batch import BatchItem, BatchResult
 from pptrepair.classify import Verdict
 from pptrepair.gui.worker import GuiScanResult
 
@@ -314,6 +318,188 @@ class ScanResultsModel(QAbstractTableModel):
         return _COLUMNS[section]
 
 
+# --------------------------------------------------------------------------
+# Repair results table
+# --------------------------------------------------------------------------
+
+#: Repair table column headers, in order.
+_REPAIR_COLUMNS = ("Source", "Action", "Output")
+
+#: Foreground colours per repair-row category; ``None`` keeps the theme
+#: default (used for the dry-run-only "planned" category, never
+#: produced by this milestone's single-file repair worker).
+_REPAIR_CATEGORY_COLORS: dict[str, QColor | None] = {
+    "repaired": QColor("#27ae60"),
+    "problem": QColor("#c0392b"),
+    "skipped": QColor("#7f8c8d"),
+    "planned": None,
+}
+
+
+@dataclass(frozen=True)
+class _RepairRow:
+    """One rendered repair-table row.
+
+    :ivar source: the Source-column text (the repaired file's path).
+    :ivar action: the Action-column text, e.g. ``"repaired (rebuild)"``.
+    :ivar output: the Output-column text (empty when nothing was, or
+        would be, written).
+    :ivar category: colour bucket -- one key of
+        :data:`_REPAIR_CATEGORY_COLORS`.
+    """
+
+    source: str
+    action: str
+    output: str
+    category: str
+
+
+def _repair_row_for_item(item: BatchItem) -> _RepairRow:
+    """Build the repair-table row for one :class:`BatchItem`.
+
+    Mirrors :mod:`pptrepair.report_batch`'s own machine-facing action
+    codes, but rendered for a human reader: ``"repaired"`` gains its
+    mode in parentheses (e.g. ``"repaired (rebuild)"``) when the repair
+    actually ran, and ``"skipped_existing"`` reads as
+    ``"skipped (exists)"``. ``"unrepairable"``/``"failed"`` and the
+    dry-run-only ``"planned"`` action are shown as-is.
+    """
+    source = str(item.source.path)
+    output = str(item.planned_output) if item.planned_output is not None else ""
+
+    if item.action == "repaired":
+        mode = item.repair.mode if item.repair is not None else None
+        action = f"repaired ({mode})" if mode is not None else "repaired"
+        category = "repaired"
+    elif item.action == "skipped_existing":
+        action = "skipped (exists)"
+        category = "skipped"
+    elif item.action in ("unrepairable", "failed"):
+        action = item.action
+        category = "problem"
+    else:
+        # "planned": only ever produced under repair_paths(dry_run=True),
+        # which this milestone's GUI worker never requests.
+        action = item.action
+        category = "planned"
+
+    return _RepairRow(source, action, output, category)
+
+
+class RepairResultsModel(QAbstractTableModel):
+    """Flat table model over the :class:`BatchItem` list of one repair run.
+
+    Three columns -- Source, Action, Output -- with ``DisplayRole`` text
+    and a ``ForegroundRole`` colour per row category (repaired green,
+    unrepairable/failed red, skipped grey).
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize an empty model.
+
+        :param parent: optional Qt parent object.
+        """
+        super().__init__(parent)
+        self._rows: list[_RepairRow] = []
+
+    def set_result(self, result: BatchResult) -> None:
+        """Rebuild every row from *result*.
+
+        Wrapped in ``beginResetModel``/``endResetModel`` so any attached
+        view refreshes wholesale. Runs on the UI thread.
+
+        :param result: the repair outcome to display.
+        """
+        self.beginResetModel()
+        self._rows = [_repair_row_for_item(item) for item in result.items]
+        self.endResetModel()
+
+    def clear(self) -> None:
+        """Reset to the empty state (no rows)."""
+        self.beginResetModel()
+        self._rows = []
+        self.endResetModel()
+
+    def rowCount(
+        self, parent: QModelIndex = QModelIndex()
+    ) -> int:
+        """Return the number of repair-result rows.
+
+        :param parent: unused; this is a flat (non-tree) table model.
+        """
+        if parent.isValid():
+            return 0
+        return len(self._rows)
+
+    def columnCount(
+        self, parent: QModelIndex = QModelIndex()
+    ) -> int:
+        """Return the fixed column count (Source/Action/Output).
+
+        :param parent: unused; this is a flat (non-tree) table model.
+        """
+        if parent.isValid():
+            return 0
+        return len(_REPAIR_COLUMNS)
+
+    def data(
+        self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
+    ) -> Any:
+        """Return the cell text or foreground colour for *index*.
+
+        :param index: cell to query; must be valid and in range.
+        :param role: ``Qt.DisplayRole`` for the cell text or
+            ``Qt.ForegroundRole`` for the row's category colour.
+        :returns: the requested value, or ``None`` for any other role
+            or an out-of-range index.
+        """
+        if not index.isValid() or not (0 <= index.row() < len(self._rows)):
+            return None
+        row = self._rows[index.row()]
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            return (row.source, row.action, row.output)[index.column()]
+
+        if role == Qt.ItemDataRole.ForegroundRole:
+            color = _REPAIR_CATEGORY_COLORS.get(row.category)
+            return QBrush(color) if color is not None else None
+
+        return None
+
+    def headerData(
+        self, section: int, orientation: Qt.Orientation,
+        role: int = Qt.ItemDataRole.DisplayRole
+    ) -> Any:
+        """Return the horizontal header label for *section*.
+
+        :param section: column index for horizontal headers.
+        :param orientation: only ``Horizontal`` yields a label.
+        :param role: only ``Qt.DisplayRole`` is served.
+        """
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        if orientation != Qt.Orientation.Horizontal:
+            return None
+        if not (0 <= section < len(_REPAIR_COLUMNS)):
+            return None
+        return _REPAIR_COLUMNS[section]
+
+
+def _repair_summary_text(result: BatchResult) -> str:
+    """Compose the one-line summary shown above the repair table.
+
+    E.g. ``"Repaired 3, unrepairable 1, skipped 1"``, with a trailing
+    ``", failed {n}"`` only when at least one repair attempt failed.
+    """
+    counts = result.counts()
+    text = (f"Repaired {counts['repaired']}, "
+            f"unrepairable {counts['unrepairable']}, "
+            f"skipped {counts['skipped_existing']}")
+    if counts["failed"]:
+        text += f", failed {counts['failed']}"
+    return text
+
+
 def _summary_text(result: GuiScanResult) -> str:
     """Compose the one-line summary shown above the results table."""
     scan: ScanResult | None = result.scan
@@ -356,20 +542,23 @@ _NO_CANDIDATES_TEXT = "(no candidates found)"
 
 
 class ResultsPanel(QWidget):
-    """Summary label above a "Files"/"Candidates" tab widget.
+    """Summary label above a "Files"/"Candidates"/"Repair" tab widget.
 
     Fed a :class:`GuiScanResult` through :meth:`show_result`: the
     "Files" tab holds the flat, colour-coded results table (its Path
     column stretching to fill the width); the "Candidates" tab holds a
     tree of twin-/lineage-/merge-restoration candidates computed from
     that same result, falling back to a placeholder label when none
-    were found. Starts empty and can be reset through :meth:`clear`;
-    the last result shown is kept for :meth:`last_result`, so a later
-    milestone's repair step can act on it without re-scanning.
+    were found. Fed a :class:`~pptrepair.batch.BatchResult` through
+    :meth:`show_repair_result`: the "Repair" tab holds a flat,
+    colour-coded table of that run's per-file outcomes, and becomes the
+    current tab. Starts empty and can be reset through :meth:`clear`;
+    the last *scan* result shown is kept for :meth:`last_result`, so a
+    repair step can act on it without re-scanning.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        """Build the summary label and the Files/Candidates tabs.
+        """Build the summary label and the Files/Candidates/Repair tabs.
 
         :param parent: optional Qt parent widget.
         """
@@ -381,10 +570,13 @@ class ResultsPanel(QWidget):
         self._model = ScanResultsModel(self)
         self._table = self._build_table()
         self._candidates_stack = self._build_candidates_stack()
+        self._repair_model = RepairResultsModel(self)
+        self._repair_table = self._build_repair_table()
 
         self._tabs = QTabWidget()
         self._tabs.addTab(self._table, "Files")
         self._tabs.addTab(self._candidates_stack, "Candidates")
+        self._tabs.addTab(self._repair_table, "Repair")
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._summary_label)
@@ -400,6 +592,21 @@ class ResultsPanel(QWidget):
         table.verticalHeader().setVisible(False)
         header = table.horizontalHeader()
         # Path column stretches; the other two size to their contents.
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        return table
+
+    def _build_repair_table(self) -> QTableView:
+        """Return the read-only repair-results table bound to its model."""
+        table = QTableView()
+        table.setModel(self._repair_model)
+        table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        header = table.horizontalHeader()
+        # Source column stretches; the other two size to their contents.
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -444,6 +651,20 @@ class ResultsPanel(QWidget):
         self._candidates_tree.expandAll()
         self._candidates_stack.setCurrentWidget(self._candidates_tree)
 
+    def show_repair_result(self, result: BatchResult) -> None:
+        """Display *result*: rebuild the Repair tab and switch to it.
+
+        Runs on the UI thread. Does not touch the Files/Candidates
+        tabs or :meth:`last_result` -- those still reflect the scan
+        this repair ran against.
+
+        :param result: the repair outcome to render.
+        """
+        self._repair_model.set_result(result)
+        self._summary = _repair_summary_text(result)
+        self._summary_label.setText(self._summary)
+        self._tabs.setCurrentWidget(self._repair_table)
+
     def summary_text(self) -> str:
         """Return the currently displayed summary line (empty when clear)."""
         return self._summary
@@ -460,6 +681,7 @@ class ResultsPanel(QWidget):
         """Reset to the empty state (no rows, no candidates, no summary)."""
         self._last_result = None
         self._model.set_result(GuiScanResult(scan=None))
+        self._repair_model.clear()
         self._summary = ""
         self._summary_label.setText("")
         self._candidates_tree.clear()
