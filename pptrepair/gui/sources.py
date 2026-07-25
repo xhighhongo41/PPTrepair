@@ -26,6 +26,7 @@ from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt
 from PySide6.QtWidgets import QApplication, QStyle
 
 from pptrepair.archive import is_archive
+from pptrepair.gui.i18n import tr
 from pptrepair.walker import TARGET_SUFFIXES
 
 
@@ -93,13 +94,6 @@ def classify_source(path: Path) -> SourceKind | None:
     return None
 
 
-#: Suffix appended to the displayed path for non-file source kinds.
-_KIND_SUFFIXES = {
-    SourceKind.FOLDER: " [folder]",
-    SourceKind.ARCHIVE: " [archive]",
-}
-
-
 class SourceListModel(QAbstractListModel):
     """Qt list model holding the accumulated, classified source paths.
 
@@ -147,7 +141,12 @@ class SourceListModel(QAbstractListModel):
         entry = self._entries[index.row()]
 
         if role == Qt.ItemDataRole.DisplayRole:
-            suffix = _KIND_SUFFIXES.get(entry.kind, "")
+            if entry.kind is SourceKind.FOLDER:
+                suffix = tr(" [folder]")
+            elif entry.kind is SourceKind.ARCHIVE:
+                suffix = tr(" [archive]")
+            else:
+                suffix = ""
             return f"{entry.path}{suffix}"
 
         if role == Qt.ItemDataRole.DecorationRole:

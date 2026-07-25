@@ -37,6 +37,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pptrepair.gui.i18n import tr
+
 if TYPE_CHECKING:  # avoid a runtime import cycle with settings.py
     from pptrepair.gui.settings import Settings
 
@@ -103,7 +105,7 @@ class RunOptionsPanel(QWidget):
         (self._in_place_radio, self._into_folder_radio,
          self._output_edit, self._browse_button,
          self._output_group) = self._build_output_controls()
-        self._download_check = QCheckBox("Download cloud-only files")
+        self._download_check = QCheckBox(tr("Download cloud-only files"))
         (self._size_spin, self._unit_combo,
          self._no_limit_check) = self._build_size_controls()
 
@@ -120,8 +122,8 @@ class RunOptionsPanel(QWidget):
     def _build_mode_combo(self) -> QComboBox:
         """Return the repair-mode combo, each item tagged with its enum."""
         combo = QComboBox()
-        combo.addItem("Single-file repair", RepairMode.SINGLE)
-        combo.addItem("Multi-source repair", RepairMode.MULTI)
+        combo.addItem(tr("Single-file repair"), RepairMode.SINGLE)
+        combo.addItem(tr("Multi-source repair"), RepairMode.MULTI)
         return combo
 
     def _build_output_controls(
@@ -132,9 +134,9 @@ class RunOptionsPanel(QWidget):
         The two radio buttons share a :class:`QButtonGroup` so exactly
         one is ever selected; "Repair in place" is the default.
         """
-        in_place = QRadioButton("Repair in place")
+        in_place = QRadioButton(tr("Repair in place"))
         in_place.setChecked(True)
-        into_folder = QRadioButton("Repair into folder:")
+        into_folder = QRadioButton(tr("Repair into folder:"))
 
         group = QButtonGroup(self)
         group.addButton(in_place)
@@ -142,10 +144,10 @@ class RunOptionsPanel(QWidget):
 
         output_edit = QLineEdit()
         output_edit.setReadOnly(True)
-        output_edit.setPlaceholderText("(choose a destination folder)")
-        browse_button = QPushButton("Browse…")
+        output_edit.setPlaceholderText(tr("(choose a destination folder)"))
+        browse_button = QPushButton(tr("Browse…"))
 
-        box = QGroupBox("Output")
+        box = QGroupBox(tr("Output"))
         box_layout = QGridLayout(box)
         box_layout.addWidget(in_place, 0, 0, 1, 3)
         box_layout.addWidget(into_folder, 1, 0)
@@ -167,14 +169,14 @@ class RunOptionsPanel(QWidget):
         unit.addItems(["MB", "GB"])
         unit.setCurrentText("GB")
 
-        no_limit = QCheckBox("No limit")
+        no_limit = QCheckBox(tr("No limit"))
         return spin, unit, no_limit
 
     def _build_layout(self) -> None:
         """Arrange the controls in a compact two-region grid."""
         layout = QGridLayout(self)
 
-        layout.addWidget(QLabel("Repair mode:"), 0, 0)
+        layout.addWidget(QLabel(tr("Repair mode:")), 0, 0)
         layout.addWidget(self._mode_combo, 0, 1)
 
         layout.addWidget(self._output_group, 1, 0, 1, 2)
@@ -182,7 +184,7 @@ class RunOptionsPanel(QWidget):
         layout.addWidget(self._download_check, 2, 0, 1, 2)
 
         size_row = QHBoxLayout()
-        size_row.addWidget(QLabel("Max file size:"))
+        size_row.addWidget(QLabel(tr("Max file size:")))
         size_row.addWidget(self._size_spin)
         size_row.addWidget(self._unit_combo)
         size_row.addWidget(self._no_limit_check)
@@ -206,7 +208,7 @@ class RunOptionsPanel(QWidget):
     def _choose_output_dir(self) -> None:
         """Prompt for a destination folder and select the folder radio."""
         directory = QFileDialog.getExistingDirectory(
-            self, "Repair Into Folder")
+            self, tr("Repair Into Folder"))
         if directory:
             self._output_edit.setText(directory)
             self._into_folder_radio.setChecked(True)

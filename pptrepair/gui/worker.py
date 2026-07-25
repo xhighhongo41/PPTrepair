@@ -37,6 +37,7 @@ from pptrepair.archive import ArchiveMember, materialize
 from pptrepair.batch import BatchItem, BatchResult, plan_output_bases, repair_paths
 from pptrepair.cancel import OperationCancelled
 from pptrepair.classify import Diagnosis, Verdict
+from pptrepair.gui.i18n import tr
 from pptrepair.gui.merge_plan import ApprovedMerge
 from pptrepair.merge import MERGE_SUFFIX, merge_restore
 from pptrepair.repair import RepairOutcome, predict_auto_mode, repair_file
@@ -540,7 +541,8 @@ class MultiRepairWorker(QThread):
         if outcome.guarantee == "failed":
             return MergeItemOutcome(
                 target=merge.target, success=False, output_path=None,
-                detail="merge failed: no output could be reconstructed")
+                detail=tr(
+                    "merge failed: no output could be reconstructed"))
         detail = outcome.guarantee
         if outcome.output_path is not None:
             detail = f"{outcome.guarantee}: {outcome.output_path.name}"

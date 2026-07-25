@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 import pptrepair
 from pptrepair.batch import BatchResult
 from pptrepair.gui.donor_dialog import DonorApprovalDialog
+from pptrepair.gui.i18n import tr
 from pptrepair.gui.merge_plan import build_target_plans
 from pptrepair.gui.results import ResultsPanel
 from pptrepair.gui.run_options import RepairMode, RunOptionsPanel
@@ -59,10 +60,6 @@ from pptrepair.gui.worker import (
 #: How long (ms) window-close waits for a running worker to stop.
 _CLOSE_WAIT_MS = 5000
 
-#: Status-bar message shown when the source list changes after a scan, so
-#: a stale result can no longer be repaired against a changed set.
-_SOURCES_CHANGED_MESSAGE = "Sources changed — please scan again"
-
 
 class MainWindow(QMainWindow):
     """Top-level window of the PPTrepair desktop application.
@@ -70,9 +67,8 @@ class MainWindow(QMainWindow):
     Hosts the source list panel, a run-options panel, an (initially
     hidden) progress row with a Cancel button, an (initially hidden)
     results panel, and a Scan/Repair/Open Output Folder action row, plus
-    a File/Run/Settings/Help menu bar and status bar. All user-facing
-    strings are plain English literals for now; gettext-based
-    translation is planned for a later milestone.
+    a File/Run/Settings/Help menu bar and status bar. Every user-facing
+    string is passed through :func:`~pptrepair.gui.i18n.tr`.
     """
 
     def __init__(self) -> None:
@@ -126,7 +122,7 @@ class MainWindow(QMainWindow):
         self._sync_scan_button()
         self._sync_repair_button()
 
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage(tr("Ready"))
 
     # -- construction --------------------------------------------------
 
@@ -172,7 +168,7 @@ class MainWindow(QMainWindow):
         self._progress_label = QLabel("")
         row.addWidget(self._progress_label, stretch=1)
 
-        self._cancel_button = QPushButton("Cancel")
+        self._cancel_button = QPushButton(tr("Cancel"))
         self._cancel_button.clicked.connect(self._cancel_scan)
         row.addWidget(self._cancel_button)
 
@@ -184,19 +180,19 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         row.addStretch(1)
 
-        self._scan_button = QPushButton("Scan")
+        self._scan_button = QPushButton(tr("Scan"))
         self._scan_button.setEnabled(False)
         self._scan_button.clicked.connect(self._start_scan)
         row.addWidget(self._scan_button)
 
-        self._repair_button = QPushButton("Repair")
+        self._repair_button = QPushButton(tr("Repair"))
         self._repair_button.setEnabled(False)
         self._repair_button.clicked.connect(self._start_repair)
         row.addWidget(self._repair_button)
 
         # Hidden until a repair completes successfully (see
         # _on_repair_finished_ok); there is nothing to open before then.
-        self._open_output_button = QPushButton("Open Output Folder")
+        self._open_output_button = QPushButton(tr("Open Output Folder"))
         self._open_output_button.setEnabled(False)
         self._open_output_button.hide()
         self._open_output_button.clicked.connect(self._open_output_folder)
@@ -206,14 +202,14 @@ class MainWindow(QMainWindow):
 
     def _build_menu_bar(self) -> None:
         """Populate the menu bar's File, Run, Settings and Help menus."""
-        file_menu = self.menuBar().addMenu("File")
+        file_menu = self.menuBar().addMenu(tr("File"))
 
-        add_files_action = QAction("Add Files…", self)
+        add_files_action = QAction(tr("Add Files…"), self)
         add_files_action.setShortcut(QKeySequence.StandardKey.Open)
         add_files_action.triggered.connect(self._source_panel.add_files)
         file_menu.addAction(add_files_action)
 
-        add_folder_action = QAction("Add Folder…", self)
+        add_folder_action = QAction(tr("Add Folder…"), self)
         add_folder_action.triggered.connect(self._source_panel.add_folder)
         file_menu.addAction(add_folder_action)
 
@@ -221,13 +217,13 @@ class MainWindow(QMainWindow):
 
         file_menu.addAction(self._build_separator())
 
-        clear_sources_action = QAction("Clear Sources", self)
+        clear_sources_action = QAction(tr("Clear Sources"), self)
         clear_sources_action.triggered.connect(self._sources.clear)
         file_menu.addAction(clear_sources_action)
 
         file_menu.addAction(self._build_separator())
 
-        quit_action = QAction("Quit", self)
+        quit_action = QAction(tr("Quit"), self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.setMenuRole(QAction.MenuRole.QuitRole)
         quit_action.triggered.connect(self.close)
@@ -235,15 +231,15 @@ class MainWindow(QMainWindow):
 
         self._build_run_menu()
 
-        settings_menu = self.menuBar().addMenu("Settings")
-        preferences_action = QAction("Preferences…", self)
+        settings_menu = self.menuBar().addMenu(tr("Settings"))
+        preferences_action = QAction(tr("Preferences…"), self)
         preferences_action.setShortcut(QKeySequence.StandardKey.Preferences)
         preferences_action.setMenuRole(QAction.MenuRole.PreferencesRole)
         preferences_action.triggered.connect(self._show_preferences_dialog)
         settings_menu.addAction(preferences_action)
 
-        help_menu = self.menuBar().addMenu("Help")
-        about_action = QAction("About PPTrepair", self)
+        help_menu = self.menuBar().addMenu(tr("Help"))
+        about_action = QAction(tr("About PPTrepair"), self)
         about_action.setMenuRole(QAction.MenuRole.AboutRole)
         about_action.triggered.connect(self._show_about_dialog)
         help_menu.addAction(about_action)
@@ -266,7 +262,7 @@ class MainWindow(QMainWindow):
 
         :param file_menu: the File menu to add this submenu to.
         """
-        menu = file_menu.addMenu("Recent Folders")
+        menu = file_menu.addMenu(tr("Recent Folders"))
         menu.aboutToShow.connect(self._rebuild_recent_folders_menu)
         return menu
 
@@ -277,7 +273,7 @@ class MainWindow(QMainWindow):
 
         folders = self._settings.recent_folders()
         if not folders:
-            empty_action = QAction("(empty)", menu)
+            empty_action = QAction(tr("(empty)"), menu)
             empty_action.setEnabled(False)
             menu.addAction(empty_action)
             return
@@ -292,7 +288,7 @@ class MainWindow(QMainWindow):
             menu.addAction(action)
 
         menu.addAction(self._build_separator())
-        clear_action = QAction("Clear Menu", menu)
+        clear_action = QAction(tr("Clear Menu"), menu)
         clear_action.triggered.connect(self._settings.clear_recent_folders)
         menu.addAction(clear_action)
 
@@ -303,20 +299,20 @@ class MainWindow(QMainWindow):
         :meth:`_sync_scan_button`/:meth:`_set_running` keep the
         actions' enabled state in lockstep with the buttons'.
         """
-        run_menu = self.menuBar().addMenu("Run")
+        run_menu = self.menuBar().addMenu(tr("Run"))
 
-        self._scan_action = QAction("Scan", self)
+        self._scan_action = QAction(tr("Scan"), self)
         self._scan_action.setShortcut(QKeySequence("Ctrl+R"))
         self._scan_action.setEnabled(False)
         self._scan_action.triggered.connect(self._start_scan)
         run_menu.addAction(self._scan_action)
 
-        self._repair_action = QAction("Repair", self)
+        self._repair_action = QAction(tr("Repair"), self)
         self._repair_action.setEnabled(False)
         self._repair_action.triggered.connect(self._start_repair)
         run_menu.addAction(self._repair_action)
 
-        self._cancel_action = QAction("Cancel", self)
+        self._cancel_action = QAction(tr("Cancel"), self)
         self._cancel_action.setShortcut(QKeySequence("Esc"))
         self._cancel_action.setEnabled(False)
         self._cancel_action.triggered.connect(self._cancel_scan)
@@ -341,22 +337,31 @@ class MainWindow(QMainWindow):
         """Show an About dialog with the app name, version and license."""
         QMessageBox.about(
             self,
-            "About PPTrepair",
+            tr("About PPTrepair"),
             f"PPTrepair {pptrepair.__version__}\n"
-            "Diagnose and repair PowerPoint files corrupted while "
-            "stored on OneDrive.\n"
-            "Licensed under the GNU General Public License v3.0.",
+            + tr("Diagnose and repair PowerPoint files corrupted while "
+                 "stored on OneDrive.")
+            + "\n"
+            + tr("Licensed under the GNU General Public License v3.0."),
         )
 
     def _show_preferences_dialog(self) -> None:
         """Open the Preferences dialog and re-apply the run options on OK.
 
         Cancelling the dialog leaves :attr:`_settings` -- and hence the
-        run-options panel -- untouched.
+        run-options panel -- untouched. When the language was changed
+        and the dialog was accepted, the status bar tells the user the
+        change only takes effect after restarting the application,
+        since already-built widgets are never retranslated (see
+        :mod:`pptrepair.gui.i18n`).
         """
+        previous_language = self._settings.language()
         dialog = SettingsDialog(self._settings, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._run_options.apply_settings(self._settings)
+            if self._settings.language() != previous_language:
+                self.statusBar().showMessage(
+                    tr("Language change takes effect after restart"))
 
     # -- scan lifecycle ------------------------------------------------
 
@@ -407,8 +412,8 @@ class MainWindow(QMainWindow):
         self._scan_worker = worker
 
         self._set_running(True)
-        self._progress_label.setText("Scanning…")
-        self.statusBar().showMessage("Scanning…")
+        self._progress_label.setText(tr("Scanning…"))
+        self.statusBar().showMessage(tr("Scanning…"))
         worker.start()
 
     def _busy(self) -> bool:
@@ -438,7 +443,8 @@ class MainWindow(QMainWindow):
         if not self._busy() and self._results_panel.last_result() is not None:
             self._results_panel.clear()
             self._results_panel.hide()
-            self.statusBar().showMessage(_SOURCES_CHANGED_MESSAGE)
+            self.statusBar().showMessage(
+                tr("Sources changed — please scan again"))
         self._sync_repair_button()
 
     def _cancel_scan(self) -> None:
@@ -449,7 +455,7 @@ class MainWindow(QMainWindow):
             self._cancel_button.setEnabled(False)
             self._cancel_action.setEnabled(False)
             worker.cancel()
-            self.statusBar().showMessage("Cancelling…")
+            self.statusBar().showMessage(tr("Cancelling…"))
 
     def _set_running(self, running: bool) -> None:
         """Toggle the UI between the idle and running (scan/repair) states.
@@ -498,7 +504,8 @@ class MainWindow(QMainWindow):
         self._update_progress_label()
         path = getattr(outcome, "path", None)
         if path is not None:
-            self.statusBar().showMessage(f"Diagnosed {Path(path).name}")
+            self.statusBar().showMessage(
+                tr("Diagnosed {name}").format(name=Path(path).name))
 
     def _on_material_scanned(self, material: object) -> None:
         """Count one mined archive member and refresh the readout."""
@@ -506,17 +513,21 @@ class MainWindow(QMainWindow):
         self._update_progress_label()
         display = getattr(material, "display", None)
         if callable(display):
-            self.statusBar().showMessage(f"Mined {display()}")
+            self.statusBar().showMessage(
+                tr("Mined {name}").format(name=display()))
 
     def _on_download_started(self, path: object) -> None:
         """Report that a cloud-only placeholder is being downloaded."""
-        self.statusBar().showMessage(f"Downloading {Path(path).name}…")
+        self.statusBar().showMessage(
+            tr("Downloading {name}…").format(name=Path(path).name))
 
     def _update_progress_label(self) -> None:
         """Refresh the progress label from the running counters."""
         self._progress_label.setText(
-            f"Scanning… {self._files_diagnosed} file(s) diagnosed, "
-            f"{self._materials_mined} material(s) mined")
+            tr("Scanning… {files} file(s) diagnosed, "
+               "{materials} material(s) mined").format(
+                   files=self._files_diagnosed,
+                   materials=self._materials_mined))
 
     def _on_scan_finished_ok(self, result: object) -> None:
         """Show the results and restore the idle UI after a clean run."""
@@ -527,14 +538,15 @@ class MainWindow(QMainWindow):
 
     def _on_scan_cancelled(self) -> None:
         """Restore the idle UI after a cancelled run."""
-        self._finish_ui("Scan cancelled")
+        self._finish_ui(tr("Scan cancelled"))
 
     def _on_scan_failed(self, message: str) -> None:
         """Report an unexpected worker failure and restore the idle UI."""
-        self._finish_ui(f"Scan failed: {message}")
+        self._finish_ui(tr("Scan failed: {message}").format(message=message))
         QMessageBox.warning(
-            self, "Scan failed",
-            f"The scan stopped unexpectedly:\n{message}")
+            self, tr("Scan failed"),
+            tr("The scan stopped unexpectedly:\n{message}").format(
+                message=message))
 
     def _on_worker_finished(self) -> None:
         """Drop the finished scan worker and re-evaluate the action buttons.
@@ -588,9 +600,9 @@ class MainWindow(QMainWindow):
         output_dir = self._run_options.output_dir()
         if not in_place and output_dir is None:
             QMessageBox.warning(
-                self, "No output folder",
-                'Choose an output folder before repairing, or switch to '
-                '"Repair in place".')
+                self, tr("No output folder"),
+                tr('Choose an output folder before repairing, or switch '
+                   'to "Repair in place".'))
             return
 
         request = RepairRequest(
@@ -621,13 +633,13 @@ class MainWindow(QMainWindow):
         self._repair_worker = worker
 
         self._set_running(True)
-        self._progress_label.setText("Repairing…")
+        self._progress_label.setText(tr("Repairing…"))
         if has_archives:
             self.statusBar().showMessage(
-                "Archives are used only by multi-source repair; "
-                "ignored in this mode")
+                tr("Archives are used only by multi-source repair; "
+                   "ignored in this mode"))
         else:
-            self.statusBar().showMessage("Repairing…")
+            self.statusBar().showMessage(tr("Repairing…"))
         worker.start()
 
     @staticmethod
@@ -657,16 +669,20 @@ class MainWindow(QMainWindow):
         """Count one diagnosed file during a repair's checking phase."""
         self._repair_checked += 1
         self._progress_label.setText(
-            f"Checking… {self._repair_checked} file(s)")
+            tr("Checking… {n} file(s)").format(n=self._repair_checked))
         path = getattr(outcome, "path", None)
         if path is not None:
-            self.statusBar().showMessage(f"Checking {Path(path).name}")
+            self.statusBar().showMessage(
+                tr("Checking {name}").format(name=Path(path).name))
 
     def _on_repair_file_repaired(self, item: object) -> None:
         """Count one processed file during a repair's repairing phase."""
         self._repair_processed += 1
         self._progress_label.setText(
-            f"Repairing… {self._repair_processed} file(s) processed")
+            tr("Repairing… {n} file(s) processed").format(
+                n=self._repair_processed))
+        # item.action is a machine-facing code (matching the core batch
+        # module's own convention), shown as-is rather than translated.
         action = getattr(item, "action", None)
         source = getattr(item, "source", None)
         path = getattr(source, "path", None) if source is not None else None
@@ -689,14 +705,16 @@ class MainWindow(QMainWindow):
         left in place (see :meth:`RepairWorker.cancel`'s own contract);
         this status message deliberately does not claim otherwise.
         """
-        self._finish_ui("Repair cancelled")
+        self._finish_ui(tr("Repair cancelled"))
 
     def _on_repair_failed(self, message: str) -> None:
         """Report an unexpected repair-worker failure and restore the UI."""
-        self._finish_ui(f"Repair failed: {message}")
+        self._finish_ui(
+            tr("Repair failed: {message}").format(message=message))
         QMessageBox.warning(
-            self, "Repair failed",
-            f"The repair stopped unexpectedly:\n{message}")
+            self, tr("Repair failed"),
+            tr("The repair stopped unexpectedly:\n{message}").format(
+                message=message))
 
     def _on_repair_worker_finished(self) -> None:
         """Drop the finished repair worker and re-evaluate the action buttons.
@@ -733,17 +751,17 @@ class MainWindow(QMainWindow):
         plans = build_target_plans(scan_result)
         if not plans:
             QMessageBox.information(
-                self, "Nothing to repair",
-                "The last scan found no corrupted files to repair.")
+                self, tr("Nothing to repair"),
+                tr("The last scan found no corrupted files to repair."))
             return
 
         in_place = self._run_options.in_place()
         output_dir = self._run_options.output_dir()
         if not in_place and output_dir is None:
             QMessageBox.warning(
-                self, "No output folder",
-                'Choose an output folder before repairing, or switch to '
-                '"Repair in place".')
+                self, tr("No output folder"),
+                tr('Choose an output folder before repairing, or switch '
+                   'to "Repair in place".'))
             return
 
         dialog = DonorApprovalDialog(plans, self)
@@ -784,18 +802,22 @@ class MainWindow(QMainWindow):
         self._multi_repair_worker = worker
 
         self._set_running(True)
-        self._progress_label.setText("Merging…")
-        self.statusBar().showMessage("Repairing…")
+        self._progress_label.setText(tr("Merging…"))
+        self.statusBar().showMessage(tr("Repairing…"))
         worker.start()
 
     def _on_merge_done(self, item: object) -> None:
         """Count one finished merge and refresh the progress readout."""
         self._merge_processed += 1
         self._progress_label.setText(
-            f"Merging… {self._merge_processed}/{self._merge_total}")
+            tr("Merging… {done}/{total}").format(
+                done=self._merge_processed, total=self._merge_total))
         target = getattr(item, "target", None)
         success = getattr(item, "success", None)
         if target is not None:
+            # "merged"/"merge failed" mirror the Repair tab's own action
+            # text for this run (see results.py's _merge_row_for_item)
+            # and stay untranslated for the same reason.
             verb = "merged" if success else "merge failed"
             self.statusBar().showMessage(f"{verb}: {Path(target).name}")
 
@@ -803,10 +825,12 @@ class MainWindow(QMainWindow):
         """Count one finished fallback repair and refresh the readout."""
         self._fallback_processed += 1
         self._progress_label.setText(
-            f"Repairing… {self._fallback_processed}/{self._fallback_total}")
+            tr("Repairing… {done}/{total}").format(
+                done=self._fallback_processed, total=self._fallback_total))
         src = getattr(outcome, "src", None)
         if src is not None:
-            self.statusBar().showMessage(f"Repaired {Path(src).name}")
+            self.statusBar().showMessage(
+                tr("Repaired {name}").format(name=Path(src).name))
 
     def _on_multi_finished_ok(self, result: object) -> None:
         """Show the merge results and restore the idle UI after a clean run."""
@@ -824,14 +848,16 @@ class MainWindow(QMainWindow):
         left in place (see :meth:`MultiRepairWorker.cancel`'s contract);
         this status message deliberately does not claim otherwise.
         """
-        self._finish_ui("Repair cancelled")
+        self._finish_ui(tr("Repair cancelled"))
 
     def _on_multi_failed(self, message: str) -> None:
         """Report an unexpected multi-repair failure and restore the UI."""
-        self._finish_ui(f"Repair failed: {message}")
+        self._finish_ui(
+            tr("Repair failed: {message}").format(message=message))
         QMessageBox.warning(
-            self, "Repair failed",
-            f"The repair stopped unexpectedly:\n{message}")
+            self, tr("Repair failed"),
+            tr("The repair stopped unexpectedly:\n{message}").format(
+                message=message))
 
     def _on_multi_worker_finished(self) -> None:
         """Drop the finished multi-repair worker and re-sync the buttons.
@@ -962,12 +988,15 @@ class MainWindow(QMainWindow):
         """
         parts = []
         if result.added:
-            parts.append(f"Added {len(result.added)} source(s)")
+            parts.append(
+                tr("Added {n} source(s)").format(n=len(result.added)))
         if result.duplicates:
-            parts.append(f"{len(result.duplicates)} duplicate(s) skipped")
+            parts.append(tr("{n} duplicate(s) skipped").format(
+                n=len(result.duplicates)))
         if result.rejected:
-            parts.append(f"{len(result.rejected)} unsupported item(s) rejected")
-        return ", ".join(parts) if parts else "No sources added"
+            parts.append(tr("{n} unsupported item(s) rejected").format(
+                n=len(result.rejected)))
+        return ", ".join(parts) if parts else tr("No sources added")
 
     # -- shutdown ------------------------------------------------------
 

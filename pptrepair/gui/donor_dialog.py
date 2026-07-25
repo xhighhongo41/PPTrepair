@@ -31,19 +31,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pptrepair.gui.i18n import tr
 from pptrepair.gui.merge_plan import ApprovedMerge, DonorRef, TargetPlan
-
-#: Child-item text shown under a target that has no usable donor.
-_NO_DONORS_TEXT = "(no donors found — will fall back to single-file repair)"
-
-#: Explanatory note shown below the tree, warning that the weaker tiers
-#: are only cross-checked per entry rather than proven identical.
-_TIER_NOTE = (
-    "Auto-tier donors are byte-identical copies and are selected by "
-    "default. Candidate- and lineage-tier donors are only cross-checked "
-    "entry by entry, not proven identical, so review them before "
-    "including them."
-)
 
 
 class DonorApprovalDialog(QDialog):
@@ -66,7 +55,7 @@ class DonorApprovalDialog(QDialog):
         :param parent: optional Qt parent widget.
         """
         super().__init__(parent)
-        self.setWindowTitle("Multi-source repair")
+        self.setWindowTitle(tr("Multi-source repair"))
         self._plans = list(plans)
 
         #: Maps each checkable donor child item to its DonorRef, so
@@ -78,10 +67,14 @@ class DonorApprovalDialog(QDialog):
         self._tree = self._build_tree()
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(
-            "Review the donors for each corrupted file, then click Repair."))
+        layout.addWidget(QLabel(tr(
+            "Review the donors for each corrupted file, then click Repair.")))
         layout.addWidget(self._tree)
-        note = QLabel(_TIER_NOTE)
+        note = QLabel(tr(
+            "Auto-tier donors are byte-identical copies and are selected "
+            "by default. Candidate- and lineage-tier donors are only "
+            "cross-checked entry by entry, not proven identical, so "
+            "review them before including them."))
         note.setWordWrap(True)
         layout.addWidget(note)
         layout.addWidget(self._build_button_box())
@@ -104,7 +97,8 @@ class DonorApprovalDialog(QDialog):
 
     def _add_placeholder(self, target_item: QTreeWidgetItem) -> None:
         """Add the disabled "no donors" child under *target_item*."""
-        child = QTreeWidgetItem([_NO_DONORS_TEXT])
+        child = QTreeWidgetItem([tr(
+            "(no donors found — will fall back to single-file repair)")])
         # Neither selectable nor checkable: it is a pure annotation.
         child.setFlags(Qt.ItemFlag.NoItemFlags)
         target_item.addChild(child)
@@ -130,7 +124,7 @@ class DonorApprovalDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel)
         ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
-        ok_button.setText("Repair")
+        ok_button.setText(tr("Repair"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         return buttons

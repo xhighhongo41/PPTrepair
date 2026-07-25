@@ -832,9 +832,12 @@ def run_gui() -> int:
     try:
         from pptrepair.gui.app import main as gui_main
     except ImportError:
+        # pptrepair.gui.i18n never imports PySide6, so this stays
+        # importable even in the environment that just failed above.
+        from pptrepair.gui.i18n import tr
         print(
-            "pptrepair: error: PySide6 is not installed. Install the "
-            "GUI extra with: pip install 'pptrepair[gui]'",
+            tr("pptrepair: error: PySide6 is not installed. Install the "
+               "GUI extra with: pip install 'pptrepair[gui]'"),
             file=sys.stderr,
         )
         return EXIT_ERROR

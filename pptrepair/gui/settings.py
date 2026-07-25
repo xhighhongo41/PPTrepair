@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 # MB/GB convention as the main run panel. Importing these private
 # names is an intentional same-package reuse (see run_options.py),
 # not a public API; RepairMode is that module's public enum.
+from pptrepair.gui.i18n import tr
 from pptrepair.gui.run_options import (
     _UNIT_FACTORS,
     RepairMode,
@@ -45,8 +46,10 @@ from pptrepair.gui.run_options import (
 )
 
 #: Supported UI languages: code -> display name, in the order the
-#: language combo box lists them. Only saved for now; the actual
-#: translation switch is planned for a later milestone.
+#: language combo box lists them. Display names are always shown in
+#: their own language, never translated. A stored choice only takes
+#: effect after the application restarts (see
+#: :mod:`pptrepair.gui.i18n`).
 _LANGUAGE_NAMES = {
     "en": "English",
     "ja": "日本語",
@@ -269,9 +272,8 @@ class SettingsDialog(QDialog):
     writes every control's current value back through *settings*.
     Cancelling (or otherwise closing) the dialog discards any
     in-dialog edits -- *settings* itself is left untouched until
-    :meth:`accept` runs. All user-facing strings are plain English
-    literals for now, matching the rest of the GUI; gettext-based
-    translation is planned for a later milestone.
+    :meth:`accept` runs. Every user-facing string is passed through
+    :func:`~pptrepair.gui.i18n.tr`.
     """
 
     def __init__(
@@ -283,17 +285,17 @@ class SettingsDialog(QDialog):
         :param parent: optional Qt parent widget.
         """
         super().__init__(parent)
-        self.setWindowTitle("Preferences")
+        self.setWindowTitle(tr("Preferences"))
         self._settings = settings
 
         self._language_combo = self._build_language_combo()
         (self._size_spin, self._unit_combo,
          self._no_limit_check) = self._build_size_controls()
-        self._download_check = QCheckBox("Download cloud-only files")
+        self._download_check = QCheckBox(tr("Download cloud-only files"))
         self._symlinks_check = QCheckBox(
-            "Follow symbolic links while walking")
+            tr("Follow symbolic links while walking"))
         self._filenames_check = QCheckBox(
-            "Include file basenames in diagnostic fingerprints")
+            tr("Include file basenames in diagnostic fingerprints"))
         (self._in_place_radio, self._into_folder_radio,
          self._output_edit, self._browse_button,
          self._output_group) = self._build_output_controls()
@@ -320,7 +322,7 @@ class SettingsDialog(QDialog):
         spin.setRange(1, 9999)
         unit = QComboBox()
         unit.addItems(["MB", "GB"])
-        no_limit = QCheckBox("No limit")
+        no_limit = QCheckBox(tr("No limit"))
         return spin, unit, no_limit
 
     def _build_output_controls(
@@ -332,8 +334,8 @@ class SettingsDialog(QDialog):
         layout, but edits the *stored default* rather than one run's
         live choice.
         """
-        in_place = QRadioButton("Repair in place")
-        into_folder = QRadioButton("Repair into folder:")
+        in_place = QRadioButton(tr("Repair in place"))
+        into_folder = QRadioButton(tr("Repair into folder:"))
 
         group = QButtonGroup(self)
         group.addButton(in_place)
@@ -341,10 +343,10 @@ class SettingsDialog(QDialog):
 
         output_edit = QLineEdit()
         output_edit.setReadOnly(True)
-        output_edit.setPlaceholderText("(choose a destination folder)")
-        browse_button = QPushButton("Browse…")
+        output_edit.setPlaceholderText(tr("(choose a destination folder)"))
+        browse_button = QPushButton(tr("Browse…"))
 
-        box = QGroupBox("Default Output")
+        box = QGroupBox(tr("Default Output"))
         box_layout = QGridLayout(box)
         box_layout.addWidget(in_place, 0, 0, 1, 3)
         box_layout.addWidget(into_folder, 1, 0)
@@ -356,8 +358,8 @@ class SettingsDialog(QDialog):
     def _build_mode_combo(self) -> QComboBox:
         """Return the default-repair-mode combo, tagged with its enum."""
         combo = QComboBox()
-        combo.addItem("Single-file repair", RepairMode.SINGLE)
-        combo.addItem("Multi-source repair", RepairMode.MULTI)
+        combo.addItem(tr("Single-file repair"), RepairMode.SINGLE)
+        combo.addItem(tr("Multi-source repair"), RepairMode.MULTI)
         return combo
 
     def _build_layout(self) -> None:
@@ -365,13 +367,13 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
 
         language_row = QHBoxLayout()
-        language_row.addWidget(QLabel("Language:"))
+        language_row.addWidget(QLabel(tr("Language:")))
         language_row.addWidget(self._language_combo)
         language_row.addStretch(1)
         layout.addLayout(language_row)
 
         size_row = QHBoxLayout()
-        size_row.addWidget(QLabel("Max file size:"))
+        size_row.addWidget(QLabel(tr("Max file size:")))
         size_row.addWidget(self._size_spin)
         size_row.addWidget(self._unit_combo)
         size_row.addWidget(self._no_limit_check)
@@ -385,7 +387,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._output_group)
 
         mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("Default repair mode:"))
+        mode_row.addWidget(QLabel(tr("Default repair mode:")))
         mode_row.addWidget(self._mode_combo)
         mode_row.addStretch(1)
         layout.addLayout(mode_row)
@@ -409,7 +411,7 @@ class SettingsDialog(QDialog):
     def _choose_output_dir(self) -> None:
         """Prompt for a default destination folder and select its radio."""
         directory = QFileDialog.getExistingDirectory(
-            self, "Default Output Folder")
+            self, tr("Default Output Folder"))
         if directory:
             self._output_edit.setText(directory)
             self._into_folder_radio.setChecked(True)

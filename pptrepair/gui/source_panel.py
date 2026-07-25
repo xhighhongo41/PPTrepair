@@ -24,15 +24,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pptrepair.gui.i18n import tr
 from pptrepair.gui.sources import SourceListModel
 
-#: Filter string offered by the "Add Files…" dialog: PowerPoint
-#: targets first, then every archive suffix :mod:`pptrepair.archive`
-#: recognises, then an unrestricted fallback.
-_FILE_DIALOG_FILTER = (
-    "PowerPoint files / archives (*.pptx *.pptm *.zip *.tar *.tar.gz "
-    "*.tgz *.tar.bz2 *.tar.xz);;All files (*)"
-)
+
+def _file_dialog_filter() -> str:
+    """Return the "Add Files…" dialog's filter string.
+
+    PowerPoint targets first, then every archive suffix
+    :mod:`pptrepair.archive` recognises, then an unrestricted fallback.
+    Built at call time (rather than as a module-level constant) so its
+    two category labels always reflect the currently active language.
+    """
+    return (
+        f"{tr('PowerPoint files / archives')} (*.pptx *.pptm *.zip *.tar "
+        f"*.tar.gz *.tgz *.tar.bz2 *.tar.xz);;{tr('All files')} (*)"
+    )
 
 
 class SourcePanel(QWidget):
@@ -85,7 +92,7 @@ class SourcePanel(QWidget):
 
     def _build_placeholder(self) -> QLabel:
         """Return the empty-state placeholder label."""
-        placeholder = QLabel("Drop PowerPoint files or folders here")
+        placeholder = QLabel(tr("Drop PowerPoint files or folders here"))
         placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         placeholder.setStyleSheet(
             "border: 2px dashed gray; border-radius: 8px; color: gray;"
@@ -105,19 +112,19 @@ class SourcePanel(QWidget):
         """Return the "Add Files…"/"Add Folder…"/remove/clear row."""
         row = QHBoxLayout()
 
-        add_files_button = QPushButton("Add Files…")
+        add_files_button = QPushButton(tr("Add Files…"))
         add_files_button.clicked.connect(self.add_files)
         row.addWidget(add_files_button)
 
-        add_folder_button = QPushButton("Add Folder…")
+        add_folder_button = QPushButton(tr("Add Folder…"))
         add_folder_button.clicked.connect(self.add_folder)
         row.addWidget(add_folder_button)
 
-        remove_button = QPushButton("Remove Selected")
+        remove_button = QPushButton(tr("Remove Selected"))
         remove_button.clicked.connect(self.remove_selected)
         row.addWidget(remove_button)
 
-        clear_button = QPushButton("Clear All")
+        clear_button = QPushButton(tr("Clear All"))
         clear_button.clicked.connect(self._model.clear)
         row.addWidget(clear_button)
 
@@ -141,7 +148,7 @@ class SourcePanel(QWidget):
         confirmed, so the host window can report the outcome.
         """
         file_names, _selected_filter = QFileDialog.getOpenFileNames(
-            self, "Add Files", "", _FILE_DIALOG_FILTER
+            self, tr("Add Files"), "", _file_dialog_filter()
         )
         if file_names:
             result = self._model.add_paths(Path(name) for name in file_names)
@@ -154,7 +161,7 @@ class SourcePanel(QWidget):
         :class:`~pptrepair.gui.sources.AddResult` when the dialog was
         confirmed, so the host window can report the outcome.
         """
-        directory = QFileDialog.getExistingDirectory(self, "Add Folder")
+        directory = QFileDialog.getExistingDirectory(self, tr("Add Folder"))
         if directory:
             result = self._model.add_paths([Path(directory)])
             self.sources_added.emit(result)

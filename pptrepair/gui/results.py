@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from pptrepair.batch import BatchItem, BatchResult
 from pptrepair.classify import Verdict
+from pptrepair.gui.i18n import tr
 from pptrepair.gui.worker import (
     GuiScanResult,
     MergeItemOutcome,
@@ -94,10 +95,15 @@ def _row_for_outcome(outcome: FileOutcome) -> _ResultRow:
     """Build the table row for one on-disk :class:`FileOutcome`."""
     path_text = str(outcome.path)
     if outcome.diagnosis is None:
-        # Pipeline failure: no verdict, only an error message.
-        return _ResultRow(path_text, "error", outcome.error or "", "error")
+        # Pipeline failure: no verdict, only an error message. The
+        # Status text is translated; the trailing "error" is the
+        # (untranslated) colour-bucket category key.
+        return _ResultRow(
+            path_text, tr("error"), outcome.error or "", "error")
     verdict = outcome.diagnosis.verdict
     if verdict == Verdict.NORMAL:
+        # verdict.value is a machine-facing code shared with the CLI
+        # (see pptrepair.classify.Verdict) and is never translated.
         return _ResultRow(path_text, verdict.value, "", "normal")
     evidence = outcome.diagnosis.evidence
     detail = evidence[0] if evidence else ""
@@ -108,16 +114,16 @@ def _skip_rows(walk: WalkResult) -> list[_ResultRow]:
     """Build the skipped/error rows from a discovery :class:`WalkResult`."""
     rows: list[_ResultRow] = []
     skip_labels = (
-        (walk.skipped_oversize, "skipped (size limit)"),
-        (walk.skipped_cloud, "skipped (cloud-only)"),
-        (walk.skipped_legacy, "skipped (legacy .ppt)"),
-        (walk.skipped_temp, "skipped (temp file)"),
+        (walk.skipped_oversize, tr("skipped (size limit)")),
+        (walk.skipped_cloud, tr("skipped (cloud-only)")),
+        (walk.skipped_legacy, tr("skipped (legacy .ppt)")),
+        (walk.skipped_temp, tr("skipped (temp file)")),
     )
     for paths, label in skip_labels:
         for path in paths:
             rows.append(_ResultRow(str(path), label, "", "skipped"))
     for path, message in walk.errors:
-        rows.append(_ResultRow(str(path), "error", message, "error"))
+        rows.append(_ResultRow(str(path), tr("error"), message, "error"))
     return rows
 
 
@@ -129,7 +135,7 @@ def _row_for_material(material: ArchiveMaterial) -> _ResultRow:
         detail = material.error or ""
     # Donor material is always named through its "<archive>::<member>"
     # label, never the temporary path it was briefly extracted to.
-    return _ResultRow(material.display(), "material", detail, "material")
+    return _ResultRow(material.display(), tr("material"), detail, "material")
 
 
 def _build_rows(result: GuiScanResult) -> list[_ResultRow]:
@@ -165,8 +171,9 @@ def _twin_candidate_label(path: Path, candidate: TwinCandidate) -> str:
 
 def _lineage_candidate_label(path: Path, candidate: _LineageCandidate) -> str:
     """Render one lineage-candidate item's text, with its lineage score."""
-    return (f"{path} → {candidate.display} "
-            f"(score {candidate.score.lineage_score:.2f})")
+    score_text = tr("(score {score})").format(
+        score=f"{candidate.score.lineage_score:.2f}")
+    return f"{path} → {candidate.display} {score_text}"
 
 
 def _build_twin_branch(
@@ -175,7 +182,7 @@ def _build_twin_branch(
     """Return the "Twin candidates" top-level item, or None when empty."""
     if not twin_map:
         return None
-    root = QTreeWidgetItem(["Twin candidates"])
+    root = QTreeWidgetItem([tr("Twin candidates")])
     for path, candidates in twin_map.items():
         for candidate in candidates:
             QTreeWidgetItem(root, [_twin_candidate_label(path, candidate)])
@@ -188,7 +195,7 @@ def _build_lineage_branch(
     """Return the "Lineage candidates" top-level item, or None when empty."""
     if not lineage_map:
         return None
-    root = QTreeWidgetItem(["Lineage candidates"])
+    root = QTreeWidgetItem([tr("Lineage candidates")])
     for path, candidates in lineage_map.items():
         for candidate in candidates:
             QTreeWidgetItem(
@@ -204,9 +211,10 @@ def _build_merge_branch(groups: list[dict]) -> QTreeWidgetItem | None:
     """
     if not groups:
         return None
-    root = QTreeWidgetItem(["Merge groups"])
+    root = QTreeWidgetItem([tr("Merge groups")])
     for group in groups:
-        group_item = QTreeWidgetItem(root, [f"group (size {group['size']})"])
+        group_item = QTreeWidgetItem(
+            root, [tr("group (size {size})").format(size=group['size'])])
         for merge_file in group["files"]:
             QTreeWidgetItem(group_item, [merge_file.display])
     return root
@@ -318,9 +326,10 @@ class ScanResultsModel(QAbstractTableModel):
             return None
         if orientation != Qt.Orientation.Horizontal:
             return None
-        if not (0 <= section < len(_COLUMNS)):
+        labels = (tr("Path"), tr("Status"), tr("Detail"))
+        if not (0 <= section < len(labels)):
             return None
-        return _COLUMNS[section]
+        return labels[section]
 
 
 # --------------------------------------------------------------------------
@@ -367,7 +376,11 @@ def _repair_row_for_item(item: BatchItem) -> _RepairRow:
     mode in parentheses (e.g. ``"repaired (rebuild)"``) when the repair
     actually ran, and ``"skipped_existing"`` reads as
     ``"skipped (exists)"``. ``"unrepairable"``/``"failed"`` and the
-    dry-run-only ``"planned"`` action are shown as-is.
+    dry-run-only ``"planned"`` action are shown as-is. Like the Status
+    column's verdict codes, these action/mode words stay untranslated,
+    matching :mod:`pptrepair.report_batch`'s own convention of keeping
+    action and mode codes locale-independent (only their surrounding
+    count labels are translated).
     """
     source = str(item.source.path)
     output = str(item.planned_output) if item.planned_output is not None else ""
@@ -541,9 +554,10 @@ class RepairResultsModel(QAbstractTableModel):
             return None
         if orientation != Qt.Orientation.Horizontal:
             return None
-        if not (0 <= section < len(_REPAIR_COLUMNS)):
+        labels = (tr("Source"), tr("Action"), tr("Output"))
+        if not (0 <= section < len(labels)):
             return None
-        return _REPAIR_COLUMNS[section]
+        return labels[section]
 
 
 def _repair_summary_text(result: BatchResult) -> str:
@@ -553,11 +567,13 @@ def _repair_summary_text(result: BatchResult) -> str:
     ``", failed {n}"`` only when at least one repair attempt failed.
     """
     counts = result.counts()
-    text = (f"Repaired {counts['repaired']}, "
-            f"unrepairable {counts['unrepairable']}, "
-            f"skipped {counts['skipped_existing']}")
+    text = tr("Repaired {repaired}, unrepairable {unrepairable}, "
+              "skipped {skipped}").format(
+        repaired=counts['repaired'],
+        unrepairable=counts['unrepairable'],
+        skipped=counts['skipped_existing'])
     if counts["failed"]:
-        text += f", failed {counts['failed']}"
+        text += tr(", failed {n}").format(n=counts['failed'])
     return text
 
 
@@ -572,13 +588,14 @@ def _multi_repair_summary_text(result: MultiRepairResult) -> str:
     repaired = sum(1 for outcome in result.fallbacks if outcome.success)
     fallback_failed = len(result.fallbacks) - repaired
 
-    parts = [f"Merged {merged}"]
+    parts = [tr("Merged {n}").format(n=merged)]
     if merge_failed:
-        parts.append(f"merge failed {merge_failed}")
+        parts.append(tr("merge failed {n}").format(n=merge_failed))
     if result.fallbacks:
-        parts.append(f"fallback repaired {repaired}")
+        parts.append(tr("fallback repaired {n}").format(n=repaired))
         if fallback_failed:
-            parts.append(f"fallback failed {fallback_failed}")
+            parts.append(
+                tr("fallback failed {n}").format(n=fallback_failed))
     return ", ".join(parts)
 
 
@@ -604,23 +621,20 @@ def _summary_text(result: GuiScanResult) -> str:
                    + len(walk.errors))
     materials = len(result.materials)
 
-    head = f"Scanned {scanned} file(s): {corrupted} corrupted, {intact} intact"
+    head = tr("Scanned {n} file(s): {corrupted} corrupted, "
+              "{intact} intact").format(
+        n=scanned, corrupted=corrupted, intact=intact)
     if errors:
-        head += f", {errors} error(s)"
+        head += tr(", {n} error(s)").format(n=errors)
 
     tail: list[str] = []
     if skipped:
-        tail.append(f"{skipped} skipped")
+        tail.append(tr("{n} skipped").format(n=skipped))
     if materials:
-        tail.append(f"{materials} archive material(s)")
+        tail.append(tr("{n} archive material(s)").format(n=materials))
     if tail:
         return f"{head} — {', '.join(tail)}"
     return head
-
-
-#: Placeholder text shown on the Candidates tab when a scan found no
-#: twin, lineage or merge candidates at all.
-_NO_CANDIDATES_TEXT = "(no candidates found)"
 
 
 class ResultsPanel(QWidget):
@@ -656,9 +670,9 @@ class ResultsPanel(QWidget):
         self._repair_table = self._build_repair_table()
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._table, "Files")
-        self._tabs.addTab(self._candidates_stack, "Candidates")
-        self._tabs.addTab(self._repair_table, "Repair")
+        self._tabs.addTab(self._table, tr("Files"))
+        self._tabs.addTab(self._candidates_stack, tr("Candidates"))
+        self._tabs.addTab(self._repair_table, tr("Repair"))
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._summary_label)
@@ -699,7 +713,7 @@ class ResultsPanel(QWidget):
         self._candidates_tree = QTreeWidget()
         self._candidates_tree.setHeaderHidden(True)
 
-        self._candidates_placeholder = QLabel(_NO_CANDIDATES_TEXT)
+        self._candidates_placeholder = QLabel(tr("(no candidates found)"))
         self._candidates_placeholder.setAlignment(
             Qt.AlignmentFlag.AlignCenter)
 

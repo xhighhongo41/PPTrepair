@@ -14,14 +14,17 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
 import pptrepair
+from pptrepair.gui.i18n import set_language
 from pptrepair.gui.main_window import MainWindow
+from pptrepair.gui.settings import Settings
 
 
 def main() -> int:
     """Run the PPTrepair desktop application.
 
-    Creates the :class:`~PySide6.QtWidgets.QApplication`, shows the
-    main window and runs the Qt event loop to completion.
+    Creates the :class:`~PySide6.QtWidgets.QApplication`, applies the
+    persisted UI language, shows the main window and runs the Qt event
+    loop to completion.
 
     :returns: the Qt event loop's exit code, suitable for use as the
         process exit code.
@@ -33,6 +36,12 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("PPTrepair")
     app.setApplicationVersion(pptrepair.__version__)
+
+    # Must run before any widget is built (see
+    # pptrepair.gui.i18n.set_language's threading/ordering contract);
+    # the GUI never retranslates widgets already on screen, so this is
+    # the only place the language is applied.
+    set_language(Settings().language())
 
     window = MainWindow()
     window.show()

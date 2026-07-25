@@ -2,9 +2,11 @@
 """Extract translatable message ids from the pptrepair source tree.
 
 Collects every string literal passed to a call of a function named
-``tr`` (the translator callable convention used across the code base)
-via AST analysis, plus the known dynamic message tables that reach
-``tr()`` through a variable:
+``tr`` (the translator callable convention used across the code base --
+both the core CLI's :func:`pptrepair.i18n.get_translator` result and
+the GUI's :func:`pptrepair.gui.i18n.tr`) via AST analysis, scanning
+``pptrepair/*.py`` and ``pptrepair/gui/*.py``, plus the known dynamic
+message tables that reach ``tr()`` through a variable:
 
 * ``pptrepair.report.VERDICT_LABELS`` values,
 * the field labels of ``pptrepair.extract._CORE_FIELDS``.
@@ -89,7 +91,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="write a .pot template to FILE")
     args = parser.parse_args(argv)
 
-    msgids = sorted(literal_msgids(PACKAGE_DIR) | dynamic_msgids())
+    msgids = sorted(
+        literal_msgids(PACKAGE_DIR)
+        | literal_msgids(PACKAGE_DIR / "gui")
+        | dynamic_msgids())
     for msgid in msgids:
         print(msgid)
     print(f"-- {len(msgids)} message(s)", file=sys.stderr)

@@ -17,6 +17,33 @@ msgstr ""
 msgid "  {size} bytes: {files}"
 msgstr ""
 
+msgid " [archive]"
+msgstr ""
+
+msgid " [folder]"
+msgstr ""
+
+msgid "(choose a destination folder)"
+msgstr ""
+
+msgid "(empty)"
+msgstr ""
+
+msgid "(no candidates found)"
+msgstr ""
+
+msgid "(no donors found — will fall back to single-file repair)"
+msgstr ""
+
+msgid "(score {score})"
+msgstr ""
+
+msgid ", failed {n}"
+msgstr ""
+
+msgid ", {n} error(s)"
+msgstr ""
+
 msgid "=== Merge summary ==="
 msgstr ""
 
@@ -29,10 +56,70 @@ msgstr ""
 msgid "=== Scan summary ==="
 msgstr ""
 
+msgid "About PPTrepair"
+msgstr ""
+
+msgid "Action"
+msgstr ""
+
+msgid "Add Files"
+msgstr ""
+
+msgid "Add Files…"
+msgstr ""
+
+msgid "Add Folder"
+msgstr ""
+
+msgid "Add Folder…"
+msgstr ""
+
+msgid "Added {n} source(s)"
+msgstr ""
+
+msgid "All files"
+msgstr ""
+
+msgid "Archives are used only by multi-source repair; ignored in this mode"
+msgstr ""
+
+msgid "Auto-tier donors are byte-identical copies and are selected by default. Candidate- and lineage-tier donors are only cross-checked entry by entry, not proven identical, so review them before including them."
+msgstr ""
+
+msgid "Browse…"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Cancelling…"
+msgstr ""
+
 msgid "Candidate-tier source not used: {path} (pass --allow-candidate, --yes, or confirm the prompt to include it)"
 msgstr ""
 
+msgid "Candidates"
+msgstr ""
+
 msgid "Category"
+msgstr ""
+
+msgid "Checking {name}"
+msgstr ""
+
+msgid "Checking… {n} file(s)"
+msgstr ""
+
+msgid "Choose an output folder before repairing, or switch to \"Repair in place\"."
+msgstr ""
+
+msgid "Clear All"
+msgstr ""
+
+msgid "Clear Menu"
+msgstr ""
+
+msgid "Clear Sources"
 msgstr ""
 
 msgid "Corrupted files:"
@@ -44,10 +131,37 @@ msgstr ""
 msgid "Creator"
 msgstr ""
 
+msgid "Default Output"
+msgstr ""
+
+msgid "Default Output Folder"
+msgstr ""
+
+msgid "Default repair mode:"
+msgstr ""
+
+msgid "Detail"
+msgstr ""
+
+msgid "Diagnose and repair PowerPoint files corrupted while stored on OneDrive."
+msgstr ""
+
+msgid "Diagnosed {name}"
+msgstr ""
+
 msgid "Diagnostic fingerprints were written to {path}; please attach them to a new issue at {url}."
 msgstr ""
 
+msgid "Download cloud-only files"
+msgstr ""
+
 msgid "Downloading cloud-only file: {path}"
+msgstr ""
+
+msgid "Downloading {name}…"
+msgstr ""
+
+msgid "Drop PowerPoint files or folders here"
 msgstr ""
 
 msgid "Encrypted or legacy Office file(s) (not attempted): {n}"
@@ -68,7 +182,19 @@ msgstr ""
 msgid "Failed: {n} file(s)"
 msgstr ""
 
+msgid "File"
+msgstr ""
+
+msgid "Files"
+msgstr ""
+
+msgid "Follow symbolic links while walking"
+msgstr ""
+
 msgid "Guarantee: {guarantee}"
+msgstr ""
+
+msgid "Help"
 msgstr ""
 
 msgid "Hint: OneDrive's web version history may hold an older intact copy of this file."
@@ -89,7 +215,22 @@ msgstr ""
 msgid "Images carved: {n}"
 msgstr ""
 
+msgid "Include file basenames in diagnostic fingerprints"
+msgstr ""
+
+msgid "Language change takes effect after restart"
+msgstr ""
+
+msgid "Language:"
+msgstr ""
+
 msgid "Last Modified By"
+msgstr ""
+
+msgid "Licensed under the GNU General Public License v3.0."
+msgstr ""
+
+msgid "Lineage candidates"
 msgstr ""
 
 msgid "Lineage score: {value}"
@@ -104,10 +245,28 @@ msgstr ""
 msgid "Lost slides: {numbers}"
 msgstr ""
 
+msgid "Max file size:"
+msgstr ""
+
 msgid "Media ratio: {pct}%"
 msgstr ""
 
 msgid "Merge candidates:"
+msgstr ""
+
+msgid "Merge groups"
+msgstr ""
+
+msgid "Merged {n}"
+msgstr ""
+
+msgid "Merging…"
+msgstr ""
+
+msgid "Merging… {done}/{total}"
+msgstr ""
+
+msgid "Mined {name}"
 msgstr ""
 
 msgid "Mode: {mode}"
@@ -116,13 +275,25 @@ msgstr ""
 msgid "Modified"
 msgstr ""
 
+msgid "Multi-source repair"
+msgstr ""
+
 msgid "Name ratio: {pct}%"
 msgstr ""
 
 msgid "No content survives: {n} file(s)"
 msgstr ""
 
+msgid "No limit"
+msgstr ""
+
+msgid "No output folder"
+msgstr ""
+
 msgid "No slide-title heading found; listing all recovered title strings:"
+msgstr ""
+
+msgid "No sources added"
 msgstr ""
 
 msgid "Not examined: {n} cloud-only file(s) were skipped without downloading."
@@ -146,10 +317,19 @@ msgstr ""
 msgid "Nothing could be salvaged from this file."
 msgstr ""
 
+msgid "Nothing to repair"
+msgstr ""
+
 msgid "Nothing to repair: the file is already an intact PowerPoint package."
 msgstr ""
 
 msgid "Nothing to salvage: the file is already an intact PowerPoint package."
+msgstr ""
+
+msgid "Open Output Folder"
+msgstr ""
+
+msgid "Output"
 msgstr ""
 
 msgid "Output: {path}"
@@ -158,16 +338,40 @@ msgstr ""
 msgid "Partial XML parts: {n}"
 msgstr ""
 
+msgid "Path"
+msgstr ""
+
 msgid "Planned: {n} file(s)"
+msgstr ""
+
+msgid "PowerPoint files / archives"
 msgstr ""
 
 msgid "PowerPoint may offer a one-time repair on first open."
 msgstr ""
 
+msgid "Preferences"
+msgstr ""
+
+msgid "Preferences…"
+msgstr ""
+
+msgid "Quit"
+msgstr ""
+
 msgid "Re-check verdict: {verdict}"
 msgstr ""
 
+msgid "Ready"
+msgstr ""
+
+msgid "Recent Folders"
+msgstr ""
+
 msgid "Reference integrity: {n} unresolved reference(s) in {m} part(s)"
+msgstr ""
+
+msgid "Remove Selected"
 msgstr ""
 
 msgid "Removed {e} stale reference(s) from {p} rebuilt part(s)."
@@ -176,10 +380,55 @@ msgstr ""
 msgid "Removed {n} bytes of foreign data that followed the archive; the leading archive was kept unmodified."
 msgstr ""
 
+msgid "Repair"
+msgstr ""
+
+msgid "Repair Into Folder"
+msgstr ""
+
+msgid "Repair cancelled"
+msgstr ""
+
+msgid "Repair failed"
+msgstr ""
+
+msgid "Repair failed: {message}"
+msgstr ""
+
+msgid "Repair in place"
+msgstr ""
+
+msgid "Repair into folder:"
+msgstr ""
+
+msgid "Repair mode:"
+msgstr ""
+
+msgid "Repaired {name}"
+msgstr ""
+
+msgid "Repaired {repaired}, unrepairable {unrepairable}, skipped {skipped}"
+msgstr ""
+
 msgid "Repaired: {n} file(s)"
 msgstr ""
 
+msgid "Repairing…"
+msgstr ""
+
+msgid "Repairing… {done}/{total}"
+msgstr ""
+
+msgid "Repairing… {n} file(s) processed"
+msgstr ""
+
 msgid "Repairs:"
+msgstr ""
+
+msgid "Review the donors for each corrupted file, then click Repair."
+msgstr ""
+
+msgid "Run"
 msgstr ""
 
 msgid "Salvageable: {entries_ok}/{entries_total} entries, {slides_ok}/{slides_total} slides"
@@ -188,10 +437,37 @@ msgstr ""
 msgid "Salvaged entries: {ok} of {total}"
 msgstr ""
 
+msgid "Scan"
+msgstr ""
+
+msgid "Scan cancelled"
+msgstr ""
+
+msgid "Scan failed"
+msgstr ""
+
+msgid "Scan failed: {message}"
+msgstr ""
+
+msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
+msgstr ""
+
 msgid "Scanned: {n} file(s)"
 msgstr ""
 
+msgid "Scanning…"
+msgstr ""
+
+msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
+msgstr ""
+
 msgid "Series"
+msgstr ""
+
+msgid "Settings"
+msgstr ""
+
+msgid "Single-file repair"
 msgstr ""
 
 msgid "Size match: {value}"
@@ -215,10 +491,19 @@ msgstr ""
 msgid "Slides recovered: {ok} of {total}"
 msgstr ""
 
+msgid "Source"
+msgstr ""
+
 msgid "Source not used (not the same origin): {path}"
 msgstr ""
 
 msgid "Source: {path}"
+msgstr ""
+
+msgid "Sources changed — please scan again"
+msgstr ""
+
+msgid "Status"
 msgstr ""
 
 msgid "Structure integrity: {n} required relationship(s) missing"
@@ -227,10 +512,19 @@ msgstr ""
 msgid "Text lines recovered: {n}"
 msgstr ""
 
+msgid "The last scan found no corrupted files to repair."
+msgstr ""
+
 msgid "The merge target cannot be a file inside an archive: {path}. Extract it to a plain file and pass that instead."
 msgstr ""
 
 msgid "The recovery folder groups salvaged content by kind: images/ and media/ hold pictures, audio and video; texts/ holds best-effort recovered text; charts/ holds chart XML plus cached data; parts/ holds every salvaged part in its original, raw form."
+msgstr ""
+
+msgid "The repair stopped unexpectedly:\n{message}"
+msgstr ""
+
+msgid "The scan stopped unexpectedly:\n{message}"
 msgstr ""
 
 msgid "Tier: {tier}"
@@ -243,6 +537,9 @@ msgid "Title"
 msgstr ""
 
 msgid "Triple ratio: {pct}%"
+msgstr ""
+
+msgid "Twin candidates"
 msgstr ""
 
 msgid "Unknown pattern: {n} file(s) did not match any known corruption pattern."
@@ -308,13 +605,37 @@ msgstr ""
 msgid "dry run: nothing was written."
 msgstr ""
 
+msgid "error"
+msgstr ""
+
+msgid "fallback failed {n}"
+msgstr ""
+
+msgid "fallback repaired {n}"
+msgstr ""
+
+msgid "group (size {size})"
+msgstr ""
+
 msgid "intact PowerPoint package"
+msgstr ""
+
+msgid "material"
+msgstr ""
+
+msgid "merge failed {n}"
+msgstr ""
+
+msgid "merge failed: no output could be reconstructed"
 msgstr ""
 
 msgid "no {required} relationship"
 msgstr ""
 
 msgid "not a ZIP-based file"
+msgstr ""
+
+msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
 msgstr ""
 
 msgid "same name and size"
@@ -324,4 +645,28 @@ msgid "same name only"
 msgstr ""
 
 msgid "same size only"
+msgstr ""
+
+msgid "skipped (cloud-only)"
+msgstr ""
+
+msgid "skipped (legacy .ppt)"
+msgstr ""
+
+msgid "skipped (size limit)"
+msgstr ""
+
+msgid "skipped (temp file)"
+msgstr ""
+
+msgid "{n} archive material(s)"
+msgstr ""
+
+msgid "{n} duplicate(s) skipped"
+msgstr ""
+
+msgid "{n} skipped"
+msgstr ""
+
+msgid "{n} unsupported item(s) rejected"
 msgstr ""
