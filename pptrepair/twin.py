@@ -16,9 +16,10 @@ scan report -- that integration is a separate task.
 from __future__ import annotations
 
 import posixpath
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Sequence
+from typing import TYPE_CHECKING
 
 from pptrepair.classify import Verdict
 from pptrepair.scan import FileOutcome
@@ -118,7 +119,7 @@ class TwinIndex:
 
 def build_twin_index(
     outcomes: Iterable[FileOutcome],
-    materials: "Sequence[ArchiveMaterial]" = (),
+    materials: Sequence[ArchiveMaterial] = (),
 ) -> TwinIndex:
     """Build a :class:`TwinIndex` from *outcomes* and optional *materials*.
 

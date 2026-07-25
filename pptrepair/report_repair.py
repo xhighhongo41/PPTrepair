@@ -7,7 +7,8 @@ small; see :mod:`pptrepair.cli_single` for the caller.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from pptrepair.classify import Verdict
 from pptrepair.report_common import VERDICT_LABELS
@@ -16,7 +17,7 @@ if TYPE_CHECKING:  # avoid runtime import cycles with repair
     from pptrepair.repair import RepairOutcome
 
 
-def render_repair_text(outcome: "RepairOutcome",
+def render_repair_text(outcome: RepairOutcome,
                        tr: Callable[[str], str]) -> str:
     """Render one repair outcome as a human-readable, translated report.
 
@@ -145,7 +146,7 @@ def render_repair_text(outcome: "RepairOutcome",
     return "\n".join(lines)
 
 
-def render_repair_json(outcome: "RepairOutcome") -> str:
+def render_repair_json(outcome: RepairOutcome) -> str:
     """Render a repair outcome as a language-neutral JSON object.
 
     Schema (stable for tests)::

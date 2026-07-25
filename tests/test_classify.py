@@ -11,8 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pptrepair.census import CensusResult, EntryResult
-from pptrepair.classify import (CFB_EVIDENCE, HEAD_ZERO_MIN_LENGTH, Verdict,
-                                classify)
+from pptrepair.classify import CFB_EVIDENCE, HEAD_ZERO_MIN_LENGTH, Verdict, classify
 from pptrepair.scanner import EocdInfo, ZeroRun, ZipStructure
 
 DUMMY_PATH = Path("dummy.pptx")

@@ -17,8 +17,13 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from fixtures import (append_foreign_tail, build_minimal_pptx, truncate,
-                      zero_interior_entry, zero_prefix)
+from fixtures import (
+    append_foreign_tail,
+    build_minimal_pptx,
+    truncate,
+    zero_interior_entry,
+    zero_prefix,
+)
 
 from pptrepair.census import from_central_directory, from_lfh_scan
 from pptrepair.classify import Diagnosis, Verdict, classify
@@ -401,8 +406,8 @@ def _add_theme_relationship_to_slide_master(data: bytes) -> bytes:
     original = contents[part].decode("utf-8")
     injected = original.replace(
         "</Relationships>",
-        '<Relationship Id="rIdTheme" Type="{}/theme" '
-        'Target="../theme/theme1.xml"/></Relationships>'.format(_R_NS),
+        f'<Relationship Id="rIdTheme" Type="{_R_NS}/theme" '
+        'Target="../theme/theme1.xml"/></Relationships>',
         1,
     )
     assert injected != original, "injection anchor not found in fixture"

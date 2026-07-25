@@ -295,8 +295,11 @@ def materialize(
     is_zip = _is_zip_archive(archive_path)
 
     try:
+        # The handle is context-managed by the ``with opener:`` below;
+        # assignment and open are split only so open-time damage can be
+        # reported as a note instead of aborting the whole batch.
         opener = (zipfile.ZipFile(archive_path) if is_zip
-                  else tarfile.open(archive_path, mode="r:*"))
+                  else tarfile.open(archive_path, mode="r:*"))  # noqa: SIM115
     except Exception as exc:
         # Broad for the same reason as in list_members: opening a
         # compressed tar already reads its first blocks, so mid-stream

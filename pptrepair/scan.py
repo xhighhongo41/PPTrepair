@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import json
 import tempfile
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
 
 from pptrepair.archive import ArchiveMember, list_members, materialize
 from pptrepair.census import from_central_directory, from_lfh_scan
@@ -168,6 +168,7 @@ def diagnose_archive_materials(
     archives: Sequence[Path], *,
     on_download: Callable[[Path], None] | None = None,
     download_targets: Sequence[Path] = (),
+    material_progress: Callable[[ArchiveMaterial], None] | None = None,
 ) -> tuple[list[ArchiveMaterial], list[str]]:
     """Enumerate and diagnose the ``.pptx``/``.pptm`` members of *archives*.
 
@@ -189,13 +190,24 @@ def diagnose_archive_materials(
     client downloads it, so the announcement must precede the read,
     exactly as the per-file target loop announces a placeholder target.
 
+    *material_progress* (when given) is invoked once per member that is
+    actually diagnosed (i.e. once per element appended to *materials*),
+    right after that :class:`ArchiveMaterial` is produced -- so a caller
+    can stream progress across a long archive-mining run, or raise to
+    cancel it. Its exception is not caught here and propagates to the
+    caller, exactly like *on_download*'s; see
+    :class:`pptrepair.cancel.OperationCancelled` for the coordinated
+    cancellation contract.
+
     :return: ``(materials, notes)`` -- one :class:`ArchiveMaterial` per
         member that could be extracted (its ``diagnosis`` may still be
         None if the pipeline failed on the member's bytes), plus every
         enumeration/extraction note collected along the way, in
-        encounter order. Never raises: an unreadable archive or member
-        degrades to a note, and the remaining archives/members are still
-        processed.
+        encounter order. An unreadable archive or member degrades to a
+        note on its own, and the remaining archives/members are still
+        processed; the only way out early is a propagated *on_download*
+        or *material_progress* callback exception (the coordinated
+        cancellation contract above).
     """
     materials: list[ArchiveMaterial] = []
     notes: list[str] = []
@@ -223,6 +235,8 @@ def diagnose_archive_materials(
                 materials.append(ArchiveMaterial(
                     archive_path=archive_path, member=member,
                     diagnosis=diagnosis, error=error))
+                if material_progress is not None:
+                    material_progress(materials[-1])
                 # Free the disk/memory footprint before the next member.
                 dest_path.unlink(missing_ok=True)
     return materials, notes
@@ -231,11 +245,11 @@ def diagnose_archive_materials(
 def _apply_exclusions(walk: WalkResult, exclude: Sequence[Path]) -> WalkResult:
     """Return a copy of *walk* with every path under *exclude* removed.
 
-    Applied to all six path buckets (``targets`` / ``skipped_legacy`` /
+    Applied to all seven path buckets (``targets`` / ``skipped_legacy`` /
     ``skipped_temp`` / ``skipped_cloud`` / ``download_targets`` /
-    ``archives``) plus ``errors`` (matched on its path element).
-    *walker* itself is never touched; this only post-filters its output.
-    Comparison resolves
+    ``archives`` / ``skipped_oversize``) plus ``errors`` (matched on its
+    path element). *walker* itself is never touched; this only
+    post-filters its output. Comparison resolves
     both sides with ``Path.resolve()``, a best-effort symlink-following
     normalisation, so an exclusion given as a relative path or through
     a symlinked ancestor still matches.
@@ -260,6 +274,7 @@ def _apply_exclusions(walk: WalkResult, exclude: Sequence[Path]) -> WalkResult:
         archives=_filter(walk.archives),
         errors=[(path, message) for path, message in walk.errors
                if not _is_excluded(path)],
+        skipped_oversize=_filter(walk.skipped_oversize),
     )
 
 
@@ -271,8 +286,10 @@ def scan_paths(roots: Sequence[Path], *,
                include_filenames: bool = False,
                search_archives: bool = False,
                exclude: Sequence[Path] = (),
+               max_file_bytes: int | None = None,
                progress: Callable[[FileOutcome], None] | None = None,
-               on_download: Callable[[Path], None] | None = None
+               on_download: Callable[[Path], None] | None = None,
+               material_progress: Callable[[ArchiveMaterial], None] | None = None
                ) -> ScanResult:
     """Scan *roots* and return the aggregate result.
 
@@ -284,7 +301,10 @@ def scan_paths(roots: Sequence[Path], *,
       (``parents=True``) up front; create ``diagnostics/`` lazily on
       the first fingerprint.
     * Discover targets via :func:`discover_targets` with
-      *follow_symlinks* / *allow_download* passed through.
+      *follow_symlinks* / *allow_download* / *max_file_bytes* passed
+      through; a candidate over the limit is excluded before it ever
+      reaches the diagnosis loop (see ``WalkResult.skipped_oversize``).
+      Left at the default ``None`` this is a complete no-op.
     * *search_archives*: opt-in only. When True, backup archives found
       during the walk are enumerated and their members diagnosed as
       donor *material* (:func:`diagnose_archive_materials`), stored on
@@ -294,6 +314,11 @@ def scan_paths(roots: Sequence[Path], *,
       Left False (the default) this is a complete no-op: no archive is
       collected, opened or diagnosed, and every existing output byte is
       unchanged.
+    * *material_progress* (when given) is forwarded to
+      :func:`diagnose_archive_materials`, which invokes it once per
+      archive member actually diagnosed, right after that member's
+      :class:`ArchiveMaterial` is produced. A no-op whenever
+      *search_archives* is False, or left at the default ``None``.
     * *exclude*: subtrees to leave out of every discovery bucket (e.g.
       a batch driver's own aggregate output directory, which would
       otherwise be diagnosed as part of the very tree it is writing
@@ -322,6 +347,18 @@ def scan_paths(roots: Sequence[Path], *,
     * ``scan_report.txt`` / ``scan_report.json`` are NOT written here;
       the CLI renders them via :mod:`pptrepair.report` so that stdout
       and file output share one implementation.
+
+    Coordinated cancellation: *progress*, *on_download* and
+    *material_progress* may raise to abort the run in progress -- none
+    of their exceptions are caught here, so they propagate to the caller
+    exactly like any other exception. That propagation is the supported,
+    official contract for cooperative cancellation; see
+    :class:`pptrepair.cancel.OperationCancelled`. Every temporary
+    directory this function (or the archive-mining path it calls into)
+    opens is a context manager, so it is always cleaned up whether the
+    run completes or is cancelled partway through; whatever was already
+    written under *report_dir* (created up front, plus any fingerprints
+    written so far) before the cancellation point is left in place.
     """
     if report_dir is not None:
         if report_dir.exists() and not force:
@@ -333,7 +370,8 @@ def scan_paths(roots: Sequence[Path], *,
 
     walk = discover_targets(roots, follow_symlinks=follow_symlinks,
                             allow_download=allow_download,
-                            collect_archives=search_archives)
+                            collect_archives=search_archives,
+                            max_file_bytes=max_file_bytes)
     if exclude:
         walk = _apply_exclusions(walk, exclude)
     result = ScanResult(roots=[Path(root) for root in roots],
@@ -353,21 +391,21 @@ def scan_paths(roots: Sequence[Path], *,
         diagnosis, error = diagnose_file(path)
         outcome = FileOutcome(path=path, diagnosis=diagnosis, error=error)
 
-        if diagnosis is not None and is_fingerprint_target(diagnosis):
-            if diagnostics_dir is not None:
-                if fingerprints_written < MAX_FINGERPRINTS:
-                    diagnostics_dir.mkdir(parents=True, exist_ok=True)
-                    fingerprint = build_fingerprint(
-                        diagnosis, include_filename=include_filenames)
-                    fingerprint_path = (
-                        diagnostics_dir / f"{file_id(path)}.diag.json")
-                    fingerprint_path.write_text(
-                        json.dumps(fingerprint, indent=2) + "\n",
-                        encoding="utf-8")
-                    outcome.fingerprint_path = fingerprint_path
-                    fingerprints_written += 1
-                else:
-                    result.fingerprints_skipped += 1
+        if (diagnosis is not None and is_fingerprint_target(diagnosis)
+                and diagnostics_dir is not None):
+            if fingerprints_written < MAX_FINGERPRINTS:
+                diagnostics_dir.mkdir(parents=True, exist_ok=True)
+                fingerprint = build_fingerprint(
+                    diagnosis, include_filename=include_filenames)
+                fingerprint_path = (
+                    diagnostics_dir / f"{file_id(path)}.diag.json")
+                fingerprint_path.write_text(
+                    json.dumps(fingerprint, indent=2) + "\n",
+                    encoding="utf-8")
+                outcome.fingerprint_path = fingerprint_path
+                fingerprints_written += 1
+            else:
+                result.fingerprints_skipped += 1
 
         result.outcomes.append(outcome)
         if progress is not None:
@@ -380,7 +418,8 @@ def scan_paths(roots: Sequence[Path], *,
     if search_archives:
         materials, material_notes = diagnose_archive_materials(
             walk.archives, on_download=on_download,
-            download_targets=walk.download_targets)
+            download_targets=walk.download_targets,
+            material_progress=material_progress)
         result.materials = materials
         result.material_notes = material_notes
 

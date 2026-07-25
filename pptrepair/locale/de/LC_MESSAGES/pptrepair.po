@@ -84,6 +84,9 @@ msgstr "Reihe"
 msgid "Skipped: {n} Office temp file(s)"
 msgstr "Übersprungen: {n} Office-Temporärdatei(en)"
 
+msgid "Skipped: {n} file(s) over the size limit"
+msgstr "Übersprungen: {n} Datei(en) über der Größenbegrenzung"
+
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "Übersprungen: {n} veraltete .ppt-Datei(en)"
 
@@ -197,6 +200,15 @@ msgstr "Reparaturen:"
 
 msgid "corrupted: overwritten with fragments of another ZIP archive"
 msgstr "beschädigt: mit Fragmenten eines anderen ZIP-Archivs überschrieben"
+
+msgid "[auto] — verified same-origin donor (byte-level CRC evidence). Trusted and pre-checked."
+msgstr "[auto] — verifizierte Quelle gleichen Ursprungs (CRC-Nachweis auf Byteebene). Vertrauenswürdig und bereits ausgewählt."
+
+msgid "[candidate] — probably the same origin, but not fully verified. Check to use."
+msgstr "[candidate] — vermutlich derselbe Ursprung, aber nicht vollständig verifiziert. Zum Verwenden auswählen."
+
+msgid "[lineage] — a different version of the same document; merged content may differ slightly. Check only if that is acceptable."
+msgstr "[lineage] — eine andere Version desselben Dokuments; der zusammengeführte Inhalt kann leicht abweichen. Nur auswählen, wenn das akzeptabel ist."
 
 msgid "corrupted: archive body largely overwritten in place"
 msgstr "beschädigt: Archivkörper größtenteils an Ort und Stelle überschrieben"
@@ -323,4 +335,387 @@ msgstr "Strukturintegrität: {n} erforderliche Beziehung(en) fehlend"
 
 msgid "no {required} relationship"
 msgstr "keine {required}-Beziehung"
+
+msgid " [archive]"
+msgstr " [Archiv]"
+
+msgid " [folder]"
+msgstr " [Ordner]"
+
+msgid "(choose a destination folder)"
+msgstr "(Zielordner auswählen)"
+
+msgid "(empty)"
+msgstr "(leer)"
+
+msgid "(no candidates found)"
+msgstr "(keine Kandidaten gefunden)"
+
+msgid "(no donors found — will fall back to single-file repair)"
+msgstr "(keine Quellen gefunden — Rückfall auf Einzeldatei-Reparatur)"
+
+msgid "(score {score})"
+msgstr "(Wert {score})"
+
+msgid ", failed {n}"
+msgstr ", fehlgeschlagen {n}"
+
+msgid ", {n} error(s)"
+msgstr ", {n} Fehler"
+
+msgid "About PPTrepair"
+msgstr "Über PPTrepair"
+
+msgid "Action"
+msgstr "Aktion"
+
+msgid "Add Files"
+msgstr "Dateien hinzufügen"
+
+msgid "Add Files…"
+msgstr "Dateien hinzufügen…"
+
+msgid "Add Folder"
+msgstr "Ordner hinzufügen"
+
+msgid "Add Folder…"
+msgstr "Ordner hinzufügen…"
+
+msgid "Added {n} source(s)"
+msgstr "{n} Quelle(n) hinzugefügt"
+
+msgid "All files"
+msgstr "Alle Dateien"
+
+msgid "Archives are used only by multi-source repair; ignored in this mode"
+msgstr "Archive werden nur bei der Mehrquellen-Reparatur verwendet; in diesem Modus werden sie ignoriert"
+
+msgid "Browse…"
+msgstr "Durchsuchen…"
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Cancelling…"
+msgstr "Wird abgebrochen…"
+
+msgid "Candidates"
+msgstr "Kandidaten"
+
+msgid "Checking {name}"
+msgstr "Überprüfe: {name}"
+
+msgid "Checking… {n} file(s)"
+msgstr "Überprüfung… {n} Datei(en)"
+
+msgid "Choose an output folder before repairing, or switch to \"Repair in place\"."
+msgstr "Wählen Sie vor der Reparatur einen Ausgabeordner, oder wechseln Sie zu „An Ort und Stelle reparieren“."
+
+msgid "Clear All"
+msgstr "Alles löschen"
+
+msgid "Clear Menu"
+msgstr "Menü löschen"
+
+msgid "Clear Sources"
+msgstr "Quellen löschen"
+
+msgid "Default Output"
+msgstr "Standardausgabe"
+
+msgid "Default Output Folder"
+msgstr "Standard-Ausgabeordner"
+
+msgid "Default repair mode:"
+msgstr "Standard-Reparaturmodus:"
+
+msgid "Detail"
+msgstr "Detail"
+
+msgid "Diagnose and repair PowerPoint files corrupted while stored on OneDrive."
+msgstr "Diagnostiziert und repariert PowerPoint-Dateien, die während der Speicherung in OneDrive beschädigt wurden."
+
+msgid "Diagnosed {name}"
+msgstr "Diagnostiziert: {name}"
+
+msgid "Download cloud-only files"
+msgstr "Reine Cloud-Dateien herunterladen"
+
+msgid "Downloading {name}…"
+msgstr "Wird heruntergeladen: {name}…"
+
+msgid "Drop PowerPoint files or folders here"
+msgstr "PowerPoint-Dateien oder -Ordner hier ablegen"
+
+msgid "File"
+msgstr "Datei"
+
+msgid "Files"
+msgstr "Dateien"
+
+msgid "Follow symbolic links while walking"
+msgstr "Symbolischen Links beim Durchsuchen folgen"
+
+msgid "Help"
+msgstr "Hilfe"
+
+msgid "Include file basenames in diagnostic fingerprints"
+msgstr "Dateinamen in Diagnose-Fingerabdrücke einschließen"
+
+msgid "Language change takes effect after restart"
+msgstr "Die Sprachänderung wird nach einem Neustart wirksam"
+
+msgid "Language:"
+msgstr "Sprache:"
+
+msgid "Licensed under the GNU General Public License v3.0."
+msgstr "Lizenziert unter der GNU General Public License v3.0."
+
+msgid "Lineage candidates"
+msgstr "Abstammungskandidaten"
+
+msgid "Max file size:"
+msgstr "Maximale Dateigröße:"
+
+msgid "Merge groups"
+msgstr "Zusammenführungsgruppen"
+
+msgid "Merged {n}"
+msgstr "Zusammengeführt {n}"
+
+msgid "Merging…"
+msgstr "Wird zusammengeführt…"
+
+msgid "Merging… {done}/{total}"
+msgstr "Wird zusammengeführt… {done} von {total}"
+
+msgid "Mined {name}"
+msgstr "Extrahiert: {name}"
+
+msgid "Multi-source repair"
+msgstr "Mehrquellen-Reparatur"
+
+msgid "No limit"
+msgstr "Kein Limit"
+
+msgid "No output folder"
+msgstr "Kein Ausgabeordner"
+
+msgid "No sources added"
+msgstr "Keine Quellen hinzugefügt"
+
+msgid "Nothing to repair"
+msgstr "Nichts zu reparieren"
+
+msgid "Open Output Folder"
+msgstr "Ausgabeordner öffnen"
+
+msgid "Output"
+msgstr "Ausgabe"
+
+msgid "Path"
+msgstr "Pfad"
+
+msgid "PowerPoint files / archives"
+msgstr "PowerPoint-Dateien/Archive"
+
+msgid "Preferences"
+msgstr "Einstellungen"
+
+msgid "Preferences…"
+msgstr "Einstellungen…"
+
+msgid "Quit"
+msgstr "Beenden"
+
+msgid "Ready"
+msgstr "Bereit"
+
+msgid "Recent Folders"
+msgstr "Zuletzt verwendete Ordner"
+
+msgid "Remove Selected"
+msgstr "Auswahl entfernen"
+
+msgid "Repair"
+msgstr "Reparieren"
+
+msgid "Repair Into Folder"
+msgstr "In Ordner reparieren"
+
+msgid "Repair cancelled"
+msgstr "Reparatur abgebrochen"
+
+msgid "Repair failed"
+msgstr "Reparatur fehlgeschlagen"
+
+msgid "Repair failed: {message}"
+msgstr "Reparatur fehlgeschlagen: {message}"
+
+msgid "Repair in place"
+msgstr "An Ort und Stelle reparieren"
+
+msgid "Repair into folder:"
+msgstr "In Ordner reparieren:"
+
+msgid "Repair mode:"
+msgstr "Reparaturmodus:"
+
+msgid "Repaired {name}"
+msgstr "Repariert: {name}"
+
+msgid "Repaired {repaired}, unrepairable {unrepairable}, skipped {skipped}"
+msgstr "Repariert {repaired}, nicht reparierbar {unrepairable}, übersprungen {skipped}"
+
+msgid "Repairing…"
+msgstr "Wird repariert…"
+
+msgid "Repairing… {done}/{total}"
+msgstr "Wird repariert… {done} von {total}"
+
+msgid "Repairing… {n} file(s) processed"
+msgstr "Wird repariert… {n} Datei(en) verarbeitet"
+
+msgid "Review the donors for each corrupted file, then click Repair."
+msgstr "Überprüfen Sie die Quellen für jede beschädigte Datei und klicken Sie dann auf „Reparieren“."
+
+msgid "Run"
+msgstr "Ausführen"
+
+msgid "Scan"
+msgstr "Scannen"
+
+msgid "Scan cancelled"
+msgstr "Scan abgebrochen"
+
+msgid "Scan failed"
+msgstr "Scan fehlgeschlagen"
+
+msgid "Scan failed: {message}"
+msgstr "Scan fehlgeschlagen: {message}"
+
+msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
+msgstr "Gescannt {n} Datei(en): {corrupted} beschädigt, {intact} intakt"
+
+msgid "Scanning…"
+msgstr "Wird gescannt…"
+
+msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
+msgstr "Wird gescannt… {files} Datei(en) diagnostiziert, {materials} Material(ien) extrahiert"
+
+msgid "Settings"
+msgstr "Einstellungen"
+
+msgid "Single-file repair"
+msgstr "Einzeldatei-Reparatur"
+
+msgid "Source"
+msgstr "Quelle"
+
+msgid "Sources changed — please scan again"
+msgstr "Quellen geändert — bitte erneut scannen"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "The last scan found no corrupted files to repair."
+msgstr "Der letzte Scan hat keine beschädigten Dateien zum Reparieren gefunden."
+
+msgid "The repair stopped unexpectedly:\n{message}"
+msgstr "Die Reparatur wurde unerwartet gestoppt:\n{message}"
+
+msgid "The scan stopped unexpectedly:\n{message}"
+msgstr "Der Scan wurde unerwartet gestoppt:\n{message}"
+
+msgid "Twin candidates"
+msgstr "Wiederherstellungskandidaten"
+
+msgid "error"
+msgstr "Fehler"
+
+msgid "fallback failed {n}"
+msgstr "Ausweichreparatur fehlgeschlagen {n}"
+
+msgid "fallback repaired {n}"
+msgstr "Ausweichreparatur {n}"
+
+msgid "group (size {size})"
+msgstr "Gruppe (Größe {size})"
+
+msgid "material"
+msgstr "Material"
+
+msgid "merge failed {n}"
+msgstr "Zusammenführung fehlgeschlagen {n}"
+
+msgid "merge failed: no output could be reconstructed"
+msgstr "Zusammenführung fehlgeschlagen: Es konnte keine Ausgabe rekonstruiert werden"
+
+msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
+msgstr "pptrepair: Fehler: PySide6 ist nicht installiert. Installieren Sie das GUI-Extra mit: pip install 'pptrepair[gui]'"
+
+msgid "skipped (cloud-only)"
+msgstr "übersprungen (nur Cloud)"
+
+msgid "skipped (legacy .ppt)"
+msgstr "übersprungen (veraltetes .ppt)"
+
+msgid "skipped (size limit)"
+msgstr "übersprungen (Größenbegrenzung)"
+
+msgid "skipped (temp file)"
+msgstr "übersprungen (Temporärdatei)"
+
+msgid "{n} archive material(s)"
+msgstr "{n} Archivmaterial(ien)"
+
+msgid "{n} duplicate(s) skipped"
+msgstr "{n} Duplikat(e) übersprungen"
+
+msgid "{n} skipped"
+msgstr "{n} übersprungen"
+
+msgid "{n} unsupported item(s) rejected"
+msgstr "{n} nicht unterstützte(s) Element(e) abgelehnt"
+msgid "Quick Guide"
+msgstr "Kurzanleitung"
+
+msgid "Open GitHub Page"
+msgstr "GitHub-Seite öffnen"
+
+msgid "Report Unknown Corruption…"
+msgstr "Unbekannte Beschädigung melden…"
+
+msgid "License Information"
+msgstr "Lizenzinformationen"
+
+msgid "PPTrepair diagnoses and repairs PowerPoint files damaged while stored on OneDrive."
+msgstr "PPTrepair diagnostiziert und repariert PowerPoint-Dateien, die während der Speicherung in OneDrive beschädigt wurden."
+
+msgid "1. Drop .pptx/.pptm files onto the window, or add a folder (scanned recursively for matching files)."
+msgstr "1. Ziehen Sie .pptx-/.pptm-Dateien auf das Fenster oder fügen Sie einen Ordner hinzu (wird rekursiv durchsucht)."
+
+msgid "2. Backup archives can also be dropped as donor material for multi-source repair."
+msgstr "2. Backup-Archive können ebenfalls als Spendermaterial für die Multi-Source-Reparatur abgelegt werden."
+
+msgid "3. Click Scan to diagnose everything, then review the Files and Candidates tabs."
+msgstr "3. Klicken Sie auf „Scan“, um alles zu diagnostizieren, und prüfen Sie dann die Reiter „Files“ und „Candidates“."
+
+msgid "4. Pick Single-file or Multi-source repair mode."
+msgstr "4. Wählen Sie den Reparaturmodus „Single-file“ oder „Multi-source“."
+
+msgid "5. Choose in-place or folder output, then click Repair."
+msgstr "5. Wählen Sie „in place“ oder einen Ausgabeordner und klicken Sie auf „Repair“."
+
+msgid "6. Multi-source repair asks you to approve donors mined from other copies and archives before repairing."
+msgstr "6. Bei der Multi-Source-Reparatur müssen Sie vor der Reparatur die aus anderen Kopien und Archiven ermittelten Spender bestätigen."
+
+msgid "PPTrepair is licensed under the GNU General Public License v3.0."
+msgstr "PPTrepair ist unter der GNU General Public License v3.0 lizenziert."
+
+msgid "This application uses Qt for Python (PySide6), licensed under the GNU LGPL v3."
+msgstr "Diese Anwendung verwendet Qt for Python (PySide6), lizenziert unter der GNU LGPL v3."
+
+msgid "See the LICENSE file in the GitHub repository for details."
+msgstr "Details finden Sie in der Datei LICENSE im GitHub-Repository."
 

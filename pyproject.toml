@@ -22,13 +22,30 @@ classifiers = [
 pptrepair = "pptrepair.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pytest-qt"]
+gui = [
+    "PySide6>=6.8",
+    "pyobjc-framework-Cocoa>=10 ; sys_platform == 'darwin'",
+]
 
 [tool.setuptools]
-packages = ["pptrepair"]
+packages = ["pptrepair", "pptrepair.gui"]
 
 [tool.setuptools.dynamic]
 version = {attr = "pptrepair.__version__"}
 
 [tool.setuptools.package-data]
 pptrepair = ["locale/*/LC_MESSAGES/*.mo"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# BLE001: 修復パイプラインは「読める範囲で続行する」設計のため広いexcept捕捉が意図的
+ignore = ["BLE001"]
+
+[tool.ruff.lint.per-file-ignores]
+# report.py は report_*.py 群のファサード(再エクスポート専用)
+"pptrepair/report.py" = ["F401"]
+# Qtのオーバーライド必須シグネチャ(rowCount/data等)がQModelIndex()を既定値に取る
+"pptrepair/gui/*.py" = ["B008"]

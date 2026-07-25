@@ -7,16 +7,19 @@ small; see :mod:`pptrepair.cli_single` for the caller.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from pptrepair.classify import Diagnosis
 from pptrepair.report_common import VERDICT_LABELS
 from pptrepair.scanner import ZipStructure
 
 if TYPE_CHECKING:  # avoid runtime import cycles with integrity
-    from pptrepair.integrity import (RefIntegrityResult,
-                                     StructureIntegrityResult,
-                                     TimingIntegrityResult)
+    from pptrepair.integrity import (
+        RefIntegrityResult,
+        StructureIntegrityResult,
+        TimingIntegrityResult,
+    )
 
 
 def _no_translation(message: str) -> str:
@@ -25,10 +28,10 @@ def _no_translation(message: str) -> str:
 
 
 def render_text(diagnosis: Diagnosis,
-               ref_integrity: "RefIntegrityResult | None" = None,
-               timing: "TimingIntegrityResult | None" = None,
-               structure: "StructureIntegrityResult | None" = None,
-               tr: "Callable[[str], str] | None" = None) -> str:
+               ref_integrity: RefIntegrityResult | None = None,
+               timing: TimingIntegrityResult | None = None,
+               structure: StructureIntegrityResult | None = None,
+               tr: Callable[[str], str] | None = None) -> str:
     """Render one diagnosis as a human-readable multi-line report.
 
     Layout contract (kept stable for tests):
@@ -118,9 +121,9 @@ def render_text(diagnosis: Diagnosis,
 
 
 def render_json(diagnoses: list[Diagnosis],
-               integrities: "list[RefIntegrityResult | None] | None" = None,
-               timings: "list[TimingIntegrityResult | None] | None" = None,
-               structures: "list[StructureIntegrityResult | None] | None"
+               integrities: list[RefIntegrityResult | None] | None = None,
+               timings: list[TimingIntegrityResult | None] | None = None,
+               structures: list[StructureIntegrityResult | None] | None
                = None) -> str:
     """Render diagnoses as a JSON array (schema kept stable for tests).
 
@@ -189,9 +192,9 @@ def _structure_to_dict(structure: ZipStructure | None) -> dict | None:
 
 
 def _to_dict(diagnosis: Diagnosis,
-            integrity: "RefIntegrityResult | None" = None,
-            timing: "TimingIntegrityResult | None" = None,
-            structure_integrity: "StructureIntegrityResult | None" = None,
+            integrity: RefIntegrityResult | None = None,
+            timing: TimingIntegrityResult | None = None,
+            structure_integrity: StructureIntegrityResult | None = None,
             ) -> dict:
     """Render one diagnosis as a JSON-schema dict.
 
@@ -214,7 +217,7 @@ def _to_dict(diagnosis: Diagnosis,
 
 
 def _integrity_to_dict(
-    integrity: "RefIntegrityResult | None",
+    integrity: RefIntegrityResult | None,
 ) -> dict | None:
     """Render *integrity* as its JSON-schema dict, or None when absent."""
     if integrity is None:
@@ -226,7 +229,7 @@ def _integrity_to_dict(
 
 
 def _timing_integrity_to_dict(
-    timing: "TimingIntegrityResult | None",
+    timing: TimingIntegrityResult | None,
 ) -> dict | None:
     """Render *timing* as its JSON-schema dict, or None when absent."""
     if timing is None:
@@ -241,7 +244,7 @@ def _timing_integrity_to_dict(
 
 
 def _structure_integrity_to_dict(
-    structure: "StructureIntegrityResult | None",
+    structure: StructureIntegrityResult | None,
 ) -> dict | None:
     """Render *structure* as its JSON-schema dict, or None when absent."""
     if structure is None:

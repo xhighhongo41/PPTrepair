@@ -29,8 +29,7 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
-from fixtures import (append_foreign_tail, build_minimal_pptx, truncate,
-                      zero_prefix)
+from fixtures import append_foreign_tail, build_minimal_pptx, truncate, zero_prefix
 
 from pptrepair.cli import EXIT_CORRUPT, EXIT_OK, main
 

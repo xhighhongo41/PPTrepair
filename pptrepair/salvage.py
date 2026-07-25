@@ -18,9 +18,10 @@ from __future__ import annotations
 import struct
 import zipfile
 import zlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Self
 
 from pptrepair.census import EntryResult
 from pptrepair.classify import Diagnosis, Verdict, cd_matched_ok_entries
@@ -219,7 +220,7 @@ class SalvageReader:
         self._zip: zipfile.ZipFile | None = None
         self._size: int | None = None
 
-    def __enter__(self) -> "SalvageReader":
+    def __enter__(self) -> Self:
         # Open the raw handle used for LFH re-parsing eagerly; the
         # zipfile object for CD entries is opened only when first needed.
         self._file = self._path.open("rb")

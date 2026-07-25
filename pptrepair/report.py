@@ -10,29 +10,47 @@ split.
 
 from __future__ import annotations
 
-from pptrepair.report_batch import (_batch_item_to_dict,
-                                    _count_lost_content, _repair_item_line,
-                                    render_batch_json, render_batch_text)
-from pptrepair.report_candidates import (_lineage_candidate_text_lines,
-                                         _lineage_candidates_map,
-                                         _lineage_candidates_to_json,
-                                         _merge_group_map,
-                                         _merge_group_text_lines,
-                                         _merge_groups_to_json,
-                                         _twin_candidate_text_lines,
-                                         _twin_candidates_map,
-                                         _twin_candidates_to_json,
-                                         _twin_reason_label)
-from pptrepair.report_check import (_integrity_to_dict,
+from pptrepair.report_batch import (
+                                    _batch_item_to_dict,
+                                    _count_lost_content,
+                                    _repair_item_line,
+                                    render_batch_json,
+                                    render_batch_text,
+)
+from pptrepair.report_candidates import (
+                                    _lineage_candidate_text_lines,
+                                    _lineage_candidates_map,
+                                    _lineage_candidates_to_json,
+                                    _merge_group_map,
+                                    _merge_group_text_lines,
+                                    _merge_groups_to_json,
+                                    _twin_candidate_text_lines,
+                                    _twin_candidates_map,
+                                    _twin_candidates_to_json,
+                                    _twin_reason_label,
+)
+from pptrepair.report_check import (
+                                    _integrity_to_dict,
                                     _structure_integrity_to_dict,
                                     _structure_to_dict,
-                                    _timing_integrity_to_dict, _to_dict,
-                                    render_json, render_text)
-from pptrepair.report_common import (ISSUE_URL, VERDICT_LABELS,
-                                     _LINEAGE_CANDIDATES_DISPLAY_LIMIT,
-                                     _MERGE_GROUP_MIN_FILES,
-                                     _TWIN_CANDIDATES_DISPLAY_LIMIT)
+                                    _timing_integrity_to_dict,
+                                    _to_dict,
+                                    render_json,
+                                    render_text,
+)
+from pptrepair.report_common import (
+                                    _LINEAGE_CANDIDATES_DISPLAY_LIMIT,
+                                    _MERGE_GROUP_MIN_FILES,
+                                    _TWIN_CANDIDATES_DISPLAY_LIMIT,
+                                    ISSUE_URL,
+                                    VERDICT_LABELS,
+)
 from pptrepair.report_repair import render_repair_json, render_repair_text
-from pptrepair.report_scan import (_collect_errors, _scan_file_entry,
-                                   _scan_payload, _scan_summary_lines,
-                                   render_scan_json, render_scan_text)
+from pptrepair.report_scan import (
+                                    _collect_errors,
+                                    _scan_file_entry,
+                                    _scan_payload,
+                                    _scan_summary_lines,
+                                    render_scan_json,
+                                    render_scan_text,
+)

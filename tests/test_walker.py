@@ -337,6 +337,75 @@ def test_discover_targets_allow_download_records_download_targets(
     assert default_result.targets == [local_file]
 
 
+# --- discover_targets: max_file_bytes ---------------------------------------
+
+
+def test_discover_targets_max_file_bytes_skips_oversize_file(
+        tmp_path: Path) -> None:
+    """A file larger than max_file_bytes is skipped_oversize, not a target."""
+    root = tmp_path / "root"
+    root.mkdir()
+    big_file = root / "big.pptx"
+    big_file.write_bytes(b"x" * 20)
+    small_file = root / "small.pptx"
+    small_file.write_bytes(b"x" * 5)
+
+    result = discover_targets([root], max_file_bytes=10)
+
+    assert result.skipped_oversize == [big_file]
+    assert big_file not in result.targets
+    assert result.targets == [small_file]
+
+
+def test_discover_targets_max_file_bytes_boundary_is_inclusive(
+        tmp_path: Path) -> None:
+    """A file whose size exactly equals max_file_bytes is still a target."""
+    root = tmp_path / "root"
+    root.mkdir()
+    exact_file = root / "exact.pptx"
+    exact_file.write_bytes(b"x" * 10)
+
+    result = discover_targets([root], max_file_bytes=10)
+
+    assert result.targets == [exact_file]
+    assert result.skipped_oversize == []
+
+
+def test_discover_targets_max_file_bytes_none_is_unlimited(
+        tmp_path: Path) -> None:
+    """The default max_file_bytes=None never skips anything on size."""
+    root = tmp_path / "root"
+    root.mkdir()
+    big_file = root / "big.pptx"
+    big_file.write_bytes(b"x" * 20)
+
+    result = discover_targets([root])
+
+    assert result.skipped_oversize == []
+    assert result.targets == [big_file]
+
+
+def test_discover_targets_max_file_bytes_skips_oversize_placeholder(
+        tmp_path: Path, monkeypatch) -> None:
+    """An oversize cloud placeholder is skipped_oversize even with
+    allow_download=True, and never reaches targets/download_targets."""
+    root = tmp_path / "root"
+    root.mkdir()
+    cloud_file = root / "cloud.pptx"
+    cloud_file.write_bytes(b"x" * 20)
+    cloud_ino = os.lstat(cloud_file).st_ino
+
+    monkeypatch.setattr(
+        walker, "is_cloud_placeholder",
+        lambda st: st.st_ino == cloud_ino)
+
+    result = discover_targets([root], allow_download=True, max_file_bytes=10)
+
+    assert result.skipped_oversize == [cloud_file]
+    assert cloud_file not in result.targets
+    assert cloud_file not in result.download_targets
+
+
 # --- discover_targets: error handling ---------------------------------------
 
 

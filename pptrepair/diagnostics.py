@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pptrepair import __version__
@@ -75,9 +75,7 @@ def is_fingerprint_target(diagnosis: Diagnosis) -> bool:
         return True
     if diagnosis.verdict == Verdict.NOT_A_ZIP:
         structure = diagnosis.structure
-        if structure is not None and structure.head_kind == "cfb":
-            return False
-        return True
+        return structure is None or structure.head_kind != "cfb"
     return False
 
 
@@ -215,7 +213,7 @@ def build_fingerprint(diagnosis: Diagnosis, *,
     path = diagnosis.path
     stat = path.stat()
     mtime_utc = datetime.fromtimestamp(
-        stat.st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        stat.st_mtime, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     file_info = {
         "id": file_id(path),
         "name": path.name if include_filename else None,

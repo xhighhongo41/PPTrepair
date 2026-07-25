@@ -16,8 +16,13 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from fixtures import (build_minimal_jpeg, build_minimal_pptx, find_eocd,
-                      make_corrupted_copies, make_edited_version)
+from fixtures import (
+    build_minimal_jpeg,
+    build_minimal_pptx,
+    find_eocd,
+    make_corrupted_copies,
+    make_edited_version,
+)
 
 import pptrepair.cli as cli_module
 from pptrepair import merge as merge_module

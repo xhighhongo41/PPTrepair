@@ -38,9 +38,9 @@ import posixpath
 import re
 import xml.etree.ElementTree as ET
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, TypeVar
 
 from pptrepair.salvage import SalvagedEntry, SalvageReader
 
@@ -242,9 +242,7 @@ _DEFAULT_THEME_XML = (
     '<a:objectDefaults/>'
     '<a:extraClrSchemeLst/>'
     '</a:theme>'
-).encode("utf-8")
-
-_T = TypeVar("_T")
+).encode()
 
 #: One dangling reference: ``(attribute key, local name, relationship id)``.
 _DanglingAttr = tuple[str, str, str]
@@ -680,7 +678,7 @@ def _prune_content_types(data: bytes, final_names: set[str],
 def _override_part(child: ET.Element) -> str:
     """Return the package-relative PartName of an Override *child*."""
     part = child.get("PartName", "")
-    return part[1:] if part.startswith("/") else part
+    return part.removeprefix("/")
 
 
 def _default_content_type(extension: str, warnings: list[str]) -> str:
@@ -1207,10 +1205,10 @@ def _has_ancestor_in(elem: ET.Element, anchors: set[ET.Element],
     return False
 
 
-def _unique(items: list[_T]) -> list[_T]:
+def _unique[T](items: list[T]) -> list[T]:
     """Return *items* de-duplicated while preserving first-seen order."""
-    seen: set[_T] = set()
-    result: list[_T] = []
+    seen: set[T] = set()
+    result: list[T] = []
     for item in items:
         if item not in seen:
             seen.add(item)

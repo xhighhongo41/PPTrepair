@@ -7,15 +7,18 @@ for the callers of these helpers.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Sequence
+from typing import TYPE_CHECKING
 
 from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.origin import OriginScore, score_origin
-from pptrepair.report_common import (_LINEAGE_CANDIDATES_DISPLAY_LIMIT,
-                                     _MERGE_GROUP_MIN_FILES,
-                                     _TWIN_CANDIDATES_DISPLAY_LIMIT)
+from pptrepair.report_common import (
+    _LINEAGE_CANDIDATES_DISPLAY_LIMIT,
+    _MERGE_GROUP_MIN_FILES,
+    _TWIN_CANDIDATES_DISPLAY_LIMIT,
+)
 from pptrepair.twin import TwinCandidate, build_twin_index, find_twin_candidates
 
 if TYPE_CHECKING:  # avoid runtime import cycles with scan
@@ -66,8 +69,8 @@ def _twin_reason_label(confidence: str, tr: Callable[[str], str]) -> str:
 
 
 def _twin_candidates_map(
-    outcomes: "Sequence[FileOutcome]",
-    materials: "Sequence[ArchiveMaterial]" = (),
+    outcomes: Sequence[FileOutcome],
+    materials: Sequence[ArchiveMaterial] = (),
 ) -> dict[Path, list[TwinCandidate]]:
     """Map each corrupted file's path to its twin-restoration candidates.
 
@@ -152,8 +155,8 @@ def _twin_candidates_to_json(candidates: list[TwinCandidate]) -> list[dict]:
 
 
 def _lineage_candidates_map(
-    outcomes: "Sequence[FileOutcome]",
-    materials: "Sequence[ArchiveMaterial]" = (),
+    outcomes: Sequence[FileOutcome],
+    materials: Sequence[ArchiveMaterial] = (),
 ) -> dict[Path, list[_LineageCandidate]]:
     """Map each corrupted file's path to its lineage-version candidates.
 
@@ -243,8 +246,8 @@ def _lineage_candidates_to_json(
 
 
 def _merge_group_map(
-    outcomes: "Sequence[FileOutcome]",
-    materials: "Sequence[ArchiveMaterial]" = (),
+    outcomes: Sequence[FileOutcome],
+    materials: Sequence[ArchiveMaterial] = (),
 ) -> list[dict]:
     """Group corrupted files sharing an exact byte size into merge candidates.
 

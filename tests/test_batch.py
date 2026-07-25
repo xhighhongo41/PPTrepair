@@ -14,12 +14,17 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from fixtures import (append_foreign_tail, build_minimal_pptx, truncate,
-                      zero_prefix)
+from fixtures import append_foreign_tail, build_minimal_pptx, truncate, zero_prefix
 
 from pptrepair import batch as batch_module
-from pptrepair.batch import (assign_root_labels, plan_output_base,
-                             plan_output_bases, repair_paths)
+from pptrepair.batch import (
+    BatchItem,
+    assign_root_labels,
+    plan_output_base,
+    plan_output_bases,
+    repair_paths,
+)
+from pptrepair.cancel import OperationCancelled
 from pptrepair.repair import default_output_path
 
 #: Small media payload so fixtures stay fast to build and diagnose.
@@ -408,3 +413,34 @@ def test_repair_paths_dry_run_writes_nothing_and_plans(tmp_path: Path) -> None:
     # A planned artifact is "handled" for exit-code purposes in dry-run;
     # only the unrepairable empty file remains.
     assert result.unrepaired_remaining() == 1
+
+
+# --- repair_paths: coordinated cancellation ----------------------------------
+
+
+def test_repair_paths_repair_progress_cancellation_keeps_partial_output(
+    tmp_path: Path,
+) -> None:
+    """A repair_progress callback that raises OperationCancelled right
+    after the first repair aborts phase 2 immediately: the exception
+    propagates uncaught, the first file's artifact stays on disk, and the
+    second corrupted file is never repaired."""
+    root = _mkroot(tmp_path)
+    out = tmp_path / "out"
+    _write(root, "a.pptx", _rebuildable_truncated(num_slides=2))
+    _write(root, "b.pptx", _rebuildable_truncated(num_slides=4))
+
+    calls: list[BatchItem] = []
+
+    def _cancel_after_first(item: BatchItem) -> None:
+        calls.append(item)
+        raise OperationCancelled("user requested cancellation")
+
+    with pytest.raises(OperationCancelled):
+        repair_paths([root], output_dir=out,
+                     repair_progress=_cancel_after_first)
+
+    assert len(calls) == 1
+    assert calls[0].source.path.name == "a.pptx"
+    assert (out / "a.repaired.pptx").is_file()
+    assert not (out / "b.repaired.pptx").exists()

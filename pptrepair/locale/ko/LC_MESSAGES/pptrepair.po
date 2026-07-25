@@ -84,6 +84,9 @@ msgstr "계열"
 msgid "Skipped: {n} Office temp file(s)"
 msgstr "건너뜀: Office 임시 파일 {n}개"
 
+msgid "Skipped: {n} file(s) over the size limit"
+msgstr "건너뜀: 크기 상한을 초과한 파일 {n}개"
+
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "건너뜀: 레거시 .ppt 파일 {n}개"
 
@@ -197,6 +200,15 @@ msgstr "복구 결과:"
 
 msgid "corrupted: overwritten with fragments of another ZIP archive"
 msgstr "손상됨: 다른 ZIP 아카이브의 조각으로 덮어써졌습니다"
+
+msgid "[auto] — verified same-origin donor (byte-level CRC evidence). Trusted and pre-checked."
+msgstr "[auto] — 동일 원본으로 검증된 제공 소스(바이트 단위 CRC 증거). 신뢰할 수 있으며 기본적으로 선택되어 있습니다."
+
+msgid "[candidate] — probably the same origin, but not fully verified. Check to use."
+msgstr "[candidate] — 아마도 동일 원본이지만 완전히 검증되지는 않았습니다. 사용하려면 선택하세요."
+
+msgid "[lineage] — a different version of the same document; merged content may differ slightly. Check only if that is acceptable."
+msgstr "[lineage] — 같은 문서의 다른 버전입니다. 병합된 내용이 조금 다를 수 있습니다. 허용 가능한 경우에만 선택하세요."
 
 msgid "corrupted: archive body largely overwritten in place"
 msgstr "손상됨: 아카이브 본문의 대부분이 제자리에서 덮어써졌습니다"
@@ -323,4 +335,387 @@ msgstr "구조 무결성: 필요한 관계 {n}개 누락"
 
 msgid "no {required} relationship"
 msgstr "{required} 관계 없음"
+
+msgid " [archive]"
+msgstr " [아카이브]"
+
+msgid " [folder]"
+msgstr " [폴더]"
+
+msgid "(choose a destination folder)"
+msgstr "(대상 폴더 선택)"
+
+msgid "(empty)"
+msgstr "(비어 있음)"
+
+msgid "(no candidates found)"
+msgstr "(후보를 찾을 수 없음)"
+
+msgid "(no donors found — will fall back to single-file repair)"
+msgstr "(제공 소스를 찾을 수 없음 — 단일 파일 복구로 대체됩니다)"
+
+msgid "(score {score})"
+msgstr "(점수 {score})"
+
+msgid ", failed {n}"
+msgstr ", 실패 {n}개"
+
+msgid ", {n} error(s)"
+msgstr ", 오류 {n}개"
+
+msgid "About PPTrepair"
+msgstr "PPTrepair 정보"
+
+msgid "Action"
+msgstr "작업"
+
+msgid "Add Files"
+msgstr "파일 추가"
+
+msgid "Add Files…"
+msgstr "파일 추가…"
+
+msgid "Add Folder"
+msgstr "폴더 추가"
+
+msgid "Add Folder…"
+msgstr "폴더 추가…"
+
+msgid "Added {n} source(s)"
+msgstr "소스 {n}개 추가됨"
+
+msgid "All files"
+msgstr "모든 파일"
+
+msgid "Archives are used only by multi-source repair; ignored in this mode"
+msgstr "아카이브는 다중 소스 복구에서만 사용되며, 이 모드에서는 무시됩니다"
+
+msgid "Browse…"
+msgstr "찾아보기…"
+
+msgid "Cancel"
+msgstr "취소"
+
+msgid "Cancelling…"
+msgstr "취소 중…"
+
+msgid "Candidates"
+msgstr "후보"
+
+msgid "Checking {name}"
+msgstr "확인 중: {name}"
+
+msgid "Checking… {n} file(s)"
+msgstr "확인 중… {n}개"
+
+msgid "Choose an output folder before repairing, or switch to \"Repair in place\"."
+msgstr "복구하기 전에 출력 폴더를 선택하거나 \"제자리 복구\"로 전환하세요."
+
+msgid "Clear All"
+msgstr "모두 지우기"
+
+msgid "Clear Menu"
+msgstr "메뉴 지우기"
+
+msgid "Clear Sources"
+msgstr "소스 지우기"
+
+msgid "Default Output"
+msgstr "기본 출력"
+
+msgid "Default Output Folder"
+msgstr "기본 출력 폴더"
+
+msgid "Default repair mode:"
+msgstr "기본 복구 모드:"
+
+msgid "Detail"
+msgstr "세부 정보"
+
+msgid "Diagnose and repair PowerPoint files corrupted while stored on OneDrive."
+msgstr "OneDrive에 저장하는 동안 손상된 PowerPoint 파일을 진단하고 복구합니다."
+
+msgid "Diagnosed {name}"
+msgstr "진단됨: {name}"
+
+msgid "Download cloud-only files"
+msgstr "클라우드 전용 파일 다운로드"
+
+msgid "Downloading {name}…"
+msgstr "다운로드 중: {name}…"
+
+msgid "Drop PowerPoint files or folders here"
+msgstr "PowerPoint 파일이나 폴더를 여기에 놓으세요"
+
+msgid "File"
+msgstr "파일"
+
+msgid "Files"
+msgstr "파일"
+
+msgid "Follow symbolic links while walking"
+msgstr "탐색 시 심볼릭 링크 따라가기"
+
+msgid "Help"
+msgstr "도움말"
+
+msgid "Include file basenames in diagnostic fingerprints"
+msgstr "진단 핑거프린트에 파일 이름 포함"
+
+msgid "Language change takes effect after restart"
+msgstr "언어 변경 사항은 재시작 후 적용됩니다"
+
+msgid "Language:"
+msgstr "언어:"
+
+msgid "Licensed under the GNU General Public License v3.0."
+msgstr "GNU General Public License v3.0에 따라 라이선스가 부여됩니다."
+
+msgid "Lineage candidates"
+msgstr "버전 계보 후보"
+
+msgid "Max file size:"
+msgstr "최대 파일 크기:"
+
+msgid "Merge groups"
+msgstr "병합 그룹"
+
+msgid "Merged {n}"
+msgstr "병합됨 {n}개"
+
+msgid "Merging…"
+msgstr "병합 중…"
+
+msgid "Merging… {done}/{total}"
+msgstr "병합 중… 총 {total}개 중 {done}개"
+
+msgid "Mined {name}"
+msgstr "추출됨: {name}"
+
+msgid "Multi-source repair"
+msgstr "다중 소스 복구"
+
+msgid "No limit"
+msgstr "제한 없음"
+
+msgid "No output folder"
+msgstr "출력 폴더 없음"
+
+msgid "No sources added"
+msgstr "추가된 소스 없음"
+
+msgid "Nothing to repair"
+msgstr "복구할 항목 없음"
+
+msgid "Open Output Folder"
+msgstr "출력 폴더 열기"
+
+msgid "Output"
+msgstr "출력"
+
+msgid "Path"
+msgstr "경로"
+
+msgid "PowerPoint files / archives"
+msgstr "PowerPoint 파일/아카이브"
+
+msgid "Preferences"
+msgstr "환경설정"
+
+msgid "Preferences…"
+msgstr "환경설정…"
+
+msgid "Quit"
+msgstr "종료"
+
+msgid "Ready"
+msgstr "준비 완료"
+
+msgid "Recent Folders"
+msgstr "최근 폴더"
+
+msgid "Remove Selected"
+msgstr "선택 항목 제거"
+
+msgid "Repair"
+msgstr "복구"
+
+msgid "Repair Into Folder"
+msgstr "폴더로 복구"
+
+msgid "Repair cancelled"
+msgstr "복구가 취소됨"
+
+msgid "Repair failed"
+msgstr "복구 실패"
+
+msgid "Repair failed: {message}"
+msgstr "복구 실패: {message}"
+
+msgid "Repair in place"
+msgstr "제자리 복구"
+
+msgid "Repair into folder:"
+msgstr "폴더로 복구:"
+
+msgid "Repair mode:"
+msgstr "복구 모드:"
+
+msgid "Repaired {name}"
+msgstr "복구됨: {name}"
+
+msgid "Repaired {repaired}, unrepairable {unrepairable}, skipped {skipped}"
+msgstr "복구됨 {repaired}개, 복구 불가 {unrepairable}개, 건너뜀 {skipped}개"
+
+msgid "Repairing…"
+msgstr "복구 중…"
+
+msgid "Repairing… {done}/{total}"
+msgstr "복구 중… 총 {total}개 중 {done}개"
+
+msgid "Repairing… {n} file(s) processed"
+msgstr "복구 중… {n}개 처리됨"
+
+msgid "Review the donors for each corrupted file, then click Repair."
+msgstr "손상된 각 파일의 제공 소스를 검토한 후 \"복구\"를 클릭하세요."
+
+msgid "Run"
+msgstr "실행"
+
+msgid "Scan"
+msgstr "스캔"
+
+msgid "Scan cancelled"
+msgstr "스캔이 취소됨"
+
+msgid "Scan failed"
+msgstr "스캔 실패"
+
+msgid "Scan failed: {message}"
+msgstr "스캔 실패: {message}"
+
+msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
+msgstr "스캔한 파일 {n}개: 손상 {corrupted}개, 정상 {intact}개"
+
+msgid "Scanning…"
+msgstr "스캔 중…"
+
+msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
+msgstr "스캔 중… 파일 {files}개 진단됨, 소재 {materials}개 추출됨"
+
+msgid "Settings"
+msgstr "설정"
+
+msgid "Single-file repair"
+msgstr "단일 파일 복구"
+
+msgid "Source"
+msgstr "소스"
+
+msgid "Sources changed — please scan again"
+msgstr "소스가 변경됨 — 다시 스캔하세요"
+
+msgid "Status"
+msgstr "상태"
+
+msgid "The last scan found no corrupted files to repair."
+msgstr "마지막 스캔에서 복구할 손상된 파일을 찾지 못했습니다."
+
+msgid "The repair stopped unexpectedly:\n{message}"
+msgstr "복구가 예기치 않게 중지되었습니다:\n{message}"
+
+msgid "The scan stopped unexpectedly:\n{message}"
+msgstr "스캔이 예기치 않게 중지되었습니다:\n{message}"
+
+msgid "Twin candidates"
+msgstr "복구 후보"
+
+msgid "error"
+msgstr "오류"
+
+msgid "fallback failed {n}"
+msgstr "대체 복구 실패 {n}개"
+
+msgid "fallback repaired {n}"
+msgstr "대체 복구 {n}개"
+
+msgid "group (size {size})"
+msgstr "그룹 (크기 {size})"
+
+msgid "material"
+msgstr "소재"
+
+msgid "merge failed {n}"
+msgstr "병합 실패 {n}개"
+
+msgid "merge failed: no output could be reconstructed"
+msgstr "병합 실패: 출력을 재구성할 수 없습니다"
+
+msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
+msgstr "pptrepair: 오류: PySide6이 설치되어 있지 않습니다. 다음 명령으로 GUI 확장을 설치하세요: pip install 'pptrepair[gui]'"
+
+msgid "skipped (cloud-only)"
+msgstr "건너뜀(클라우드 전용)"
+
+msgid "skipped (legacy .ppt)"
+msgstr "건너뜀(레거시 .ppt)"
+
+msgid "skipped (size limit)"
+msgstr "건너뜀(크기 상한)"
+
+msgid "skipped (temp file)"
+msgstr "건너뜀(임시 파일)"
+
+msgid "{n} archive material(s)"
+msgstr "아카이브 소재 {n}개"
+
+msgid "{n} duplicate(s) skipped"
+msgstr "중복 {n}개 건너뜀"
+
+msgid "{n} skipped"
+msgstr "건너뜀 {n}개"
+
+msgid "{n} unsupported item(s) rejected"
+msgstr "지원되지 않는 항목 {n}개 거부됨"
+msgid "Quick Guide"
+msgstr "빠른 안내"
+
+msgid "Open GitHub Page"
+msgstr "GitHub 페이지 열기"
+
+msgid "Report Unknown Corruption…"
+msgstr "알 수 없는 손상 신고…"
+
+msgid "License Information"
+msgstr "라이선스 정보"
+
+msgid "PPTrepair diagnoses and repairs PowerPoint files damaged while stored on OneDrive."
+msgstr "PPTrepair는 OneDrive에 저장하는 동안 손상된 PowerPoint 파일을 진단하고 복구합니다."
+
+msgid "1. Drop .pptx/.pptm files onto the window, or add a folder (scanned recursively for matching files)."
+msgstr "1. .pptx/.pptm 파일을 창에 끌어다 놓거나 폴더를 추가하세요(재귀적으로 검색됩니다)."
+
+msgid "2. Backup archives can also be dropped as donor material for multi-source repair."
+msgstr "2. 백업 아카이브도 다중 소스 복구용 공여 자료로 끌어다 놓을 수 있습니다."
+
+msgid "3. Click Scan to diagnose everything, then review the Files and Candidates tabs."
+msgstr "3. \"Scan\"을 클릭해 모두 진단한 후 Files 및 Candidates 탭을 확인하세요."
+
+msgid "4. Pick Single-file or Multi-source repair mode."
+msgstr "4. Single-file 또는 Multi-source 복구 모드를 선택하세요."
+
+msgid "5. Choose in-place or folder output, then click Repair."
+msgstr "5. 즉시 수정 또는 출력 폴더를 선택한 후 \"Repair\"를 클릭하세요."
+
+msgid "6. Multi-source repair asks you to approve donors mined from other copies and archives before repairing."
+msgstr "6. 다중 소스 복구는 수리 전에 다른 사본과 아카이브에서 채굴한 공여자를 승인하도록 요청합니다."
+
+msgid "PPTrepair is licensed under the GNU General Public License v3.0."
+msgstr "PPTrepair는 GNU General Public License v3.0에 따라 라이선스가 부여됩니다."
+
+msgid "This application uses Qt for Python (PySide6), licensed under the GNU LGPL v3."
+msgstr "이 애플리케이션은 GNU LGPL v3 라이선스의 Qt for Python(PySide6)을 사용합니다."
+
+msgid "See the LICENSE file in the GitHub repository for details."
+msgstr "자세한 내용은 GitHub 저장소의 LICENSE 파일을 참조하세요."
 

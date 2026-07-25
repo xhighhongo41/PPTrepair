@@ -25,9 +25,9 @@ from __future__ import annotations
 import csv
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Callable, Iterable
 
 from pptrepair.salvage import SalvagedEntry, SalvageReader
 

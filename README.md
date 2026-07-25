@@ -1,6 +1,6 @@
 # PPTrepair
 
-Diagnoses and repairs PowerPoint files that were corrupted while stored on OneDrive.
+Diagnoses and repairs PowerPoint files that were corrupted while stored on OneDrive — from the command line or a desktop GUI.
 
 日本語版は [README_ja.md](README_ja.md) を参照してください。 (For the Japanese version, see [README_ja.md](README_ja.md).)
 
@@ -140,6 +140,7 @@ Useful to know:
 * **Cloud-only files are never downloaded by default.** Placeholder files that exist only in the cloud (OneDrive Files On-Demand, iCloud Drive, and other clients built on the OS-standard placeholder mechanisms) are detected from metadata alone and skipped; the summary always states how many files were left unexamined. Only PowerPoint files count here — everything else is filtered out by name first, so a folder full of cloud-only photos or documents does not inflate the number. Pass `--allow-download` to have them downloaded and examined too — each file is announced on stderr as its download starts, so long scans stay visible (this may take long and use significant disk space). Clients with proprietary placeholder implementations — notably Google Drive for desktop on Windows — cannot be detected this way, so reading their files may still trigger a download.
 * Encrypted or legacy binary Office files (OLE compound documents) are recognized and reported as such rather than as corruption. Legacy `.ppt` and Office `~$` lock files are counted and skipped; symbolic links are ignored unless you pass `--follow-symlinks`.
 * **`--search-archives` also mines backup archives for restore material.** Zip and tar archives (`.zip`, `.tar`, `.tar.gz`/`.tgz`, `.tar.bz2`/`.tbz2`, `.tar.xz`/`.txz`) found during the walk are opened and every `.pptx`/`.pptm` inside is diagnosed — an intact twin or an older version of a corrupted file kept inside a backup then shows up among the restore/lineage/merge candidates, labelled `backup.zip::inner/deck.pptx`. Archived files are donor material only: they are never repaired, never counted as scanned or corrupted, and members are extracted one at a time to a temporary directory that is removed afterwards. Cloud-only archives follow the same rule as cloud-only PowerPoint files (skipped unless `--allow-download`). With the flag, the report JSON carries `schema_version: 4` and an `origin_archive` key on archive-derived candidates; without it, output is unchanged.
+* `--max-file-size SIZE` skips files larger than SIZE before diagnosing them (a plain byte count, or with a `K`/`M`/`G`/`T` suffix, e.g. `500M`, `2G`); unlimited by default.
 * `--report DIR` writes `scan_report.txt`, machine-readable `scan_report.json`, and — for unknown corruption patterns — anonymous diagnostic fingerprints (see below). An existing report directory needs `--force`. `--lang` and `--json` work like in `repair`.
 * Exit codes: `0` — everything examined is intact, `1` — corruption found, `2` — some paths could not be examined.
 
@@ -158,6 +159,7 @@ $ pptrepair repair-all ~/slides -o ~/repaired --dry-run      # plan only, write 
 * Artifacts follow the single-file conventions: a rebuilt/trimmed `<name>.repaired.pptx` or a `<name>.salvaged/` recovery folder (with its `REPORT.txt`). An artifact that already exists is skipped — so an interrupted batch can simply be re-run — unless you pass `--force`. One file's failure never stops the rest.
 * Encrypted/legacy Office files are reported but never attempted; files with no surviving content (empty or fully zeroed) are honestly reported as unrepairable.
 * `--dry-run` diagnoses everything and prints the repair plan without writing anything at all (not even reports).
+* `--max-file-size SIZE` skips files larger than SIZE before diagnosing or repairing them (a plain byte count, or with a `K`/`M`/`G`/`T` suffix, e.g. `500M`, `2G`); unlimited by default.
 * `--report DIR` writes `scan_report.txt`/`.json`, `repair_report.txt`/`.json` and anonymous diagnostic fingerprints for unknown patterns, like `scan --report`.
 * Exit codes: `0` — no corruption found, or every corrupted file was repaired; `1` — at least one corrupted file was left unrepaired (unrepairable, or skipped over an existing artifact); `2` — some paths could not be examined, or a repair failed with an error.
 
@@ -218,7 +220,31 @@ When `scan` meets damage that matches no known pattern (`other_corrupt`, or a `n
 
 If you hit an unknown pattern, please review the fingerprint file yourself and consider attaching it to a [new issue](https://github.com/xhighhongo41/PPTrepair/issues/new/choose) using the *Unknown corruption pattern report* template. These reports are what future repair strategies get built from.
 
+### Desktop GUI (v2.0)
+
+For everyday use without a terminal, `pptrepair gui` launches a PySide6-based desktop application that wraps the same scan/repair engine as the CLI.
+
+```console
+$ pipx install "pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git"
+$ pptrepair gui
+```
+
+The GUI needs the optional `[gui]` extra (PySide6) on top of the plain install described above; from a local clone, `pip install '.[gui]'` works the same way.
+
+Drop files, folders (scanned recursively for `.pptx`/`.pptm`) or backup archives onto the window — repeated drops keep accumulating into one work set. **Scan** diagnoses everything with live progress and a Cancel button, then lists the results in a **Files** tab (colour-coded verdicts) and a **Candidates** tab (the same restore/lineage/merge candidates `scan --report` writes to disk). **Repair** then runs in one of two modes:
+
+* **Single-file** repairs each corrupted file from its own bytes only, like `repair`/`repair-all`.
+* **Multi-source** merges in donor material mined from other copies and from any dropped backup archives, like `merge` — a donor-approval dialog shows the evidence for every candidate and lets you check or uncheck it before repairing; verified byte-identical donors are pre-checked, while the weaker candidate/lineage matches start unchecked and need deliberate approval, mirroring the CLI's own trust model.
+
+Output goes either **in place** next to each source, or into a chosen folder that mirrors the input tree — the GUI equivalents of `--in-place` and aggregate `-o OUTDIR`. A Preferences dialog controls whether cloud-only files may be downloaded, the maximum file size examined (default 2 GB, the GUI equivalent of `--max-file-size`), and the UI/report language — the same 7 languages as the CLI, with a change taking effect after restart. Every setting persists across launches. As with the CLI, dropped archives are only donor material: the files inside them are never repaired themselves.
+
 ## Changelog
+
+### ver 2.0.0 (2026-07-25)
+- New PySide6 desktop GUI (`pptrepair gui`, optional `[gui]` extra): drag & drop accumulation, recursive folder scan, live progress with cancellation, single-file / multi-source repair modes with donor approval, archive donor mining, in-place / mirrored folder output, persistent settings, 7-language UI
+- New `--max-file-size` option for `scan` / `repair-all` skips files above a given size (e.g. `500M`, `2G`; default: no limit)
+- Core: a cooperative cancellation contract (`OperationCancelled`) and a per-member archive-mining progress callback, both added to support the GUI's live progress and Cancel button
+- Development: adopted ruff for linting; `tools/check.sh` now runs ruff and the test suite as one pipeline
 
 ### ver 1.3.1 (2026-07-23)
 - Backup archives can now supply restore material. `pptrepair merge` accepts zip/tar archives (`.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz` and their short forms) as additional SRC arguments, and `scan` / `repair-all` gained an opt-in `--search-archives` flag that mines archives found during the walk — an intact twin or an older version kept inside a backup shows up among the restore/lineage/merge candidates, labelled `backup.zip::inner/deck.pptx`. Archived files are donor material only: never repaired, never counted, and cloud-only archives are never downloaded without `--allow-download`. Verified against real corrupted files: byte-identical `full` restores from a twin inside a zip and inside a tar.gz

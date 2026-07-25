@@ -313,3 +313,77 @@ def test_check_json_reports_timing_and_structure_integrity(
     assert clean_entry["structure_integrity"] == {
         "missing_count": 0, "items": [],
     }
+
+
+# --- _parse_max_file_size (--max-file-size argparse type) -----------------
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("12345", 12345),
+    ("500M", 524288000),
+    ("2G", 2147483648),
+    ("1.5K", 1536),
+    ("2gb", 2147483648),
+])
+def test_parse_max_file_size_accepts_valid_input(
+    text: str, expected: int
+) -> None:
+    """Plain byte counts and K/M/G/T-suffixed magnitudes parse correctly."""
+    from pptrepair.cli import _parse_max_file_size
+
+    assert _parse_max_file_size(text) == expected
+
+
+@pytest.mark.parametrize("text", ["abc", "", "-1", "0", "1X"])
+def test_parse_max_file_size_rejects_invalid_input(text: str) -> None:
+    """Malformed grammar and non-positive sizes raise ArgumentTypeError."""
+    import argparse
+
+    from pptrepair.cli import _parse_max_file_size
+
+    with pytest.raises(argparse.ArgumentTypeError):
+        _parse_max_file_size(text)
+
+
+# --- gui subcommand (v2.0 GUI skeleton) -----------------------------------
+
+
+def test_gui_subcommand_registered() -> None:
+    """The parser accepts a bare ``gui`` subcommand with no extra options."""
+    from pptrepair.cli import build_parser
+
+    parser = build_parser()
+    args = parser.parse_args(["gui"])
+    assert args.command == "gui"
+
+
+def test_gui_subcommand_reports_missing_pyside6(
+    monkeypatch: pytest.MonkeyPatch, capsys: CaptureFixture
+) -> None:
+    """Without PySide6 importable, ``gui`` prints an install hint to
+    stderr and returns EXIT_ERROR instead of raising an unhandled
+    ImportError.
+
+    Simulates PySide6 being absent by making both the top-level
+    ``PySide6`` package and the ``PySide6.QtWidgets`` submodule fail to
+    import (``None`` in :data:`sys.modules` is the standard "this name
+    is known to be missing" sentinel -- see the import system
+    reference). Blocking ``PySide6.QtWidgets`` specifically is required
+    in addition to ``PySide6`` itself: if PySide6 happens to already be
+    installed in the test environment (e.g. pytest-qt's own plugin
+    eagerly imports ``PySide6.QtWidgets`` at ``pytest_configure`` time,
+    well before this test runs), that submodule would otherwise already
+    be cached in ``sys.modules`` and satisfy the import regardless of
+    the parent package being blocked.
+    """
+    import sys
+
+    monkeypatch.delitem(sys.modules, "pptrepair.gui.app", raising=False)
+    monkeypatch.setitem(sys.modules, "PySide6", None)
+    monkeypatch.setitem(sys.modules, "PySide6.QtWidgets", None)
+
+    exit_code = main(["gui"])
+
+    err = capsys.readouterr().err
+    assert exit_code == EXIT_ERROR
+    assert "pip install 'pptrepair[gui]'" in err

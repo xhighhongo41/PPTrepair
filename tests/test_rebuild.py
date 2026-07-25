@@ -15,14 +15,18 @@ import io
 import posixpath
 import xml.etree.ElementTree as ET
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import pytest
 from fixtures import build_minimal_pptx
 
-from pptrepair.census import (EntryResult, categorize, from_central_directory,
-                              from_lfh_scan)
+from pptrepair.census import (
+    EntryResult,
+    categorize,
+    from_central_directory,
+    from_lfh_scan,
+)
 from pptrepair.classify import Verdict, classify
 from pptrepair.integrity import inspect_timing
 from pptrepair.rebuild import RebuildError, rebuild_package
@@ -278,7 +282,7 @@ def test_external_relationship_is_kept(tmp_path: Path) -> None:
         f'<Relationship Id="rId8" Type="{_R_NS}/image" '
         'Target="../media/missing.png"/>'
         '</Relationships>'
-    ).encode("utf-8")
+    ).encode()
     reader = FakeReader(payloads)
     output = tmp_path / "rebuilt.pptx"
 
@@ -312,7 +316,7 @@ def test_namespace_declaration_preserved(tmp_path: Path) -> None:
         '<p:sldId id="257" r:id="rId3"/>'
         '</p:sldIdLst>'
         '</p:presentation>'
-    ).encode("utf-8")
+    ).encode()
     reader = FakeReader(payloads)
     output = tmp_path / "rebuilt.pptx"
 
@@ -374,7 +378,7 @@ def _rels(relationships: list[tuple[str, str, str]]) -> bytes:
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
         f'<Relationships xmlns="{_REL_NS}">{items}</Relationships>'
-    ).encode("utf-8")
+    ).encode()
 
 
 def _slide_with(shapes: str) -> bytes:
@@ -386,7 +390,7 @@ def _slide_with(shapes: str) -> bytes:
         '<p:cSld><p:spTree><p:nvGrpSpPr/><p:grpSpPr/>'
         f'{shapes}'
         '</p:spTree></p:cSld></p:sld>'
-    ).encode("utf-8")
+    ).encode()
 
 
 def _pic(rid: str, cid: int = 4, name: str = "Img") -> str:
@@ -674,7 +678,7 @@ def test_cleanup_removes_custom_show_slide_reference(tmp_path: Path) -> None:
         '<p:sld r:id="rId4"/>'
         '</p:sldLst></p:custShow></p:custShowLst>'
         '</p:presentation>'
-    ).encode("utf-8")
+    ).encode()
     payloads["ppt/_rels/presentation.xml.rels"] = _rels([
         ("rId1", f"{_R_NS}/slideMaster", "slideMasters/slideMaster1.xml"),
         ("rId2", f"{_R_NS}/slide", "slides/slide1.xml"),
@@ -797,7 +801,7 @@ def _slide_with_timing(shapes: str, timing: str) -> bytes:
         '</p:spTree></p:cSld>'
         f'{timing}'
         '</p:sld>'
-    ).encode("utf-8")
+    ).encode()
 
 
 def _timing_seq_and_video(spid: str) -> str:

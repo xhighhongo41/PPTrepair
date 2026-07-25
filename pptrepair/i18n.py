@@ -21,8 +21,8 @@ Message conventions:
 from __future__ import annotations
 
 import gettext
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 #: Languages selectable via ``--lang`` (msgids themselves are English).
 SUPPORTED_LANGUAGES: tuple[str, ...] = (

@@ -84,6 +84,9 @@ msgstr "系列"
 msgid "Skipped: {n} Office temp file(s)"
 msgstr "已跳过: {n} 个 Office 临时文件"
 
+msgid "Skipped: {n} file(s) over the size limit"
+msgstr "已跳过: 超过大小上限的文件 {n} 个"
+
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "已跳过: {n} 个旧版 .ppt 文件"
 
@@ -197,6 +200,15 @@ msgstr "修复结果:"
 
 msgid "corrupted: overwritten with fragments of another ZIP archive"
 msgstr "损坏: 被另一个ZIP压缩包的碎片覆盖"
+
+msgid "[auto] — verified same-origin donor (byte-level CRC evidence). Trusted and pre-checked."
+msgstr "[auto] — 已验证的同源提供源（有字节级CRC证据）。可信，且已默认勾选。"
+
+msgid "[candidate] — probably the same origin, but not fully verified. Check to use."
+msgstr "[candidate] — 可能是同一来源，但未完全验证。需要使用请勾选。"
+
+msgid "[lineage] — a different version of the same document; merged content may differ slightly. Check only if that is acceptable."
+msgstr "[lineage] — 同一文档的不同版本；合并后的内容可能略有差异。仅在可接受的情况下勾选。"
 
 msgid "corrupted: archive body largely overwritten in place"
 msgstr "损坏: 压缩包主体大部分被就地覆盖"
@@ -323,4 +335,387 @@ msgstr "结构完整性: 缺少 {n} 个必需的关系"
 
 msgid "no {required} relationship"
 msgstr "无 {required} 关系"
+
+msgid " [archive]"
+msgstr " [压缩包]"
+
+msgid " [folder]"
+msgstr " [文件夹]"
+
+msgid "(choose a destination folder)"
+msgstr "(选择目标文件夹)"
+
+msgid "(empty)"
+msgstr "(空)"
+
+msgid "(no candidates found)"
+msgstr "(未找到候选)"
+
+msgid "(no donors found — will fall back to single-file repair)"
+msgstr "(未找到提供源 — 将回退为单文件修复)"
+
+msgid "(score {score})"
+msgstr "(分数 {score})"
+
+msgid ", failed {n}"
+msgstr "，失败 {n} 个"
+
+msgid ", {n} error(s)"
+msgstr "，错误 {n} 个"
+
+msgid "About PPTrepair"
+msgstr "关于 PPTrepair"
+
+msgid "Action"
+msgstr "操作"
+
+msgid "Add Files"
+msgstr "添加文件"
+
+msgid "Add Files…"
+msgstr "添加文件…"
+
+msgid "Add Folder"
+msgstr "添加文件夹"
+
+msgid "Add Folder…"
+msgstr "添加文件夹…"
+
+msgid "Added {n} source(s)"
+msgstr "已添加 {n} 个来源"
+
+msgid "All files"
+msgstr "所有文件"
+
+msgid "Archives are used only by multi-source repair; ignored in this mode"
+msgstr "压缩包仅在多来源修复中使用；此模式下将被忽略"
+
+msgid "Browse…"
+msgstr "浏览…"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Cancelling…"
+msgstr "正在取消…"
+
+msgid "Candidates"
+msgstr "候选"
+
+msgid "Checking {name}"
+msgstr "正在检查: {name}"
+
+msgid "Checking… {n} file(s)"
+msgstr "检查中… {n} 个文件"
+
+msgid "Choose an output folder before repairing, or switch to \"Repair in place\"."
+msgstr "请在修复前选择输出文件夹，或切换为\"原地修复\"。"
+
+msgid "Clear All"
+msgstr "全部清除"
+
+msgid "Clear Menu"
+msgstr "清除菜单"
+
+msgid "Clear Sources"
+msgstr "清除来源"
+
+msgid "Default Output"
+msgstr "默认输出"
+
+msgid "Default Output Folder"
+msgstr "默认输出文件夹"
+
+msgid "Default repair mode:"
+msgstr "默认修复模式:"
+
+msgid "Detail"
+msgstr "详情"
+
+msgid "Diagnose and repair PowerPoint files corrupted while stored on OneDrive."
+msgstr "诊断并修复在 OneDrive 存储期间损坏的 PowerPoint 文件。"
+
+msgid "Diagnosed {name}"
+msgstr "已诊断: {name}"
+
+msgid "Download cloud-only files"
+msgstr "下载仅云端文件"
+
+msgid "Downloading {name}…"
+msgstr "正在下载: {name}…"
+
+msgid "Drop PowerPoint files or folders here"
+msgstr "将 PowerPoint 文件或文件夹拖放到此处"
+
+msgid "File"
+msgstr "文件"
+
+msgid "Files"
+msgstr "文件"
+
+msgid "Follow symbolic links while walking"
+msgstr "遍历时跟随符号链接"
+
+msgid "Help"
+msgstr "帮助"
+
+msgid "Include file basenames in diagnostic fingerprints"
+msgstr "在诊断指纹中包含文件名"
+
+msgid "Language change takes effect after restart"
+msgstr "语言更改将在重启后生效"
+
+msgid "Language:"
+msgstr "语言:"
+
+msgid "Licensed under the GNU General Public License v3.0."
+msgstr "依据 GNU 通用公共许可证 v3.0 授权。"
+
+msgid "Lineage candidates"
+msgstr "版本候选"
+
+msgid "Max file size:"
+msgstr "最大文件大小:"
+
+msgid "Merge groups"
+msgstr "合并组"
+
+msgid "Merged {n}"
+msgstr "已合并 {n} 个"
+
+msgid "Merging…"
+msgstr "合并中…"
+
+msgid "Merging… {done}/{total}"
+msgstr "合并中… 共 {total} 个中的 {done} 个"
+
+msgid "Mined {name}"
+msgstr "已提取: {name}"
+
+msgid "Multi-source repair"
+msgstr "多来源修复"
+
+msgid "No limit"
+msgstr "无限制"
+
+msgid "No output folder"
+msgstr "未指定输出文件夹"
+
+msgid "No sources added"
+msgstr "未添加任何来源"
+
+msgid "Nothing to repair"
+msgstr "无需修复"
+
+msgid "Open Output Folder"
+msgstr "打开输出文件夹"
+
+msgid "Output"
+msgstr "输出"
+
+msgid "Path"
+msgstr "路径"
+
+msgid "PowerPoint files / archives"
+msgstr "PowerPoint 文件/压缩包"
+
+msgid "Preferences"
+msgstr "偏好设置"
+
+msgid "Preferences…"
+msgstr "偏好设置…"
+
+msgid "Quit"
+msgstr "退出"
+
+msgid "Ready"
+msgstr "就绪"
+
+msgid "Recent Folders"
+msgstr "最近使用的文件夹"
+
+msgid "Remove Selected"
+msgstr "删除所选"
+
+msgid "Repair"
+msgstr "修复"
+
+msgid "Repair Into Folder"
+msgstr "修复到文件夹"
+
+msgid "Repair cancelled"
+msgstr "修复已取消"
+
+msgid "Repair failed"
+msgstr "修复失败"
+
+msgid "Repair failed: {message}"
+msgstr "修复失败: {message}"
+
+msgid "Repair in place"
+msgstr "原地修复"
+
+msgid "Repair into folder:"
+msgstr "修复到文件夹:"
+
+msgid "Repair mode:"
+msgstr "修复模式:"
+
+msgid "Repaired {name}"
+msgstr "已修复: {name}"
+
+msgid "Repaired {repaired}, unrepairable {unrepairable}, skipped {skipped}"
+msgstr "已修复 {repaired} 个，无法修复 {unrepairable} 个，已跳过 {skipped} 个"
+
+msgid "Repairing…"
+msgstr "修复中…"
+
+msgid "Repairing… {done}/{total}"
+msgstr "修复中… 共 {total} 个中的 {done} 个"
+
+msgid "Repairing… {n} file(s) processed"
+msgstr "修复中… 已处理 {n} 个文件"
+
+msgid "Review the donors for each corrupted file, then click Repair."
+msgstr "请查看每个损坏文件的提供源，然后点击\"修复\"。"
+
+msgid "Run"
+msgstr "运行"
+
+msgid "Scan"
+msgstr "扫描"
+
+msgid "Scan cancelled"
+msgstr "扫描已取消"
+
+msgid "Scan failed"
+msgstr "扫描失败"
+
+msgid "Scan failed: {message}"
+msgstr "扫描失败: {message}"
+
+msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
+msgstr "已扫描 {n} 个文件: 损坏 {corrupted} 个，完好 {intact} 个"
+
+msgid "Scanning…"
+msgstr "扫描中…"
+
+msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
+msgstr "扫描中… 已诊断 {files} 个文件，已提取素材 {materials} 个"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Single-file repair"
+msgstr "单文件修复"
+
+msgid "Source"
+msgstr "来源"
+
+msgid "Sources changed — please scan again"
+msgstr "来源已更改 — 请重新扫描"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "The last scan found no corrupted files to repair."
+msgstr "上次扫描未发现需要修复的损坏文件。"
+
+msgid "The repair stopped unexpectedly:\n{message}"
+msgstr "修复意外停止:\n{message}"
+
+msgid "The scan stopped unexpectedly:\n{message}"
+msgstr "扫描意外停止:\n{message}"
+
+msgid "Twin candidates"
+msgstr "恢复候选"
+
+msgid "error"
+msgstr "错误"
+
+msgid "fallback failed {n}"
+msgstr "回退失败 {n} 个"
+
+msgid "fallback repaired {n}"
+msgstr "回退修复 {n} 个"
+
+msgid "group (size {size})"
+msgstr "组 (大小 {size})"
+
+msgid "material"
+msgstr "素材"
+
+msgid "merge failed {n}"
+msgstr "合并失败 {n} 个"
+
+msgid "merge failed: no output could be reconstructed"
+msgstr "合并失败: 无法重建输出"
+
+msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
+msgstr "pptrepair: 错误: 未安装 PySide6。请使用以下命令安装 GUI 扩展: pip install 'pptrepair[gui]'"
+
+msgid "skipped (cloud-only)"
+msgstr "已跳过(仅云端)"
+
+msgid "skipped (legacy .ppt)"
+msgstr "已跳过(旧版.ppt)"
+
+msgid "skipped (size limit)"
+msgstr "已跳过(大小超限)"
+
+msgid "skipped (temp file)"
+msgstr "已跳过(临时文件)"
+
+msgid "{n} archive material(s)"
+msgstr "压缩包素材 {n} 个"
+
+msgid "{n} duplicate(s) skipped"
+msgstr "已跳过 {n} 个重复项"
+
+msgid "{n} skipped"
+msgstr "已跳过 {n} 个"
+
+msgid "{n} unsupported item(s) rejected"
+msgstr "已拒绝 {n} 个不支持的项目"
+msgid "Quick Guide"
+msgstr "快速指南"
+
+msgid "Open GitHub Page"
+msgstr "打开 GitHub 页面"
+
+msgid "Report Unknown Corruption…"
+msgstr "报告未知损坏…"
+
+msgid "License Information"
+msgstr "许可信息"
+
+msgid "PPTrepair diagnoses and repairs PowerPoint files damaged while stored on OneDrive."
+msgstr "PPTrepair 诊断并修复在 OneDrive 存储期间损坏的 PowerPoint 文件。"
+
+msgid "1. Drop .pptx/.pptm files onto the window, or add a folder (scanned recursively for matching files)."
+msgstr "1. 将 .pptx/.pptm 文件拖放到窗口中，或添加一个文件夹(将递归扫描)。"
+
+msgid "2. Backup archives can also be dropped as donor material for multi-source repair."
+msgstr "2. 备份归档文件也可以拖放，作为多源修复的素材来源。"
+
+msgid "3. Click Scan to diagnose everything, then review the Files and Candidates tabs."
+msgstr "3. 点击“Scan”诊断全部内容，然后查看 Files 和 Candidates 标签页。"
+
+msgid "4. Pick Single-file or Multi-source repair mode."
+msgstr "4. 选择 Single-file 或 Multi-source 修复模式。"
+
+msgid "5. Choose in-place or folder output, then click Repair."
+msgstr "5. 选择原地修复或输出文件夹，然后点击“Repair”。"
+
+msgid "6. Multi-source repair asks you to approve donors mined from other copies and archives before repairing."
+msgstr "6. 多源修复会要求您先批准从其他副本和归档文件中挖掘出的素材来源，再进行修复。"
+
+msgid "PPTrepair is licensed under the GNU General Public License v3.0."
+msgstr "PPTrepair 依据 GNU 通用公共许可证 v3.0 授权。"
+
+msgid "This application uses Qt for Python (PySide6), licensed under the GNU LGPL v3."
+msgstr "本应用程序使用 Qt for Python（PySide6），依据 GNU LGPL v3 授权。"
+
+msgid "See the LICENSE file in the GitHub repository for details."
+msgstr "详情请参阅 GitHub 仓库中的 LICENSE 文件。"
 

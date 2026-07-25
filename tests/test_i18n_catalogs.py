@@ -1,9 +1,10 @@
 """Catalog completeness checks for the shipped translation catalogs.
 
 These tests keep the ``.po``/``.mo`` catalogs honest as the code
-evolves: every msgid used by the code (extracted the same way
-``tools/extract_messages.py`` does) must be covered by every shipped
-language, with format placeholders preserved.
+evolves: every msgid used by the code -- the core CLI (``pptrepair/*.py``)
+and the PySide6 GUI (``pptrepair/gui/*.py``) alike, extracted the same
+way ``tools/extract_messages.py`` does -- must be covered by every
+shipped language, with format placeholders preserved.
 """
 
 from __future__ import annotations
@@ -26,18 +27,25 @@ _SHIPPED_LANGUAGES = [lang for lang in SUPPORTED_LANGUAGES if lang != "en"]
 
 
 def _source_msgids() -> set[str]:
-    """Collect every msgid the code can pass to a translator."""
+    """Collect every msgid the code can pass to a translator.
+
+    Scans both ``pptrepair/*.py`` (the core CLI) and
+    ``pptrepair/gui/*.py`` (the PySide6 desktop app) -- non-recursively
+    in each, matching :func:`tools.extract_messages.literal_msgids`.
+    """
     msgids: set[str] = set(VERDICT_LABELS.values())
     msgids.update(label for label, _ns, _tag in _CORE_FIELDS)
-    for py_file in sorted(_PACKAGE_DIR.glob("*.py")):
-        tree = ast.parse(py_file.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id == "tr" and node.args
-                    and isinstance(node.args[0], ast.Constant)
-                    and isinstance(node.args[0].value, str)):
-                msgids.add(node.args[0].value)
+    source_dirs = (_PACKAGE_DIR, _PACKAGE_DIR / "gui")
+    for source_dir in source_dirs:
+        for py_file in sorted(source_dir.glob("*.py")):
+            tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "tr" and node.args
+                        and isinstance(node.args[0], ast.Constant)
+                        and isinstance(node.args[0].value, str)):
+                    msgids.add(node.args[0].value)
     return msgids
 
 
@@ -45,7 +53,7 @@ def _catalog(lang: str) -> dict[str, str]:
     """Load the compiled catalog for *lang* as a msgid -> msgstr dict."""
     translation = gettext.translation(
         DOMAIN, localedir=LOCALE_DIR, languages=[lang])
-    catalog = dict(getattr(translation, "_catalog"))
+    catalog = dict(translation._catalog)
     catalog.pop("", None)  # metadata header
     return catalog
 

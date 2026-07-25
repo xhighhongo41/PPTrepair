@@ -306,3 +306,28 @@ def test_skipped_existing_requires_force_to_overwrite(
     capsys.readouterr()
     assert forced == EXIT_OK
     assert artifact.is_file()
+
+
+# --- --max-file-size -----------------------------------------------------
+
+
+def test_max_file_size_skips_oversize_file_no_artifact_written(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """A corrupted file over --max-file-size is skipped before repair:
+    no artifact is written for it, and it counts as neither corrupted
+    nor repaired."""
+    root = _mkroot(tmp_path)
+    broken = _write(root, "trunc.pptx", _rebuildable_truncated())
+    out = tmp_path / "out"
+    small_limit = broken.stat().st_size // 2
+
+    exit_code = main(
+        ["repair-all", str(root), "-o", str(out),
+         "--max-file-size", str(small_limit)])
+
+    out_text = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert "Skipped: 1 file(s) over the size limit" in out_text
+    assert "Repaired: 0 file(s)" in out_text
+    assert not out.exists()

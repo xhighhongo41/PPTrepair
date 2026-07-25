@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pptrepair
 from pptrepair import archive as archive_module
@@ -39,6 +40,44 @@ from pptrepair.cli_batch import run_repair_all, run_scan
 from pptrepair.cli_single import run_check, run_repair, run_salvage
 from pptrepair.exit_codes import EXIT_CORRUPT, EXIT_ERROR, EXIT_OK
 from pptrepair.origin import OriginScore, score_origin
+
+#: Grammar accepted by ``--max-file-size``: a plain byte count, or a
+#: decimal magnitude with a binary (1024-based) K/M/G/T multiplier
+#: suffix and an optional trailing "B", case-insensitive.
+_SIZE_RE = re.compile(r"^(?P<value>\d+(?:\.\d+)?)(?P<unit>[KkMmGgTt]?)[Bb]?$")
+
+#: Byte multiplier per (uppercased) unit letter of :data:`_SIZE_RE`.
+_SIZE_MULTIPLIERS = {"": 1, "K": 1024, "M": 1024 ** 2,
+                     "G": 1024 ** 3, "T": 1024 ** 4}
+
+
+def _parse_max_file_size(text: str) -> int:
+    """Parse a ``--max-file-size`` value into a byte count.
+
+    Accepts a plain integer byte count (``"12345"``) or a decimal
+    magnitude followed by a ``K``/``M``/``G``/``T`` binary-multiplier
+    suffix (base 1024, case-insensitive) with an optional trailing
+    ``B`` (``"500M"``, ``"2G"``, ``"1.5K"``, ``"2gb"``). The scaled
+    value is floored to an :class:`int`.
+
+    :raises argparse.ArgumentTypeError: when *text* does not match the
+        accepted grammar, or resolves to a non-positive byte count --
+        used directly as an ``argparse`` ``type=`` callable, so
+        ``argparse`` reports the message as a usage error.
+    """
+    match = _SIZE_RE.fullmatch(text.strip())
+    if match is None:
+        raise argparse.ArgumentTypeError(
+            f"invalid size {text!r}: expected a byte count or a number "
+            "with a K/M/G/T suffix, e.g. 500M, 2G, 1.5K"
+        )
+    multiplier = _SIZE_MULTIPLIERS[match.group("unit").upper()]
+    size = int(float(match.group("value")) * multiplier)
+    if size <= 0:
+        raise argparse.ArgumentTypeError(
+            f"invalid size {text!r}: must be a positive number of bytes"
+        )
+    return size
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -217,6 +256,11 @@ def build_parser() -> argparse.ArgumentParser:
                           "only; archived files are never counted or "
                           "repaired (default: ignore archives)"
                       ))
+    scan.add_argument("--max-file-size", metavar="SIZE",
+                      type=_parse_max_file_size, default=None,
+                      help="skip files larger than SIZE (bytes or with "
+                           "K/M/G/T suffix, e.g. 500M, 2G; default: no "
+                           "limit)")
 
     repair_all = subparsers.add_parser(
         "repair-all",
@@ -287,6 +331,21 @@ def build_parser() -> argparse.ArgumentParser:
                                 "are never counted or repaired (default: "
                                 "ignore archives)"
                             ))
+    repair_all.add_argument("--max-file-size", metavar="SIZE",
+                            type=_parse_max_file_size, default=None,
+                            help="skip files larger than SIZE (bytes or "
+                                 "with K/M/G/T suffix, e.g. 500M, 2G; "
+                                 "default: no limit)")
+
+    subparsers.add_parser(
+        "gui",
+        help="launch the graphical interface (requires the [gui] extra)",
+        description=(
+            "Launch the PySide6 desktop interface. Requires the optional "
+            "[gui] extra (PySide6); install it with "
+            "`pip install 'pptrepair[gui]'`."
+        ),
+    )
     return parser
 
 
@@ -639,7 +698,7 @@ def _ask_yes_no(prompt: str) -> bool:
 
 
 def _merge_json_payload(
-    target_path: Path, outcome: "merge_module.MergeOutcome",
+    target_path: Path, outcome: merge_module.MergeOutcome,
     scored: list[tuple[Path, Diagnosis, OriginScore]], approved: list[Path],
     display: dict[Path, str] | None = None,
     origin: dict[Path, str] | None = None,
@@ -707,7 +766,7 @@ def _merge_json_payload(
     }
 
 
-def _render_merge_summary(outcome: "merge_module.MergeOutcome",
+def _render_merge_summary(outcome: merge_module.MergeOutcome,
                           tr: Callable[[str], str],
                           display: dict[Path, str] | None = None) -> str:
     """Render one merge outcome as a human-readable, translated summary.
@@ -757,6 +816,34 @@ def _render_merge_summary(outcome: "merge_module.MergeOutcome",
     return "\n".join(lines)
 
 
+def run_gui() -> int:
+    """Launch the PySide6 desktop interface (the ``gui`` subcommand).
+
+    :mod:`pptrepair.gui.app` (and, transitively, PySide6) is imported
+    lazily here rather than at this module's top level, so that
+    :mod:`pptrepair.cli` -- and every other subcommand -- keeps working
+    in an environment where the optional ``[gui]`` extra was never
+    installed.
+
+    :returns: :func:`pptrepair.gui.app.main`'s exit code on success, or
+        :data:`EXIT_ERROR` -- after printing an installation hint to
+        stderr -- when PySide6/the ``[gui]`` extra is not installed.
+    """
+    try:
+        from pptrepair.gui.app import main as gui_main
+    except ImportError:
+        # pptrepair.gui.i18n never imports PySide6, so this stays
+        # importable even in the environment that just failed above.
+        from pptrepair.gui.i18n import tr
+        print(
+            tr("pptrepair: error: PySide6 is not installed. Install the "
+               "GUI extra with: pip install 'pptrepair[gui]'"),
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    return gui_main()
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns the process exit code."""
     parser = build_parser()
@@ -777,12 +864,14 @@ def main(argv: list[str] | None = None) -> int:
         return run_scan(args.roots, args.report, args.force, args.show_all,
                         args.lang, args.json_output, args.follow_symlinks,
                         args.include_filenames, args.allow_download,
-                        args.search_archives)
+                        args.search_archives, args.max_file_size)
     if args.command == "repair-all":
         return run_repair_all(
             args.roots, args.output_dir, args.in_place, args.report,
             args.force, args.show_all, args.dry_run, args.lang,
             args.json_output, args.follow_symlinks, args.include_filenames,
-            args.allow_download, args.search_archives)
+            args.allow_download, args.search_archives, args.max_file_size)
+    if args.command == "gui":
+        return run_gui()
     parser.error(f"unknown command: {args.command}")
     return EXIT_ERROR

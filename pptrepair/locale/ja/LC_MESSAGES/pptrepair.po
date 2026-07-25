@@ -84,6 +84,9 @@ msgstr "系列"
 msgid "Skipped: {n} Office temp file(s)"
 msgstr "スキップ: Officeの一時ファイル {n} 件"
 
+msgid "Skipped: {n} file(s) over the size limit"
+msgstr "スキップ: サイズ上限を超えるファイル {n} 件"
+
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "スキップ: レガシー .ppt ファイル {n} 件"
 
@@ -197,6 +200,15 @@ msgstr "修復結果:"
 
 msgid "corrupted: overwritten with fragments of another ZIP archive"
 msgstr "破損: 別のZIPアーカイブの断片で上書きされています"
+
+msgid "[auto] — verified same-origin donor (byte-level CRC evidence). Trusted and pre-checked."
+msgstr "[auto] — 同一原本と検証済みの提供元（バイト単位のCRC照合による証拠）。信頼できるため既定でチェック済みです。"
+
+msgid "[candidate] — probably the same origin, but not fully verified. Check to use."
+msgstr "[candidate] — おそらく同一原本と思われますが、完全には検証されていません。使用する場合はチェックしてください。"
+
+msgid "[lineage] — a different version of the same document; merged content may differ slightly. Check only if that is acceptable."
+msgstr "[lineage] — 同じ文書の別バージョンです。マージ後の内容がわずかに異なる場合があります。許容できる場合のみチェックしてください。"
 
 msgid "corrupted: archive body largely overwritten in place"
 msgstr "破損: アーカイブ本体の大部分がその場で上書きされています"
@@ -323,4 +335,387 @@ msgstr "構造整合性: 必須リレーションシップの欠落 {n} 件"
 
 msgid "no {required} relationship"
 msgstr "{required}リレーションシップなし"
+
+msgid " [archive]"
+msgstr " [アーカイブ]"
+
+msgid " [folder]"
+msgstr " [フォルダ]"
+
+msgid "(choose a destination folder)"
+msgstr "(保存先フォルダを選択)"
+
+msgid "(empty)"
+msgstr "(なし)"
+
+msgid "(no candidates found)"
+msgstr "(候補が見つかりません)"
+
+msgid "(no donors found — will fall back to single-file repair)"
+msgstr "(提供元が見つかりません — 単一ファイル修復にフォールバックします)"
+
+msgid "(score {score})"
+msgstr "(スコア {score})"
+
+msgid ", failed {n}"
+msgstr "、失敗 {n} 件"
+
+msgid ", {n} error(s)"
+msgstr "、エラー {n} 件"
+
+msgid "About PPTrepair"
+msgstr "PPTrepairについて"
+
+msgid "Action"
+msgstr "操作"
+
+msgid "Add Files"
+msgstr "ファイルを追加"
+
+msgid "Add Files…"
+msgstr "ファイルを追加…"
+
+msgid "Add Folder"
+msgstr "フォルダを追加"
+
+msgid "Add Folder…"
+msgstr "フォルダを追加…"
+
+msgid "Added {n} source(s)"
+msgstr "{n} 件のソースを追加しました"
+
+msgid "All files"
+msgstr "すべてのファイル"
+
+msgid "Archives are used only by multi-source repair; ignored in this mode"
+msgstr "アーカイブはマルチソース修復でのみ使用されます。このモードでは無視されます"
+
+msgid "Browse…"
+msgstr "参照…"
+
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgid "Cancelling…"
+msgstr "キャンセル中…"
+
+msgid "Candidates"
+msgstr "候補"
+
+msgid "Checking {name}"
+msgstr "確認中: {name}"
+
+msgid "Checking… {n} file(s)"
+msgstr "確認中… {n} 件"
+
+msgid "Choose an output folder before repairing, or switch to \"Repair in place\"."
+msgstr "修復前に出力フォルダを選択するか、「その場で修復」に切り替えてください。"
+
+msgid "Clear All"
+msgstr "すべてクリア"
+
+msgid "Clear Menu"
+msgstr "メニューをクリア"
+
+msgid "Clear Sources"
+msgstr "ソースをクリア"
+
+msgid "Default Output"
+msgstr "既定の出力先"
+
+msgid "Default Output Folder"
+msgstr "既定の出力フォルダ"
+
+msgid "Default repair mode:"
+msgstr "既定の修復モード:"
+
+msgid "Detail"
+msgstr "詳細"
+
+msgid "Diagnose and repair PowerPoint files corrupted while stored on OneDrive."
+msgstr "OneDrive保存中に破損したPowerPointファイルを診断・修復します。"
+
+msgid "Diagnosed {name}"
+msgstr "診断済み: {name}"
+
+msgid "Download cloud-only files"
+msgstr "クラウド専用ファイルをダウンロードする"
+
+msgid "Downloading {name}…"
+msgstr "ダウンロード中: {name}…"
+
+msgid "Drop PowerPoint files or folders here"
+msgstr "PowerPointファイルまたはフォルダをここにドロップ"
+
+msgid "File"
+msgstr "ファイル"
+
+msgid "Files"
+msgstr "ファイル"
+
+msgid "Follow symbolic links while walking"
+msgstr "走査時にシンボリックリンクをたどる"
+
+msgid "Help"
+msgstr "ヘルプ"
+
+msgid "Include file basenames in diagnostic fingerprints"
+msgstr "診断用フィンガープリントにファイル名を含める"
+
+msgid "Language change takes effect after restart"
+msgstr "言語の変更はアプリの再起動後に反映されます"
+
+msgid "Language:"
+msgstr "言語:"
+
+msgid "Licensed under the GNU General Public License v3.0."
+msgstr "GNU General Public License v3.0の下でライセンスされています。"
+
+msgid "Lineage candidates"
+msgstr "別バージョン候補"
+
+msgid "Max file size:"
+msgstr "最大ファイルサイズ:"
+
+msgid "Merge groups"
+msgstr "マージグループ"
+
+msgid "Merged {n}"
+msgstr "マージ済み {n} 件"
+
+msgid "Merging…"
+msgstr "マージ中…"
+
+msgid "Merging… {done}/{total}"
+msgstr "マージ中… {total} 件中 {done} 件"
+
+msgid "Mined {name}"
+msgstr "採掘済み: {name}"
+
+msgid "Multi-source repair"
+msgstr "マルチソース修復"
+
+msgid "No limit"
+msgstr "無制限"
+
+msgid "No output folder"
+msgstr "出力フォルダが未指定"
+
+msgid "No sources added"
+msgstr "ソースは追加されていません"
+
+msgid "Nothing to repair"
+msgstr "修復対象がありません"
+
+msgid "Open Output Folder"
+msgstr "出力フォルダを開く"
+
+msgid "Output"
+msgstr "出力"
+
+msgid "Path"
+msgstr "パス"
+
+msgid "PowerPoint files / archives"
+msgstr "PowerPointファイル / アーカイブ"
+
+msgid "Preferences"
+msgstr "環境設定"
+
+msgid "Preferences…"
+msgstr "環境設定…"
+
+msgid "Quit"
+msgstr "終了"
+
+msgid "Ready"
+msgstr "準備完了"
+
+msgid "Recent Folders"
+msgstr "最近使用したフォルダ"
+
+msgid "Remove Selected"
+msgstr "選択項目を削除"
+
+msgid "Repair"
+msgstr "修復"
+
+msgid "Repair Into Folder"
+msgstr "修復先フォルダ"
+
+msgid "Repair cancelled"
+msgstr "修復をキャンセルしました"
+
+msgid "Repair failed"
+msgstr "修復に失敗しました"
+
+msgid "Repair failed: {message}"
+msgstr "修復に失敗しました: {message}"
+
+msgid "Repair in place"
+msgstr "その場で修復"
+
+msgid "Repair into folder:"
+msgstr "フォルダへ修復:"
+
+msgid "Repair mode:"
+msgstr "修復モード:"
+
+msgid "Repaired {name}"
+msgstr "修復済み: {name}"
+
+msgid "Repaired {repaired}, unrepairable {unrepairable}, skipped {skipped}"
+msgstr "修復済み {repaired} 件、修復不能 {unrepairable} 件、スキップ {skipped} 件"
+
+msgid "Repairing…"
+msgstr "修復中…"
+
+msgid "Repairing… {done}/{total}"
+msgstr "修復中… {total} 件中 {done} 件"
+
+msgid "Repairing… {n} file(s) processed"
+msgstr "修復中… {n} 件処理済み"
+
+msgid "Review the donors for each corrupted file, then click Repair."
+msgstr "各破損ファイルの提供元を確認し、「修復」をクリックしてください。"
+
+msgid "Run"
+msgstr "実行"
+
+msgid "Scan"
+msgstr "スキャン"
+
+msgid "Scan cancelled"
+msgstr "スキャンをキャンセルしました"
+
+msgid "Scan failed"
+msgstr "スキャンに失敗しました"
+
+msgid "Scan failed: {message}"
+msgstr "スキャンに失敗しました: {message}"
+
+msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
+msgstr "スキャン済み {n} 件: 破損 {corrupted} 件、無傷 {intact} 件"
+
+msgid "Scanning…"
+msgstr "スキャン中…"
+
+msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
+msgstr "スキャン中… 診断済み {files} 件、採掘済み素材 {materials} 件"
+
+msgid "Settings"
+msgstr "設定"
+
+msgid "Single-file repair"
+msgstr "単一ファイル修復"
+
+msgid "Source"
+msgstr "ソース"
+
+msgid "Sources changed — please scan again"
+msgstr "ソースが変更されました — 再度スキャンしてください"
+
+msgid "Status"
+msgstr "状態"
+
+msgid "The last scan found no corrupted files to repair."
+msgstr "前回のスキャンでは修復すべき破損ファイルが見つかりませんでした。"
+
+msgid "The repair stopped unexpectedly:\n{message}"
+msgstr "修復が予期せず停止しました:\n{message}"
+
+msgid "The scan stopped unexpectedly:\n{message}"
+msgstr "スキャンが予期せず停止しました:\n{message}"
+
+msgid "Twin candidates"
+msgstr "復元候補"
+
+msgid "error"
+msgstr "エラー"
+
+msgid "fallback failed {n}"
+msgstr "フォールバック失敗 {n} 件"
+
+msgid "fallback repaired {n}"
+msgstr "フォールバック修復 {n} 件"
+
+msgid "group (size {size})"
+msgstr "グループ (サイズ {size})"
+
+msgid "material"
+msgstr "素材"
+
+msgid "merge failed {n}"
+msgstr "マージ失敗 {n} 件"
+
+msgid "merge failed: no output could be reconstructed"
+msgstr "マージ失敗: 出力を再構築できませんでした"
+
+msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
+msgstr "pptrepair: エラー: PySide6 がインストールされていません。次のコマンドでGUI拡張をインストールしてください: pip install 'pptrepair[gui]'"
+
+msgid "skipped (cloud-only)"
+msgstr "スキップ(クラウド専用)"
+
+msgid "skipped (legacy .ppt)"
+msgstr "スキップ(レガシー .ppt)"
+
+msgid "skipped (size limit)"
+msgstr "スキップ(サイズ上限)"
+
+msgid "skipped (temp file)"
+msgstr "スキップ(一時ファイル)"
+
+msgid "{n} archive material(s)"
+msgstr "アーカイブ素材 {n} 件"
+
+msgid "{n} duplicate(s) skipped"
+msgstr "重複 {n} 件をスキップ"
+
+msgid "{n} skipped"
+msgstr "{n} 件をスキップ"
+
+msgid "{n} unsupported item(s) rejected"
+msgstr "未対応の項目 {n} 件を拒否"
+msgid "Quick Guide"
+msgstr "クイックガイド"
+
+msgid "Open GitHub Page"
+msgstr "GitHubページを開く"
+
+msgid "Report Unknown Corruption…"
+msgstr "未知の破損を報告…"
+
+msgid "License Information"
+msgstr "ライセンス情報"
+
+msgid "PPTrepair diagnoses and repairs PowerPoint files damaged while stored on OneDrive."
+msgstr "PPTrepairはOneDrive保存中に破損したPowerPointファイルを診断・修復します。"
+
+msgid "1. Drop .pptx/.pptm files onto the window, or add a folder (scanned recursively for matching files)."
+msgstr "1. .pptx/.pptmファイルをウィンドウにドロップするか、フォルダを追加してください(再帰的に走査されます)。"
+
+msgid "2. Backup archives can also be dropped as donor material for multi-source repair."
+msgstr "2. バックアップアーカイブもマルチソース修復用の素材としてドロップできます。"
+
+msgid "3. Click Scan to diagnose everything, then review the Files and Candidates tabs."
+msgstr "3. 「Scan」をクリックしてすべてを診断し、FilesタブとCandidatesタブを確認してください。"
+
+msgid "4. Pick Single-file or Multi-source repair mode."
+msgstr "4. Single-fileまたはMulti-source修復モードを選択してください。"
+
+msgid "5. Choose in-place or folder output, then click Repair."
+msgstr "5. 上書き修復か出力フォルダを選択し、「Repair」をクリックしてください。"
+
+msgid "6. Multi-source repair asks you to approve donors mined from other copies and archives before repairing."
+msgstr "6. マルチソース修復では、修復前に他のコピーやアーカイブから採掘されたドナーの承認を求められます。"
+
+msgid "PPTrepair is licensed under the GNU General Public License v3.0."
+msgstr "PPTrepairはGNU General Public License v3.0の下でライセンスされています。"
+
+msgid "This application uses Qt for Python (PySide6), licensed under the GNU LGPL v3."
+msgstr "本アプリケーションはQt for Python(PySide6)を使用しており、GNU LGPL v3の下でライセンスされています。"
+
+msgid "See the LICENSE file in the GitHub repository for details."
+msgstr "詳細はGitHubリポジトリのLICENSEファイルを参照してください。"
 
