@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -42,7 +42,18 @@ class SourcePanel(QWidget):
     empty and switches to a ``QListView`` bound to *model* as soon as
     the first source is added (and back again once the list is
     emptied), tracking the model's row-count changes automatically.
+
+    Additions made through this panel's own "Add Files…"/"Add Folder…"
+    dialogs (including the equivalent File-menu actions wired to them)
+    emit :attr:`sources_added` with the resulting
+    :class:`~pptrepair.gui.sources.AddResult`, so the host window can
+    summarise them on its status bar exactly as it already does for
+    drag-and-drop.
     """
+
+    #: Emitted after an "Add Files…"/"Add Folder…" dialog adds sources;
+    #: carries the :class:`~pptrepair.gui.sources.AddResult`.
+    sources_added = Signal(object)
 
     def __init__(
         self, model: SourceListModel, parent: QWidget | None = None
@@ -123,18 +134,30 @@ class SourcePanel(QWidget):
         self._stack.setCurrentWidget(page)
 
     def add_files(self) -> None:
-        """Open a file-selection dialog and add the chosen files."""
+        """Open a file-selection dialog and add the chosen files.
+
+        Emits :attr:`sources_added` with the resulting
+        :class:`~pptrepair.gui.sources.AddResult` when the dialog was
+        confirmed, so the host window can report the outcome.
+        """
         file_names, _selected_filter = QFileDialog.getOpenFileNames(
             self, "Add Files", "", _FILE_DIALOG_FILTER
         )
         if file_names:
-            self._model.add_paths(Path(name) for name in file_names)
+            result = self._model.add_paths(Path(name) for name in file_names)
+            self.sources_added.emit(result)
 
     def add_folder(self) -> None:
-        """Open a folder-selection dialog and add the chosen folder."""
+        """Open a folder-selection dialog and add the chosen folder.
+
+        Emits :attr:`sources_added` with the resulting
+        :class:`~pptrepair.gui.sources.AddResult` when the dialog was
+        confirmed, so the host window can report the outcome.
+        """
         directory = QFileDialog.getExistingDirectory(self, "Add Folder")
         if directory:
-            self._model.add_paths([Path(directory)])
+            result = self._model.add_paths([Path(directory)])
+            self.sources_added.emit(result)
 
     def remove_selected(self) -> None:
         """Remove the rows currently selected in the list view."""
