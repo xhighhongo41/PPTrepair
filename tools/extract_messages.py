@@ -52,8 +52,8 @@ def literal_msgids(source_dir: Path) -> set[str]:
 def dynamic_msgids() -> set[str]:
     """Collect msgids that reach ``tr()`` through known message tables."""
     sys.path.insert(0, str(REPO_ROOT))
-    from pptrepair.extract import _CORE_FIELDS  # noqa: PLC0415
-    from pptrepair.report import VERDICT_LABELS  # noqa: PLC0415
+    from pptrepair.extract import _CORE_FIELDS
+    from pptrepair.report import VERDICT_LABELS
 
     msgids = set(VERDICT_LABELS.values())
     msgids.update(label for label, _ns, _tag in _CORE_FIELDS)

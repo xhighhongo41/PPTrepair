@@ -12,8 +12,8 @@ from __future__ import annotations
 import csv
 import io
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from fixtures import build_minimal_pptx
 
@@ -45,7 +45,7 @@ class FakeSalvageReader:
 
     def datetime_of(self, salvaged: SalvagedEntry) -> None:
         """Always report no recoverable timestamp."""
-        return None
+        return
 
 
 def _entry(name: str) -> SalvagedEntry:

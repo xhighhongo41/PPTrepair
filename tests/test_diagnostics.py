@@ -17,11 +17,20 @@ import zipfile
 import zlib
 from pathlib import Path
 
-from fixtures import (append_foreign_tail, build_foreign_zip,
-                      build_minimal_pptx, find_eocd, foreign_prefix,
-                      header_offset, lfh_offsets, overlay_foreign_zip_head,
-                      version_mix, zero_interior_entry, zero_prefix,
-                      zero_range)
+from fixtures import (
+    append_foreign_tail,
+    build_foreign_zip,
+    build_minimal_pptx,
+    find_eocd,
+    foreign_prefix,
+    header_offset,
+    lfh_offsets,
+    overlay_foreign_zip_head,
+    version_mix,
+    zero_interior_entry,
+    zero_prefix,
+    zero_range,
+)
 
 from pptrepair import __version__
 from pptrepair.census import from_central_directory, from_lfh_scan

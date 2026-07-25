@@ -12,13 +12,16 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pptrepair.census import (CensusResult, from_central_directory,
-                              from_lfh_scan)
+from pptrepair.census import CensusResult, from_central_directory, from_lfh_scan
 from pptrepair.classify import Diagnosis, Verdict, classify
 from pptrepair.extract import ExtractResult, extract_salvage
 from pptrepair.i18n import get_translator
-from pptrepair.integrity import (inspect_orphans, inspect_references,
-                                 inspect_structure, inspect_timing)
+from pptrepair.integrity import (
+    inspect_orphans,
+    inspect_references,
+    inspect_structure,
+    inspect_timing,
+)
 from pptrepair.rebuild import RebuildResult, rebuild_package
 from pptrepair.salvage import SalvagedEntry, SalvageReader, select_salvageable
 from pptrepair.scanner import scan_structure

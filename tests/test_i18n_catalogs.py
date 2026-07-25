@@ -45,7 +45,7 @@ def _catalog(lang: str) -> dict[str, str]:
     """Load the compiled catalog for *lang* as a msgid -> msgstr dict."""
     translation = gettext.translation(
         DOMAIN, localedir=LOCALE_DIR, languages=[lang])
-    catalog = dict(getattr(translation, "_catalog"))
+    catalog = dict(translation._catalog)
     catalog.pop("", None)  # metadata header
     return catalog
 

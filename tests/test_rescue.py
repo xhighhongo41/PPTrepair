@@ -25,8 +25,8 @@ from fixtures import (
 )
 
 from pptrepair import rescue
-from pptrepair.cli import EXIT_CORRUPT, EXIT_OK, main
 from pptrepair.classify import Verdict
+from pptrepair.cli import EXIT_CORRUPT, EXIT_OK, main
 from pptrepair.repair import OutputExistsError
 
 #: Small media payload so fixtures stay fast to build and scan.

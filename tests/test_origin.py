@@ -13,8 +13,14 @@ import io
 import zipfile
 from pathlib import Path
 
-from fixtures import (build_minimal_jpeg, build_minimal_pptx, find_eocd,
-                      foreign_prefix, make_edited_version, truncate)
+from fixtures import (
+    build_minimal_jpeg,
+    build_minimal_pptx,
+    find_eocd,
+    foreign_prefix,
+    make_edited_version,
+    truncate,
+)
 
 from pptrepair.census import from_central_directory, from_lfh_scan
 from pptrepair.classify import Diagnosis

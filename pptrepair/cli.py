@@ -26,8 +26,8 @@ import json
 import re
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pptrepair
 from pptrepair import archive as archive_module
@@ -698,7 +698,7 @@ def _ask_yes_no(prompt: str) -> bool:
 
 
 def _merge_json_payload(
-    target_path: Path, outcome: "merge_module.MergeOutcome",
+    target_path: Path, outcome: merge_module.MergeOutcome,
     scored: list[tuple[Path, Diagnosis, OriginScore]], approved: list[Path],
     display: dict[Path, str] | None = None,
     origin: dict[Path, str] | None = None,
@@ -766,7 +766,7 @@ def _merge_json_payload(
     }
 
 
-def _render_merge_summary(outcome: "merge_module.MergeOutcome",
+def _render_merge_summary(outcome: merge_module.MergeOutcome,
                           tr: Callable[[str], str],
                           display: dict[Path, str] | None = None) -> str:
     """Render one merge outcome as a human-readable, translated summary.

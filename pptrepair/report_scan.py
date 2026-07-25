@@ -7,20 +7,23 @@ small; see :mod:`pptrepair.cli_batch` for the caller.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from pptrepair.classify import Verdict
 from pptrepair.origin import OriginScore
-from pptrepair.report_candidates import (_lineage_candidate_text_lines,
-                                         _lineage_candidates_map,
-                                         _lineage_candidates_to_json,
-                                         _merge_group_map,
-                                         _merge_group_text_lines,
-                                         _merge_groups_to_json,
-                                         _twin_candidate_text_lines,
-                                         _twin_candidates_map,
-                                         _twin_candidates_to_json)
+from pptrepair.report_candidates import (
+    _lineage_candidate_text_lines,
+    _lineage_candidates_map,
+    _lineage_candidates_to_json,
+    _merge_group_map,
+    _merge_group_text_lines,
+    _merge_groups_to_json,
+    _twin_candidate_text_lines,
+    _twin_candidates_map,
+    _twin_candidates_to_json,
+)
 from pptrepair.report_common import ISSUE_URL, VERDICT_LABELS
 from pptrepair.twin import TwinCandidate
 
@@ -28,7 +31,7 @@ if TYPE_CHECKING:  # avoid runtime import cycles with scan
     from pptrepair.scan import FileOutcome, ScanResult
 
 
-def render_scan_text(result: "ScanResult", tr: Callable[[str], str],
+def render_scan_text(result: ScanResult, tr: Callable[[str], str],
                      include_files: bool = True) -> str:
     """Render a scan result as a human-readable, translated report.
 
@@ -70,7 +73,7 @@ def render_scan_text(result: "ScanResult", tr: Callable[[str], str],
     return "\n".join(_scan_summary_lines(result, tr, include_files))
 
 
-def _scan_summary_lines(result: "ScanResult", tr: Callable[[str], str],
+def _scan_summary_lines(result: ScanResult, tr: Callable[[str], str],
                         include_files: bool) -> list[str]:
     """Build the line list rendered by :func:`render_scan_text`.
 
@@ -183,7 +186,7 @@ def _scan_summary_lines(result: "ScanResult", tr: Callable[[str], str],
     return lines
 
 
-def _collect_errors(result: "ScanResult") -> list[tuple[Path, str]]:
+def _collect_errors(result: ScanResult) -> list[tuple[Path, str]]:
     """Merge walk errors and per-file pipeline failures, in that order."""
     errors = list(result.walk.errors)
     errors.extend(
@@ -193,7 +196,7 @@ def _collect_errors(result: "ScanResult") -> list[tuple[Path, str]]:
     return errors
 
 
-def render_scan_json(result: "ScanResult") -> str:
+def render_scan_json(result: ScanResult) -> str:
     """Render a scan result as a language-neutral JSON object.
 
     Schema (stable for tests)::
@@ -250,7 +253,7 @@ def render_scan_json(result: "ScanResult") -> str:
     return json.dumps(_scan_payload(result), indent=2)
 
 
-def _scan_payload(result: "ScanResult") -> dict:
+def _scan_payload(result: ScanResult) -> dict:
     """Build the payload dict serialized by :func:`render_scan_json`.
 
     Factored out so :func:`render_batch_json` can embed it unchanged as
@@ -310,7 +313,7 @@ def _scan_payload(result: "ScanResult") -> dict:
 
 
 def _scan_file_entry(
-    outcome: "FileOutcome", twin_map: dict[Path, list[TwinCandidate]],
+    outcome: FileOutcome, twin_map: dict[Path, list[TwinCandidate]],
     lineage_map: dict[Path, list[tuple[Path, OriginScore]]],
 ) -> dict:
     """Render one diagnosed file's entry in :func:`_scan_payload`'s ``files`` list.

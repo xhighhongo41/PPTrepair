@@ -6,7 +6,6 @@ import zipfile
 from io import BytesIO
 
 import pytest
-
 from fixtures import (
     build_minimal_pptx,
     build_zip_with_data_descriptors,

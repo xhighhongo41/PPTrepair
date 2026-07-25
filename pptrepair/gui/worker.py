@@ -138,7 +138,7 @@ class ScanWorker(QThread):
         """
         self._cancel_event.set()
 
-    def run(self) -> None:  # noqa: D401 (Qt override, imperative is fine)
+    def run(self) -> None:
         """Execute the request on the worker thread.
 
         Runs the two phases the design mandates and translates the
@@ -167,7 +167,7 @@ class ScanWorker(QThread):
         except OperationCancelled:
             # Cooperative stop requested through cancel(); not an error.
             self.cancelled.emit()
-        except Exception as exc:  # noqa: BLE001 (report, never crash thread)
+        except Exception as exc:
             # Any unexpected failure is summarised for the UI rather than
             # left to terminate the worker thread silently.
             self.failed.emit(f"{type(exc).__name__}: {exc}")

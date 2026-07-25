@@ -99,8 +99,12 @@ from pathlib import Path
 
 from pptrepair.census import EntryResult, categorize, from_central_directory
 from pptrepair.classify import Diagnosis
-from pptrepair.integrity import (inspect_orphans, inspect_references,
-                                 inspect_structure, inspect_timing)
+from pptrepair.integrity import (
+    inspect_orphans,
+    inspect_references,
+    inspect_structure,
+    inspect_timing,
+)
 from pptrepair.origin import OriginScore, score_origin
 from pptrepair.rebuild import RebuildError, rebuild_package
 from pptrepair.repair import OutputExistsError
@@ -1066,12 +1070,10 @@ def _crossover_entry(
         return None
     split_points = [start, *boundaries, end]
 
-    attempts = 0
-    for cuts, run_copies in _iter_crossover_assignments(
-            len(boundaries), candidates):
+    for attempts, (cuts, run_copies) in enumerate(
+            _iter_crossover_assignments(len(boundaries), candidates)):
         if attempts >= MAX_CROSSOVER_ATTEMPTS:
             return None
-        attempts += 1
         # Concatenate each run's byte range from the copy assigned to it.
         segment = b"".join(
             copy_bytes[run_copies[run]][
@@ -1133,10 +1135,9 @@ def _crossover_capped(interval: tuple[int, int], copy_paths: list[Path],
     boundaries = _crossover_boundaries(start, end)
     if len(candidates) < 2 or not boundaries:
         return False
-    count = 0
-    for _assignment in _iter_crossover_assignments(len(boundaries),
-                                                   candidates):
-        count += 1
+    for count, _assignment in enumerate(
+            _iter_crossover_assignments(len(boundaries), candidates),
+            start=1):
         if count > MAX_CROSSOVER_ATTEMPTS:
             return True
     return False

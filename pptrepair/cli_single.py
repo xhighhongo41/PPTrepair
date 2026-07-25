@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from pptrepair import i18n
 from pptrepair import repair as repair_module
@@ -18,12 +18,21 @@ from pptrepair import rescue as rescue_module
 from pptrepair import scan as scan_module
 from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.exit_codes import EXIT_CORRUPT, EXIT_ERROR, EXIT_OK
-from pptrepair.integrity import (RefIntegrityResult, StructureIntegrityResult,
-                                 TimingIntegrityResult, inspect_references,
-                                 inspect_structure, inspect_timing)
+from pptrepair.integrity import (
+    RefIntegrityResult,
+    StructureIntegrityResult,
+    TimingIntegrityResult,
+    inspect_references,
+    inspect_structure,
+    inspect_timing,
+)
 from pptrepair.rebuild import RebuildError
-from pptrepair.report import (render_json, render_repair_json,
-                              render_repair_text, render_text)
+from pptrepair.report import (
+    render_json,
+    render_repair_json,
+    render_repair_text,
+    render_text,
+)
 
 
 def run_check(files: list[str], lang: str, json_output: bool) -> int:

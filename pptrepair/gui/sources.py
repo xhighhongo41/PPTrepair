@@ -17,9 +17,10 @@ lists the paths the user dropped.
 from __future__ import annotations
 
 import enum
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, Qt
 from PySide6.QtWidgets import QApplication, QStyle
@@ -117,7 +118,7 @@ class SourceListModel(QAbstractListModel):
         super().__init__(parent)
         self._entries: list[SourceEntry] = []
 
-    def rowCount(  # noqa: N802 (Qt's required camelCase override)
+    def rowCount(
         self, parent: QModelIndex = QModelIndex()
     ) -> int:
         """Return the number of accumulated source entries.
@@ -128,7 +129,7 @@ class SourceListModel(QAbstractListModel):
             return 0
         return len(self._entries)
 
-    def data(  # noqa: N802 (Qt's required camelCase override)
+    def data(
         self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> Any:
         """Return the display text or icon for *index*.

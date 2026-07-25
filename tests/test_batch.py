@@ -14,12 +14,16 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from fixtures import (append_foreign_tail, build_minimal_pptx, truncate,
-                      zero_prefix)
+from fixtures import append_foreign_tail, build_minimal_pptx, truncate, zero_prefix
 
 from pptrepair import batch as batch_module
-from pptrepair.batch import (assign_root_labels, BatchItem, plan_output_base,
-                             plan_output_bases, repair_paths)
+from pptrepair.batch import (
+    BatchItem,
+    assign_root_labels,
+    plan_output_base,
+    plan_output_bases,
+    repair_paths,
+)
 from pptrepair.cancel import OperationCancelled
 from pptrepair.repair import default_output_path
 

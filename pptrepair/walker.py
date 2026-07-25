@@ -27,9 +27,9 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 #: File suffixes handled by the diagnosis pipeline (matched
 #: case-insensitively). Both are OOXML ZIP containers.
@@ -98,11 +98,8 @@ def is_cloud_placeholder(st: os.stat_result) -> bool:
     attributes are read with ``getattr`` defaults so the check is a
     no-op (False) on platforms that do not expose them.
     """
-    if getattr(st, "st_flags", 0) & SF_DATALESS:
-        return True
-    if getattr(st, "st_file_attributes", 0) & _RECALL_MASK:
-        return True
-    return False
+    return bool(getattr(st, "st_flags", 0) & SF_DATALESS
+                or getattr(st, "st_file_attributes", 0) & _RECALL_MASK)
 
 
 def _record_error(result: WalkResult, path: Path, exc: OSError) -> None:

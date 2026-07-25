@@ -12,8 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from pptrepair.integrity import (inspect_orphans, inspect_references,
-                                 inspect_structure, inspect_timing)
+from pptrepair.integrity import (
+    inspect_orphans,
+    inspect_references,
+    inspect_structure,
+    inspect_timing,
+)
 
 _A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -62,7 +66,7 @@ def test_healthy_package_has_no_dangling_refs(tmp_path: Path) -> None:
             f'<p:presentation xmlns:p="{_P_NS}" xmlns:r="{_R_NS}">'
             '<p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>'
             '</p:presentation>'
-        ).encode("utf-8"),
+        ).encode(),
         "ppt/_rels/presentation.xml.rels": _rels_xml(
             [("rId1", "slide", "slides/slide1.xml")]),
         "ppt/slides/slide1.xml": (
@@ -71,7 +75,7 @@ def test_healthy_package_has_no_dangling_refs(tmp_path: Path) -> None:
             '<a:blip r:embed="rId1"/>'
             '</p:blipFill></p:pic></p:spTree></p:cSld>'
             '</p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
         "ppt/slides/_rels/slide1.xml.rels": _rels_xml(
             [("rId1", "image", "../media/image1.png")]),
         "ppt/media/image1.png": b"\x89PNG-fake-bytes",
@@ -99,7 +103,7 @@ def test_dangling_blip_embed_detected(tmp_path: Path) -> None:
             '<a:blip r:embed="rId9"/>'
             '</p:blipFill></p:pic></p:spTree></p:cSld>'
             '</p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
         "ppt/slides/_rels/slide2.xml.rels": _rels_xml(
             [("rId1", "image", "../media/image1.png")]),
     }
@@ -135,7 +139,7 @@ def test_dangling_video_and_media_both_detected(tmp_path: Path) -> None:
             '</p:extLst>'
             '</p:nvPr></p:nvPicPr></p:pic></p:spTree></p:cSld>'
             '</p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
         "ppt/slides/_rels/slide3.xml.rels": _rels_xml(
             [("rId1", "image", "../media/poster.png")]),
     }
@@ -166,7 +170,7 @@ def test_hlink_dangling_and_empty_rid_ignored(tmp_path: Path) -> None:
             '<a:hlinkClick r:id=""/>'
             '</a:rPr></a:r></a:p></p:txBody></p:sp>'
             '</p:spTree></p:cSld></p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
         "ppt/slides/_rels/slide4.xml.rels": _rels_xml([]),
     }
     path = _make_pptx(tmp_path / "dangling_hlink.pptx", parts)
@@ -188,7 +192,7 @@ def test_unknown_attribute_name_detected(tmp_path: Path) -> None:
         "ppt/slides/slide5.xml": (
             f'<p:sld xmlns:p="{_P_NS}" xmlns:r="{_R_NS}">'
             '<p:cSld><p:bg r:pict="rId8"/></p:cSld></p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
         "ppt/slides/_rels/slide5.xml.rels": _rels_xml(
             [("rId1", "image", "../media/image1.png")]),
     }
@@ -214,7 +218,7 @@ def test_external_relationship_id_not_dangling(tmp_path: Path) -> None:
             '<a:hlinkClick r:id="rIdExt"/>'
             '</a:rPr></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>'
             '</p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
         "ppt/slides/_rels/slide6.xml.rels": _rels_xml(
             [], external=[("rIdExt", "hyperlink", "https://example.com/")]),
     }
@@ -237,7 +241,7 @@ def test_missing_rels_part_flags_all_references(tmp_path: Path) -> None:
             '<p:cSld><p:spTree><p:pic><p:blipFill>'
             '<a:blip r:embed="rId1"/>'
             '</p:blipFill></p:pic></p:spTree></p:cSld></p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
         # Deliberately no ppt/slides/_rels/slide7.xml.rels part.
     }
     path = _make_pptx(tmp_path / "missing_rels.pptx", parts)
@@ -263,7 +267,7 @@ def test_corrupt_part_recorded_others_still_checked(tmp_path: Path) -> None:
             '<p:cSld><p:spTree><p:pic><p:blipFill>'
             '<a:blip r:embed="rId1"/>'
             '</p:blipFill></p:pic></p:spTree></p:cSld></p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
         "ppt/slides/_rels/slide9.xml.rels": _rels_xml(
             [("rId1", "image", "../media/image1.png")]),
     }
@@ -287,7 +291,7 @@ def test_corrupt_rels_part_recorded_and_refs_dangling(tmp_path: Path) -> None:
             '<p:cSld><p:spTree><p:pic><p:blipFill>'
             '<a:blip r:embed="rId1"/>'
             '</p:blipFill></p:pic></p:spTree></p:cSld></p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
         "ppt/slides/_rels/slide10.xml.rels": b"<Relationships broken",
     }
     path = _make_pptx(tmp_path / "corrupt_rels.pptx", parts)
@@ -335,7 +339,7 @@ def test_timing_video_with_videofile_shape_is_healthy(tmp_path: Path) -> None:
             '</p:cMediaNode></p:video>'
             '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
             '</p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
     }
     path = _make_pptx(tmp_path / "timing_healthy.pptx", parts)
 
@@ -365,7 +369,7 @@ def test_timing_video_without_videofile_is_media_mismatch(
             '</p:cMediaNode></p:video>'
             '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
             '</p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
     }
     path = _make_pptx(tmp_path / "timing_media_mismatch.pptx", parts)
 
@@ -396,7 +400,7 @@ def test_timing_sptgt_missing_shape_is_dangling_not_mismatch(
             '</p:cMediaNode></p:video>'
             '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
             '</p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
     }
     path = _make_pptx(tmp_path / "timing_dangling_video_target.pptx", parts)
 
@@ -420,7 +424,7 @@ def test_timing_bldp_missing_shape_is_dangling(tmp_path: Path) -> None:
             '<p:timing><p:tnLst><p:par><p:cTn id="1"/></p:par></p:tnLst>'
             '<p:bldLst><p:bldP spid="99" grpId="0"/></p:bldLst>'
             '</p:timing></p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
     }
     path = _make_pptx(tmp_path / "timing_dangling_bldp.pptx", parts)
 
@@ -447,7 +451,7 @@ def test_timing_empty_spid_is_ignored(tmp_path: Path) -> None:
             '</p:cond></p:stCondLst></p:cTn></p:seq>'
             '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
             '</p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
     }
     path = _make_pptx(tmp_path / "timing_empty_spid.pptx", parts)
 
@@ -475,7 +479,7 @@ def test_timing_audio_without_audiofile_is_media_mismatch(
             '</p:cMediaNode></p:audio>'
             '</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>'
             '</p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
     }
     path = _make_pptx(tmp_path / "timing_audio_mismatch.pptx", parts)
 
@@ -499,7 +503,7 @@ def test_timing_absent_slide_has_empty_results(tmp_path: Path) -> None:
             '<p:cNvPr id="1" name="Picture 1"/><p:cNvPicPr/><p:nvPr/>'
             '</p:nvPicPr><p:blipFill/><p:spPr/></p:pic></p:spTree></p:cSld>'
             '</p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
     }
     path = _make_pptx(tmp_path / "timing_absent.pptx", parts)
 
@@ -522,7 +526,7 @@ def test_timing_corrupt_part_recorded_others_still_checked(
         "ppt/slides/slide29.xml": (
             f'<p:sld xmlns:p="{_P_NS}">'
             '<p:cSld><p:spTree/></p:cSld></p:sld>'
-        ).encode("utf-8"),
+        ).encode(),
     }
     path = _make_pptx(tmp_path / "timing_corrupt_part.pptx", parts)
 

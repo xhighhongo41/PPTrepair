@@ -40,9 +40,9 @@ from pptrepair.census import (
 )
 from pptrepair.classify import Diagnosis, Verdict, classify
 from pptrepair.salvage import (
+    SalvagedEntry,
     SalvageError,
     SalvageReader,
-    SalvagedEntry,
     select_salvageable,
 )
 from pptrepair.scanner import scan_structure
@@ -257,9 +257,8 @@ def test_lfh_crc_mismatch_raises_after_full_consumption(
     corrupted[data_start + 5] ^= 0xFF
     bad_path = _write(tmp_path, "bad.zip", bytes(corrupted))
 
-    with SalvageReader(bad_path) as reader:
-        with pytest.raises(SalvageError):
-            _read_all(reader, salvaged)
+    with SalvageReader(bad_path) as reader, pytest.raises(SalvageError):
+        _read_all(reader, salvaged)
 
 
 # --- duplicate-name resolution and warnings --------------------------------

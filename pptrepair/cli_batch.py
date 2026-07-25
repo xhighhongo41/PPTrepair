@@ -16,8 +16,12 @@ from pptrepair import repair as repair_module
 from pptrepair import scan as scan_module
 from pptrepair.classify import Verdict
 from pptrepair.exit_codes import EXIT_CORRUPT, EXIT_ERROR, EXIT_OK
-from pptrepair.report import (render_batch_json, render_batch_text,
-                              render_scan_json, render_scan_text)
+from pptrepair.report import (
+    render_batch_json,
+    render_batch_text,
+    render_scan_json,
+    render_scan_text,
+)
 
 
 def run_scan(roots: list[str], report: str | None, force: bool,

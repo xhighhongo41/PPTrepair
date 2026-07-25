@@ -39,8 +39,12 @@ from pathlib import Path
 
 from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.repair import OutputExistsError
-from pptrepair.salvage import (SalvageError, SalvagedEntry, SalvageReader,
-                               select_salvageable)
+from pptrepair.salvage import (
+    SalvagedEntry,
+    SalvageError,
+    SalvageReader,
+    select_salvageable,
+)
 from pptrepair.scan import diagnose_file
 
 #: JSON report identity/versioning, mirrored by the scan/repair reports.
@@ -454,9 +458,7 @@ def _is_unsafe_name(name: str) -> bool:
     parts = normalized.split("/")
     if ".." in parts:
         return True
-    if not [part for part in parts if part not in ("", ".")]:
-        return True
-    return False
+    return not [part for part in parts if part not in ("", ".")]
 
 
 def _safe_relative(name: str) -> Path:

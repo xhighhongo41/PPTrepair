@@ -16,10 +16,10 @@ PySide6 = pytest.importorskip("PySide6")
 # the suite runs headlessly (e.g. in CI, with no display available).
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtGui import QAction  # noqa: E402
-from pytestqt.qtbot import QtBot  # noqa: E402
+from PySide6.QtGui import QAction
+from pytestqt.qtbot import QtBot
 
-from pptrepair.gui.main_window import MainWindow  # noqa: E402
+from pptrepair.gui.main_window import MainWindow
 
 
 @pytest.fixture

@@ -19,8 +19,14 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from fixtures import (build_minimal_pptx, header_offset, make_corrupted_copies,
-                      make_edited_version, truncate, zero_prefix)
+from fixtures import (
+    build_minimal_pptx,
+    header_offset,
+    make_corrupted_copies,
+    make_edited_version,
+    truncate,
+    zero_prefix,
+)
 
 from pptrepair import scan as scan_module
 from pptrepair import walker as walker_module

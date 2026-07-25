@@ -14,11 +14,15 @@ import struct
 import zipfile
 from pathlib import Path
 
-import pytest
-
 import fixtures
-from fixtures import (build_minimal_jpeg, build_minimal_pptx, find_eocd,
-                      make_corrupted_copies, make_edited_version)
+import pytest
+from fixtures import (
+    build_minimal_jpeg,
+    build_minimal_pptx,
+    find_eocd,
+    make_corrupted_copies,
+    make_edited_version,
+)
 
 from pptrepair import merge as merge_module
 from pptrepair.integrity import inspect_orphans

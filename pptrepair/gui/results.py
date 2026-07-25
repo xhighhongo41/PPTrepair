@@ -144,7 +144,7 @@ class ScanResultsModel(QAbstractTableModel):
         self._rows = _build_rows(result)
         self.endResetModel()
 
-    def rowCount(  # noqa: N802 (Qt's required camelCase override)
+    def rowCount(
         self, parent: QModelIndex = QModelIndex()
     ) -> int:
         """Return the number of result rows.
@@ -155,7 +155,7 @@ class ScanResultsModel(QAbstractTableModel):
             return 0
         return len(self._rows)
 
-    def columnCount(  # noqa: N802 (Qt's required camelCase override)
+    def columnCount(
         self, parent: QModelIndex = QModelIndex()
     ) -> int:
         """Return the fixed column count (Path/Status/Detail).
@@ -166,7 +166,7 @@ class ScanResultsModel(QAbstractTableModel):
             return 0
         return len(_COLUMNS)
 
-    def data(  # noqa: N802 (Qt's required camelCase override)
+    def data(
         self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> Any:
         """Return the cell text or foreground colour for *index*.
@@ -190,7 +190,7 @@ class ScanResultsModel(QAbstractTableModel):
 
         return None
 
-    def headerData(  # noqa: N802 (Qt's required camelCase override)
+    def headerData(
         self, section: int, orientation: Qt.Orientation,
         role: int = Qt.ItemDataRole.DisplayRole
     ) -> Any:

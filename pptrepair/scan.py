@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import json
 import tempfile
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
 
 from pptrepair.archive import ArchiveMember, list_members, materialize
 from pptrepair.census import from_central_directory, from_lfh_scan
@@ -391,21 +391,21 @@ def scan_paths(roots: Sequence[Path], *,
         diagnosis, error = diagnose_file(path)
         outcome = FileOutcome(path=path, diagnosis=diagnosis, error=error)
 
-        if diagnosis is not None and is_fingerprint_target(diagnosis):
-            if diagnostics_dir is not None:
-                if fingerprints_written < MAX_FINGERPRINTS:
-                    diagnostics_dir.mkdir(parents=True, exist_ok=True)
-                    fingerprint = build_fingerprint(
-                        diagnosis, include_filename=include_filenames)
-                    fingerprint_path = (
-                        diagnostics_dir / f"{file_id(path)}.diag.json")
-                    fingerprint_path.write_text(
-                        json.dumps(fingerprint, indent=2) + "\n",
-                        encoding="utf-8")
-                    outcome.fingerprint_path = fingerprint_path
-                    fingerprints_written += 1
-                else:
-                    result.fingerprints_skipped += 1
+        if (diagnosis is not None and is_fingerprint_target(diagnosis)
+                and diagnostics_dir is not None):
+            if fingerprints_written < MAX_FINGERPRINTS:
+                diagnostics_dir.mkdir(parents=True, exist_ok=True)
+                fingerprint = build_fingerprint(
+                    diagnosis, include_filename=include_filenames)
+                fingerprint_path = (
+                    diagnostics_dir / f"{file_id(path)}.diag.json")
+                fingerprint_path.write_text(
+                    json.dumps(fingerprint, indent=2) + "\n",
+                    encoding="utf-8")
+                outcome.fingerprint_path = fingerprint_path
+                fingerprints_written += 1
+            else:
+                result.fingerprints_skipped += 1
 
         result.outcomes.append(outcome)
         if progress is not None:

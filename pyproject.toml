@@ -44,3 +44,5 @@ ignore = ["BLE001"]
 [tool.ruff.lint.per-file-ignores]
 # report.py は report_*.py 群のファサード(再エクスポート専用)
 "pptrepair/report.py" = ["F401"]
+# Qtのオーバーライド必須シグネチャ(rowCount/data等)がQModelIndex()を既定値に取る
+"pptrepair/gui/*.py" = ["B008"]

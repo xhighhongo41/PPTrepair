@@ -20,22 +20,34 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 import fixtures
+import pytest
 
 from pptrepair.batch import BatchItem, BatchResult
 from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.i18n import get_translator
-from pptrepair.integrity import (DanglingRef, MediaMismatch, MissingStructure,
-                                 RefIntegrityResult, StructureIntegrityResult,
-                                 TimingIntegrityResult, TimingRef)
+from pptrepair.integrity import (
+    DanglingRef,
+    MediaMismatch,
+    MissingStructure,
+    RefIntegrityResult,
+    StructureIntegrityResult,
+    TimingIntegrityResult,
+    TimingRef,
+)
 from pptrepair.rebuild import RebuildResult
 from pptrepair.repair import RepairOutcome
-from pptrepair.report import (VERDICT_LABELS, render_batch_json,
-                              render_batch_text, render_json,
-                              render_repair_json, render_repair_text,
-                              render_scan_json, render_scan_text, render_text)
+from pptrepair.report import (
+    VERDICT_LABELS,
+    render_batch_json,
+    render_batch_text,
+    render_json,
+    render_repair_json,
+    render_repair_text,
+    render_scan_json,
+    render_scan_text,
+    render_text,
+)
 from pptrepair.scan import FileOutcome, ScanResult, scan_paths
 from pptrepair.scanner import ZipStructure
 from pptrepair.walker import WalkResult
@@ -656,8 +668,8 @@ def _live_batch_result() -> BatchResult:
     return BatchResult(
         scan=scan, items=items, output_dir=Path("out"), in_place=False,
         dry_run=False,
-        warnings=["output name collision under out: root/h.pptx falls back "
-                 "to base 'h.pptx' because 'h' is already taken by root/i.pptx"],
+        warnings=[("output name collision under out: root/h.pptx falls back "
+                 "to base 'h.pptx' because 'h' is already taken by root/i.pptx")],
     )
 
 

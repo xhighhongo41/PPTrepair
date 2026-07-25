@@ -22,18 +22,18 @@ PySide6 = pytest.importorskip("PySide6")
 # the suite runs headlessly (e.g. in CI, with no display available).
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt  # noqa: E402
-from pytestqt.qtbot import QtBot  # noqa: E402
+from PySide6.QtCore import Qt
+from pytestqt.qtbot import QtBot
 
-from pptrepair.gui.main_window import MainWindow  # noqa: E402
-from pptrepair.gui.results import ScanResultsModel  # noqa: E402
-from pptrepair.gui.run_options import RepairMode, RunOptionsPanel  # noqa: E402
-from pptrepair.gui.worker import (  # noqa: E402
+from pptrepair.gui.main_window import MainWindow
+from pptrepair.gui.results import ScanResultsModel
+from pptrepair.gui.run_options import RepairMode, RunOptionsPanel
+from pptrepair.gui.worker import (
     GuiScanResult,
     ScanRequest,
     ScanWorker,
 )
-from pptrepair.scan import (  # noqa: E402
+from pptrepair.scan import (
     diagnose_archive_materials,
     scan_paths,
 )

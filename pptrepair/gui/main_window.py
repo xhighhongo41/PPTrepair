@@ -192,11 +192,10 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "About PPTrepair",
-            "PPTrepair {version}\n"
+            f"PPTrepair {pptrepair.__version__}\n"
             "Diagnose and repair PowerPoint files corrupted while "
             "stored on OneDrive.\n"
-            "Licensed under the GNU General Public License v3.0.".format(
-                version=pptrepair.__version__),
+            "Licensed under the GNU General Public License v3.0.",
         )
 
     # -- scan lifecycle ------------------------------------------------
@@ -354,7 +353,7 @@ class MainWindow(QMainWindow):
         assert isinstance(result, AddResult)
         self.statusBar().showMessage(self._format_add_result(result))
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         """Accept a drag that carries at least one local file URL.
 
         :param event: Qt's drag-enter event; not consumed when the
@@ -363,7 +362,7 @@ class MainWindow(QMainWindow):
         if self._has_local_file_urls(event.mimeData()):
             event.acceptProposedAction()
 
-    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+    def dropEvent(self, event: QDropEvent) -> None:
         """Add the dropped local files/folders to the source list.
 
         :param event: Qt's drop event; its accepted URLs are resolved
@@ -413,7 +412,7 @@ class MainWindow(QMainWindow):
 
     # -- shutdown ------------------------------------------------------
 
-    def closeEvent(self, event: object) -> None:  # noqa: N802 (Qt override)
+    def closeEvent(self, event: object) -> None:
         """Stop a running scan before the window closes.
 
         Requests cancellation and blocks (briefly) for the worker to

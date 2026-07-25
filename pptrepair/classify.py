@@ -207,8 +207,8 @@ def _alignment_note(offset: int) -> str | None:
 def _zero_ratio_evidence(structure: ZipStructure) -> list[str]:
     """Return evidence describing a file that is almost entirely zeros."""
     evidence = [
-        f"{structure.zero_total()} of {structure.size} bytes are zero "
-        f"({structure.zero_ratio():.1%})",
+        (f"{structure.zero_total()} of {structure.size} bytes are zero "
+        f"({structure.zero_ratio():.1%})"),
     ]
     if structure.zero_runs:
         first_run = structure.zero_runs[0]
@@ -301,16 +301,16 @@ def _decide_unopenable(structure: ZipStructure,
     if (eocd.is_consistent and trailing > TAIL_JUNK_MIN
             and lfh_census.ok_entries()):
         return Verdict.TAIL_FOREIGN_DATA, [
-            f"EOCD record found at offset {eocd.offset}, but {trailing} "
-            "bytes of unindexed data follow the archive",
+            (f"EOCD record found at offset {eocd.offset}, but {trailing} "
+            "bytes of unindexed data follow the archive"),
             f"leading archive [0, {eocd_end}) appears complete",
-            f"{len(lfh_census.ok_entries())} CRC-valid entries found by "
-            "scanning",
+            (f"{len(lfh_census.ok_entries())} CRC-valid entries found by "
+            "scanning"),
         ]
 
     return Verdict.OTHER_CORRUPT, [
-        f"EOCD record found at offset {eocd.offset} but the "
-        "archive could not be opened (no valid central directory)",
+        (f"EOCD record found at offset {eocd.offset} but the "
+        "archive could not be opened (no valid central directory)"),
     ]
 
 
@@ -352,8 +352,8 @@ def _decide_partial_cd(structure: ZipStructure, cd_census: CensusResult,
         return scattered
 
     return Verdict.OTHER_CORRUPT, [
-        f"{cd_census.ok_count()} of {cd_census.total()} central directory "
-        "entries are readable",
+        (f"{cd_census.ok_count()} of {cd_census.total()} central directory "
+        "entries are readable"),
     ]
 
 
@@ -368,11 +368,11 @@ def _check_version_mix(cd_census: CensusResult,
     if len(mismatches) < VERSION_MIX_MIN_MISMATCHES:
         return None
     evidence = [
-        f"{len(mismatches)} CRC-valid scanned entries have header offsets "
+        (f"{len(mismatches)} CRC-valid scanned entries have header offsets "
         f"not listed in the central directory (>= {VERSION_MIX_MIN_MISMATCHES} "
-        "required)",
-        f"central directory lists {cd_census.total()} entries, "
-        f"{cd_census.ok_count()} readable",
+        "required)"),
+        (f"central directory lists {cd_census.total()} entries, "
+        f"{cd_census.ok_count()} readable"),
     ]
     return Verdict.VERSION_MIX, evidence
 
@@ -392,10 +392,10 @@ def _check_head_zero_fill(structure: ZipStructure,
     if not affected or any(entry.ok for entry in affected):
         return None
     evidence = [
-        f"leading zero region [0, {first_run.end}) covers "
-        f"{first_run.length()} bytes",
-        f"{len(affected)} central directory entries starting inside the "
-        "zero region are all unreadable",
+        (f"leading zero region [0, {first_run.end}) covers "
+        f"{first_run.length()} bytes"),
+        (f"{len(affected)} central directory entries starting inside the "
+        "zero region are all unreadable"),
     ]
     note = _alignment_note(first_run.end)
     if note is not None:
@@ -498,8 +498,8 @@ def _check_head_foreign_data(
     evidence = [
         "file does not start with a ZIP local file header signature",
         f"first CRC-valid scanned entry starts at offset {first_ok}",
-        f"{len(affected)} central directory entries before that offset "
-        "are all unreadable",
+        (f"{len(affected)} central directory entries before that offset "
+        "are all unreadable"),
     ]
     fragments = _foreign_fragment_entries(cd_census, lfh_census)
     if fragments:
@@ -519,10 +519,10 @@ def _check_interior_damage(
     if cd_census.ok_count() == 0:
         return None
     evidence = [
-        f"{cd_census.ok_count()} of {cd_census.total()} central directory "
-        "entries are readable",
-        "file head and central directory are intact; damage is confined "
-        "to entry data",
+        (f"{cd_census.ok_count()} of {cd_census.total()} central directory "
+        "entries are readable"),
+        ("file head and central directory are intact; damage is confined "
+        "to entry data"),
     ]
     if structure.zero_runs:
         largest_run = max(structure.zero_runs, key=lambda run: run.length())
@@ -565,9 +565,9 @@ def _check_foreign_zip_overwrite(
     if not fragments:
         return None
     evidence = [
-        f"{len(fragments)} CRC-valid scanned entries belong to an "
+        (f"{len(fragments)} CRC-valid scanned entries belong to an "
         "unrelated ZIP archive (names not listed in the central "
-        "directory)",
+        "directory)"),
     ]
     for entry in fragments[:_FOREIGN_FRAGMENT_SAMPLE]:
         evidence.append(
@@ -605,10 +605,10 @@ def _check_scattered_overwrite(
     if survival >= SCATTERED_LFH_SURVIVAL_MAX:
         return None
     evidence = [
-        f"only {lfh_survivors} local file header(s) survive for {total} "
-        f"central directory entries ({survival:.1%})",
-        "the central directory and EOCD are intact, but the archive body "
-        "was overwritten in place",
+        (f"only {lfh_survivors} local file header(s) survive for {total} "
+        f"central directory entries ({survival:.1%})"),
+        ("the central directory and EOCD are intact, but the archive body "
+        "was overwritten in place"),
     ]
     return Verdict.SCATTERED_OVERWRITE, evidence
 

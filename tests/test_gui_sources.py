@@ -17,22 +17,21 @@ PySide6 = pytest.importorskip("PySide6")
 # the suite runs headlessly (e.g. in CI, with no display available).
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl  # noqa: E402
-from PySide6.QtGui import (  # noqa: E402
+from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
+from PySide6.QtGui import (
     QAction,
     QDragEnterEvent,
     QDropEvent,
     QKeySequence,
 )
-from pytestqt.qtbot import QtBot  # noqa: E402
+from pytestqt.qtbot import QtBot
 
-from pptrepair.gui.main_window import MainWindow  # noqa: E402
-from pptrepair.gui.sources import (  # noqa: E402
+from pptrepair.gui.main_window import MainWindow
+from pptrepair.gui.sources import (
     SourceKind,
     SourceListModel,
     classify_source,
 )
-
 
 # --------------------------------------------------------------------------
 # classify_source

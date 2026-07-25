@@ -34,15 +34,21 @@ Implementation requirements:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
 
 from pptrepair.classify import Diagnosis, Verdict
 from pptrepair.i18n import get_translator
+from pptrepair.repair import (
+    EXTRACT_SUFFIX,
+    REBUILD_SUFFIX,
+    OutputExistsError,
+    RepairOutcome,
+    predict_auto_mode,
+    repair_file,
+)
 from pptrepair.report import render_repair_text
-from pptrepair.repair import (EXTRACT_SUFFIX, REBUILD_SUFFIX, OutputExistsError,
-                              RepairOutcome, predict_auto_mode, repair_file)
 from pptrepair.scan import ArchiveMaterial, FileOutcome, ScanResult, scan_paths
 
 

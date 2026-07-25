@@ -7,19 +7,22 @@ small; see :mod:`pptrepair.cli_batch` for the caller.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from pptrepair.classify import Verdict
 from pptrepair.origin import OriginScore
-from pptrepair.report_candidates import (_lineage_candidate_text_lines,
-                                         _lineage_candidates_map,
-                                         _lineage_candidates_to_json,
-                                         _merge_group_map,
-                                         _merge_group_text_lines,
-                                         _twin_candidate_text_lines,
-                                         _twin_candidates_map,
-                                         _twin_candidates_to_json)
+from pptrepair.report_candidates import (
+    _lineage_candidate_text_lines,
+    _lineage_candidates_map,
+    _lineage_candidates_to_json,
+    _merge_group_map,
+    _merge_group_text_lines,
+    _twin_candidate_text_lines,
+    _twin_candidates_map,
+    _twin_candidates_to_json,
+)
 from pptrepair.report_scan import _scan_payload, _scan_summary_lines
 from pptrepair.twin import TwinCandidate
 
@@ -27,7 +30,7 @@ if TYPE_CHECKING:  # avoid runtime import cycles with batch
     from pptrepair.batch import BatchItem, BatchResult
 
 
-def render_batch_text(result: "BatchResult", tr: Callable[[str], str],
+def render_batch_text(result: BatchResult, tr: Callable[[str], str],
                       include_files: bool = False) -> str:
     """Render a ``repair-all`` batch result as a human-readable report.
 
@@ -144,7 +147,7 @@ def render_batch_text(result: "BatchResult", tr: Callable[[str], str],
     return "\n".join(lines)
 
 
-def _count_lost_content(items: "list[BatchItem]") -> int:
+def _count_lost_content(items: list[BatchItem]) -> int:
     """Count unrepairable items whose diagnosis promises no surviving content.
 
     ``EMPTY_FILE`` and ``FULL_ZERO_FILL`` (see :mod:`pptrepair.classify`)
@@ -163,7 +166,7 @@ def _count_lost_content(items: "list[BatchItem]") -> int:
     return count
 
 
-def _repair_item_line(item: "BatchItem") -> str:
+def _repair_item_line(item: BatchItem) -> str:
     """Render one :class:`~pptrepair.batch.BatchItem` as one report line.
 
     The path, verdict code, action code and mode code are never
@@ -185,7 +188,7 @@ def _repair_item_line(item: "BatchItem") -> str:
     return line
 
 
-def render_batch_json(result: "BatchResult") -> str:
+def render_batch_json(result: BatchResult) -> str:
     """Render a ``repair-all`` batch result as a language-neutral JSON object.
 
     Schema (stable for tests)::
@@ -268,7 +271,7 @@ def render_batch_json(result: "BatchResult") -> str:
 
 
 def _batch_item_to_dict(
-    item: "BatchItem", twin_map: dict[Path, list[TwinCandidate]],
+    item: BatchItem, twin_map: dict[Path, list[TwinCandidate]],
     lineage_map: dict[Path, list[tuple[Path, OriginScore]]],
 ) -> dict:
     """Render one :class:`~pptrepair.batch.BatchItem` as its JSON-schema dict.
