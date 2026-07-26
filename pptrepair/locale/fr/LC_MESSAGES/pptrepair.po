@@ -719,3 +719,75 @@ msgstr "Cette application utilise Qt for Python (PySide6), sous licence GNU LGPL
 msgid "See the LICENSE file in the GitHub repository for details."
 msgstr "Consultez le fichier LICENSE du dépôt GitHub pour plus de détails."
 
+
+msgid "Already intact — no repair needed"
+msgstr "Intact — aucune réparation nécessaire"
+
+msgid "Could not repair"
+msgstr "Réparation impossible"
+
+msgid "Download"
+msgstr "Télécharger"
+
+msgid "Drop .pptx / .pptm files here, or click to choose files"
+msgstr "Déposez ici des fichiers .pptx / .pptm, ou cliquez pour les choisir"
+
+msgid "Error"
+msgstr "Erreur"
+
+msgid "File exceeds the {limit} MB size limit."
+msgstr "Le fichier dépasse la limite de {limit} Mo."
+
+msgid "Free software (GPL-3.0). Files are never uploaded."
+msgstr "Logiciel libre (GPL-3.0). Les fichiers ne sont jamais téléversés."
+
+msgid "Get the desktop version"
+msgstr "Obtenir la version de bureau"
+
+msgid "Language"
+msgstr "Langue"
+
+msgid "Loading the repair engine (about 14 MB, first visit only)…"
+msgstr "Chargement du moteur de réparation (environ 14 Mo, première visite seulement)…"
+
+msgid "Multiple corrupted copies, an intact twin, or whole folders to scan? The desktop app can merge sources for a better repair."
+msgstr "Plusieurs copies corrompues, un jumeau intact ou des dossiers entiers à analyser ? L'application de bureau peut fusionner les sources pour une meilleure réparation."
+
+msgid "Partially salvaged"
+msgstr "Récupération partielle"
+
+msgid "Preparing the repair toolkit…"
+msgstr "Préparation des outils de réparation…"
+
+msgid "Queued"
+msgstr "En attente"
+
+msgid "Ready. Your files are processed on this device only."
+msgstr "Prêt. Vos fichiers sont traités uniquement sur cet appareil."
+
+msgid "Repair corrupted PowerPoint files right in your browser."
+msgstr "Réparez les fichiers PowerPoint corrompus directement dans votre navigateur."
+
+msgid "Repaired"
+msgstr "Réparé"
+
+msgid "Result"
+msgstr "Résultat"
+
+msgid "Show details"
+msgstr "Afficher les détails"
+
+msgid "Size"
+msgstr "Taille"
+
+msgid "Source code"
+msgstr "Code source"
+
+msgid "The repair engine stopped unexpectedly. Reload the page and try again."
+msgstr "Le moteur de réparation s'est arrêté de manière inattendue. Rechargez la page et réessayez."
+
+msgid "Unsupported file type (only .pptx / .pptm)."
+msgstr "Type de fichier non pris en charge (uniquement .pptx / .pptm)."
+
+msgid "Your files never leave this device. All processing happens locally in your browser; nothing is uploaded to any server."
+msgstr "Vos fichiers ne quittent jamais cet appareil. Tout le traitement se fait localement dans votre navigateur ; rien n'est envoyé à aucun serveur."

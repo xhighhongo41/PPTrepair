@@ -719,3 +719,75 @@ msgstr "이 애플리케이션은 GNU LGPL v3 라이선스의 Qt for Python(PySi
 msgid "See the LICENSE file in the GitHub repository for details."
 msgstr "자세한 내용은 GitHub 저장소의 LICENSE 파일을 참조하세요."
 
+
+msgid "Already intact — no repair needed"
+msgstr "손상 없음 — 복구가 필요하지 않습니다"
+
+msgid "Could not repair"
+msgstr "복구할 수 없습니다"
+
+msgid "Download"
+msgstr "다운로드"
+
+msgid "Drop .pptx / .pptm files here, or click to choose files"
+msgstr ".pptx / .pptm 파일을 여기에 끌어다 놓거나 클릭하여 선택하세요"
+
+msgid "Error"
+msgstr "오류"
+
+msgid "File exceeds the {limit} MB size limit."
+msgstr "파일이 크기 제한 {limit} MB를 초과합니다."
+
+msgid "Free software (GPL-3.0). Files are never uploaded."
+msgstr "자유 소프트웨어 (GPL-3.0). 파일은 절대 업로드되지 않습니다."
+
+msgid "Get the desktop version"
+msgstr "데스크톱 버전 받기"
+
+msgid "Language"
+msgstr "언어"
+
+msgid "Loading the repair engine (about 14 MB, first visit only)…"
+msgstr "복구 엔진을 불러오는 중 (약 14 MB, 첫 방문 시에만)…"
+
+msgid "Multiple corrupted copies, an intact twin, or whole folders to scan? The desktop app can merge sources for a better repair."
+msgstr "여러 손상된 사본, 손상되지 않은 쌍둥이 파일, 또는 폴더 전체 검사가 필요하신가요? 데스크톱 앱은 여러 소스를 병합하여 더 나은 복구를 제공합니다."
+
+msgid "Partially salvaged"
+msgstr "부분적으로 복구됨"
+
+msgid "Preparing the repair toolkit…"
+msgstr "복구 도구를 준비하는 중…"
+
+msgid "Queued"
+msgstr "대기 중"
+
+msgid "Ready. Your files are processed on this device only."
+msgstr "준비 완료. 파일은 이 기기에서만 처리됩니다."
+
+msgid "Repair corrupted PowerPoint files right in your browser."
+msgstr "손상된 PowerPoint 파일을 브라우저에서 바로 복구하세요."
+
+msgid "Repaired"
+msgstr "복구됨"
+
+msgid "Result"
+msgstr "결과"
+
+msgid "Show details"
+msgstr "자세히 보기"
+
+msgid "Size"
+msgstr "크기"
+
+msgid "Source code"
+msgstr "소스 코드"
+
+msgid "The repair engine stopped unexpectedly. Reload the page and try again."
+msgstr "복구 엔진이 예기치 않게 중지되었습니다. 페이지를 새로 고친 후 다시 시도하세요."
+
+msgid "Unsupported file type (only .pptx / .pptm)."
+msgstr "지원되지 않는 파일 형식입니다 (.pptx / .pptm만 지원)."
+
+msgid "Your files never leave this device. All processing happens locally in your browser; nothing is uploaded to any server."
+msgstr "파일은 이 기기를 절대 벗어나지 않습니다. 모든 처리는 브라우저 안에서 로컬로 이루어지며 어떤 서버에도 업로드되지 않습니다."

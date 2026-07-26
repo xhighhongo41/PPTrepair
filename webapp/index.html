@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PPTrepair — repair corrupted PowerPoint files in your browser</title>
+<meta name="description"
+      content="Repair corrupted .pptx files locally in your browser. Files are never uploaded.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>PPTrepair <span id="app-version"></span></h1>
+  <p data-i18n="tagline">Repair corrupted PowerPoint files right in your
+    browser.</p>
+  <p class="privacy" data-i18n="privacy_note">Your files never leave this
+    device. All processing happens locally in your browser; nothing is
+    uploaded to any server.</p>
+  <label class="lang">
+    <span data-i18n="lang_label">Language</span>
+    <select id="lang-select" aria-label="Language"></select>
+  </label>
+</header>
+
+<main>
+  <div id="loading" role="status">
+    <span class="spinner" aria-hidden="true"></span>
+    <span id="loading-text" data-i18n="loading_engine">Loading the repair
+      engine (about 14 MB, first visit only)…</span>
+  </div>
+
+  <div id="dropzone" hidden tabindex="0" role="button">
+    <p data-i18n="drop_hint">Drop .pptx / .pptm files here, or click to
+      choose files</p>
+    <input id="file-input" type="file" multiple
+           accept=".pptx,.pptm" hidden>
+  </div>
+  <p id="ready-note" class="privacy" hidden data-i18n="ready_note">Ready.
+    Your files are processed on this device only.</p>
+
+  <table id="results" hidden>
+    <thead>
+      <tr>
+        <th data-i18n="col_file">File</th>
+        <th data-i18n="col_size">Size</th>
+        <th data-i18n="col_status">Status</th>
+        <th data-i18n="col_download">Result</th>
+      </tr>
+    </thead>
+    <tbody id="results-body"></tbody>
+  </table>
+
+  <p class="gui-note">
+    <span data-i18n="gui_note">Multiple corrupted copies, an intact twin,
+      or whole folders to scan? The desktop app can merge sources for a
+      better repair.</span>
+    <a href="https://github.com/xhighhongo41/PPTrepair#readme"
+       rel="noopener" data-i18n="gui_link">Get the desktop version</a>
+  </p>
+</main>
+
+<footer>
+  <span data-i18n="footer_license">Free software (GPL-3.0). Files are never
+    uploaded.</span>
+  <a href="https://github.com/xhighhongo41/PPTrepair" rel="noopener"
+     data-i18n="footer_source">Source code</a>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

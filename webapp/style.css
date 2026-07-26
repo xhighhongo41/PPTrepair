@@ -1,0 +1,167 @@
+/* v2.1 Web版スタイル。v2.0 GUIと同じく控えめ・実用本位。
+   ライト/ダークはprefers-color-schemeに追従する。 */
+
+:root {
+  --bg: #fafafa;
+  --fg: #1a1a1a;
+  --muted: #666;
+  --border: #d0d0d0;
+  --accent: #2563a8;
+  --accent-fg: #ffffff;
+  --zone-bg: #ffffff;
+  --good: #1a7f37;
+  --warn: #9a6700;
+  --bad: #c03030;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1e21;
+    --fg: #e8e8e8;
+    --muted: #9a9a9a;
+    --border: #43474d;
+    --accent: #5c9bd6;
+    --accent-fg: #10233a;
+    --zone-bg: #24262a;
+    --good: #4cc26b;
+    --warn: #d9a53a;
+    --bad: #e06c6c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+  max-width: 52rem;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+header { position: relative; }
+h1 { margin: 0 0 0.25rem; font-size: 1.6rem; }
+#app-version { font-size: 0.9rem; color: var(--muted); font-weight: normal; }
+header p { margin: 0.25rem 0; }
+
+.privacy { color: var(--muted); font-size: 0.9rem; }
+
+.lang {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.lang select {
+  margin-left: 0.4rem;
+  font: inherit;
+  color: var(--fg);
+  background: var(--zone-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.3rem;
+}
+
+#loading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 2rem 0;
+  color: var(--muted);
+}
+.spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#dropzone {
+  margin: 1.5rem 0 0.5rem;
+  padding: 2.5rem 1rem;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  background: var(--zone-bg);
+  text-align: center;
+  color: var(--muted);
+  cursor: pointer;
+}
+#dropzone.drag,
+#dropzone:hover { border-color: var(--accent); color: var(--fg); }
+#dropzone:focus-visible { outline: 2px solid var(--accent); }
+
+#results {
+  width: 100%;
+  margin: 1.5rem 0;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+#results th,
+#results td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+#results th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+td.good { color: var(--good); }
+td.warn { color: var(--warn); }
+td.bad { color: var(--bad); }
+
+a.download {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 600;
+}
+a.download:hover { filter: brightness(1.1); }
+
+details { margin-top: 0.3rem; }
+summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+details pre {
+  margin: 0.4rem 0 0;
+  padding: 0.6rem;
+  background: var(--zone-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.gui-note {
+  margin-top: 2rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--zone-bg);
+  font-size: 0.9rem;
+}
+
+footer {
+  margin-top: 2.5rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+a { color: var(--accent); }

@@ -239,6 +239,11 @@ repaired_ppt/
 PROJECT.md
 開発資料
 
+# Web版(v2.1)のビルド成果物: tools/build_webapp.sh が生成する
+# (Pyodideコアはバージョン・sha256固定でビルド時取得、コミットしない)
+webapp/vendor/
+webapp/wheels/
+
 # Mac
 .DS_Store
 

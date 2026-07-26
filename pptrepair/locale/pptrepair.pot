@@ -98,6 +98,9 @@ msgstr ""
 msgid "All files"
 msgstr ""
 
+msgid "Already intact — no repair needed"
+msgstr ""
+
 msgid "Archives are used only by multi-source repair; ignored in this mode"
 msgstr ""
 
@@ -140,6 +143,9 @@ msgstr ""
 msgid "Corrupted files:"
 msgstr ""
 
+msgid "Could not repair"
+msgstr ""
+
 msgid "Created"
 msgstr ""
 
@@ -167,6 +173,9 @@ msgstr ""
 msgid "Diagnostic fingerprints were written to {path}; please attach them to a new issue at {url}."
 msgstr ""
 
+msgid "Download"
+msgstr ""
+
 msgid "Download cloud-only files"
 msgstr ""
 
@@ -174,6 +183,9 @@ msgid "Downloading cloud-only file: {path}"
 msgstr ""
 
 msgid "Downloading {name}…"
+msgstr ""
+
+msgid "Drop .pptx / .pptm files here, or click to choose files"
 msgstr ""
 
 msgid "Drop PowerPoint files or folders here"
@@ -188,6 +200,9 @@ msgstr ""
 msgid "Entries recovered: {n}"
 msgstr ""
 
+msgid "Error"
+msgstr ""
+
 msgid "Errors:"
 msgstr ""
 
@@ -200,10 +215,19 @@ msgstr ""
 msgid "File"
 msgstr ""
 
+msgid "File exceeds the {limit} MB size limit."
+msgstr ""
+
 msgid "Files"
 msgstr ""
 
 msgid "Follow symbolic links while walking"
+msgstr ""
+
+msgid "Free software (GPL-3.0). Files are never uploaded."
+msgstr ""
+
+msgid "Get the desktop version"
 msgstr ""
 
 msgid "Guarantee: {guarantee}"
@@ -233,6 +257,9 @@ msgstr ""
 msgid "Include file basenames in diagnostic fingerprints"
 msgstr ""
 
+msgid "Language"
+msgstr ""
+
 msgid "Language change takes effect after restart"
 msgstr ""
 
@@ -255,6 +282,9 @@ msgid "Lineage score: {value}"
 msgstr ""
 
 msgid "Lineage-tier source not used: {path} (pass --yes or confirm the prompt to include it)"
+msgstr ""
+
+msgid "Loading the repair engine (about 14 MB, first visit only)…"
 msgstr ""
 
 msgid "Lost entries: {n}"
@@ -294,6 +324,9 @@ msgid "Modified"
 msgstr ""
 
 msgid "Multi-source repair"
+msgstr ""
+
+msgid "Multiple corrupted copies, an intact twin, or whole folders to scan? The desktop app can merge sources for a better repair."
 msgstr ""
 
 msgid "Name ratio: {pct}%"
@@ -365,6 +398,9 @@ msgstr ""
 msgid "Partial XML parts: {n}"
 msgstr ""
 
+msgid "Partially salvaged"
+msgstr ""
+
 msgid "Path"
 msgstr ""
 
@@ -383,6 +419,12 @@ msgstr ""
 msgid "Preferences…"
 msgstr ""
 
+msgid "Preparing the repair toolkit…"
+msgstr ""
+
+msgid "Queued"
+msgstr ""
+
 msgid "Quick Guide"
 msgstr ""
 
@@ -393,6 +435,9 @@ msgid "Re-check verdict: {verdict}"
 msgstr ""
 
 msgid "Ready"
+msgstr ""
+
+msgid "Ready. Your files are processed on this device only."
 msgstr ""
 
 msgid "Recent Folders"
@@ -419,6 +464,9 @@ msgstr ""
 msgid "Repair cancelled"
 msgstr ""
 
+msgid "Repair corrupted PowerPoint files right in your browser."
+msgstr ""
+
 msgid "Repair failed"
 msgstr ""
 
@@ -432,6 +480,9 @@ msgid "Repair into folder:"
 msgstr ""
 
 msgid "Repair mode:"
+msgstr ""
+
+msgid "Repaired"
 msgstr ""
 
 msgid "Repaired {name}"
@@ -456,6 +507,9 @@ msgid "Repairs:"
 msgstr ""
 
 msgid "Report Unknown Corruption…"
+msgstr ""
+
+msgid "Result"
 msgstr ""
 
 msgid "Review the donors for each corrupted file, then click Repair."
@@ -503,7 +557,13 @@ msgstr ""
 msgid "Settings"
 msgstr ""
 
+msgid "Show details"
+msgstr ""
+
 msgid "Single-file repair"
+msgstr ""
+
+msgid "Size"
 msgstr ""
 
 msgid "Size match: {value}"
@@ -528,6 +588,9 @@ msgid "Slides recovered: {ok} of {total}"
 msgstr ""
 
 msgid "Source"
+msgstr ""
+
+msgid "Source code"
 msgstr ""
 
 msgid "Source not used (not the same origin): {path}"
@@ -555,6 +618,9 @@ msgid "The merge target cannot be a file inside an archive: {path}. Extract it t
 msgstr ""
 
 msgid "The recovery folder groups salvaged content by kind: images/ and media/ hold pictures, audio and video; texts/ holds best-effort recovered text; charts/ holds chart XML plus cached data; parts/ holds every salvaged part in its original, raw form."
+msgstr ""
+
+msgid "The repair engine stopped unexpectedly. Reload the page and try again."
 msgstr ""
 
 msgid "The repair stopped unexpectedly:\n{message}"
@@ -593,6 +659,9 @@ msgstr ""
 msgid "Unresolved references after repair: {n}"
 msgstr ""
 
+msgid "Unsupported file type (only .pptx / .pptm)."
+msgstr ""
+
 msgid "Use this source for the merge? [y/N] "
 msgstr ""
 
@@ -606,6 +675,9 @@ msgid "Warning: part of the output comes from a different version and is not gua
 msgstr ""
 
 msgid "Warnings:"
+msgstr ""
+
+msgid "Your files never leave this device. All processing happens locally in your browser; nothing is uploaded to any server."
 msgstr ""
 
 msgid "[auto] — verified same-origin donor (byte-level CRC evidence). Trusted and pre-checked."
