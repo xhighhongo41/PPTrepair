@@ -26,30 +26,35 @@ For corrupted files the report also shows how much content is salvageable (entri
 
 ## Installation
 
-Requires Python 3.12 or later. No runtime dependencies beyond the standard library. Pick whichever workflow matches your Python setup.
+Requires Python 3.12 or later. The core CLI has no runtime dependencies beyond the standard library; only the optional desktop GUI (`pptrepair gui`) additionally needs the `[gui]` extra (PySide6). Each method below shows both the CLI-only and the GUI-included install — pick whichever workflow matches your Python setup.
 
 ### pipx (recommended for CLI tools)
 
 Installs `pptrepair` as an isolated, globally available command:
 
 ```console
-$ pipx install git+https://github.com/xhighhongo41/PPTrepair.git
+$ pipx install git+https://github.com/xhighhongo41/PPTrepair.git                      # CLI only
+$ pipx install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'   # CLI + GUI
 $ pptrepair check presentation.pptx
 ```
 
-From a local clone, `pipx install .` works the same way.
+From a local clone, `pipx install .` (or `pipx install '.[gui]'`) works the same way. To add the GUI to an existing CLI-only install, re-run the `[gui]` command with `--force`.
 
 ### uv
 
 ```console
-$ uv tool install git+https://github.com/xhighhongo41/PPTrepair.git
+$ uv tool install git+https://github.com/xhighhongo41/PPTrepair.git                      # CLI only
+$ uv tool install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'   # CLI + GUI
 $ pptrepair check presentation.pptx
 ```
+
+To add the GUI to an existing CLI-only install, re-run the `[gui]` command with `--force`.
 
 Inside a clone you can also run it without installing anything:
 
 ```console
 $ uv run pptrepair check presentation.pptx
+$ uv run --extra gui pptrepair gui
 ```
 
 ### pip + venv (Python standard tooling)
@@ -59,7 +64,8 @@ $ git clone https://github.com/xhighhongo41/PPTrepair.git
 $ cd PPTrepair
 $ python -m venv .venv
 $ source .venv/bin/activate    # Windows: .venv\Scripts\activate
-(.venv) $ pip install .
+(.venv) $ pip install .            # CLI only
+(.venv) $ pip install '.[gui]'     # CLI + GUI
 (.venv) $ pptrepair check presentation.pptx
 ```
 
@@ -68,13 +74,14 @@ $ source .venv/bin/activate    # Windows: .venv\Scripts\activate
 ```console
 $ git clone https://github.com/xhighhongo41/PPTrepair.git
 $ cd PPTrepair
-$ pipenv install -e .
+$ pipenv install -e .           # CLI only
+$ pipenv install -e '.[gui]'    # CLI + GUI
 $ pipenv run pptrepair check presentation.pptx
 ```
 
 ### pyenv / conda users
 
-pyenv manages Python versions rather than environments: make sure `python` resolves to 3.12+ (e.g. `pyenv install 3.13 && pyenv shell 3.13`), then use any of the methods above. With conda, create an environment first: `conda create -n pptrepair python=3.13 && conda activate pptrepair && pip install .`
+pyenv manages Python versions rather than environments: make sure `python` resolves to 3.12+ (e.g. `pyenv install 3.13 && pyenv shell 3.13`), then use any of the methods above. With conda, create an environment first: `conda create -n pptrepair python=3.13 && conda activate pptrepair && pip install .` (use `pip install '.[gui]'` for the GUI).
 
 ## Usage
 
@@ -225,11 +232,11 @@ If you hit an unknown pattern, please review the fingerprint file yourself and c
 For everyday use without a terminal, `pptrepair gui` launches a PySide6-based desktop application that wraps the same scan/repair engine as the CLI.
 
 ```console
-$ pipx install "pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git"
+$ pipx install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'
 $ pptrepair gui
 ```
 
-The GUI needs the optional `[gui]` extra (PySide6) on top of the plain install described above; from a local clone, `pip install '.[gui]'` works the same way.
+The GUI needs the optional `[gui]` extra (PySide6) on top of the plain CLI install — see [Installation](#installation) for the matching `[gui]` command for pipx, uv, pip and pipenv. Note that name-only forms such as `pip install 'pptrepair[gui]'` cannot work: the package is not published on PyPI, so the extra and the git URL (or local path) must be combined in a single requirement as shown above.
 
 Drop files, folders (scanned recursively for `.pptx`/`.pptm`) or backup archives onto the window — repeated drops keep accumulating into one work set. **Scan** diagnoses everything with live progress and a Cancel button, then lists the results in a **Files** tab (colour-coded verdicts) and a **Candidates** tab (the same restore/lineage/merge candidates `scan --report` writes to disk). **Repair** then runs in one of two modes:
 

@@ -26,30 +26,35 @@ English version: [README.md](README.md)
 
 ## インストール
 
-Python 3.12以降が必要です。標準ライブラリ以外の実行時依存はありません。お使いのPython環境管理ツールに合わせて以下のいずれかの方法を選んでください。
+Python 3.12以降が必要です。CLI本体は標準ライブラリ以外の実行時依存はありません。オプションのデスクトップGUI（`pptrepair gui`）を使う場合のみ、`[gui]` エクストラ（PySide6）が追加で必要です。以下の各方法に「CLIのみ」「GUIあり」両方のコマンドを載せているので、お使いのPython環境管理ツールに合わせて選んでください。
 
 ### pipx（CLIツールにおすすめ）
 
 `pptrepair` を独立した環境にインストールし、どこからでも使えるコマンドにします:
 
 ```console
-$ pipx install git+https://github.com/xhighhongo41/PPTrepair.git
+$ pipx install git+https://github.com/xhighhongo41/PPTrepair.git                      # CLIのみ
+$ pipx install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'   # CLI + GUI
 $ pptrepair check presentation.pptx
 ```
 
-クローン済みのディレクトリ内なら `pipx install .` でも同様です。
+クローン済みのディレクトリ内なら `pipx install .`（GUIありは `pipx install '.[gui]'`）でも同様です。CLIのみでインストール済みの環境にGUIを追加するには、`[gui]` 付きコマンドに `--force` を付けて再実行してください。
 
 ### uv
 
 ```console
-$ uv tool install git+https://github.com/xhighhongo41/PPTrepair.git
+$ uv tool install git+https://github.com/xhighhongo41/PPTrepair.git                      # CLIのみ
+$ uv tool install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'   # CLI + GUI
 $ pptrepair check presentation.pptx
 ```
+
+CLIのみでインストール済みの環境にGUIを追加するには、`[gui]` 付きコマンドに `--force` を付けて再実行してください。
 
 クローン内であればインストールせずに直接実行することもできます:
 
 ```console
 $ uv run pptrepair check presentation.pptx
+$ uv run --extra gui pptrepair gui
 ```
 
 ### pip + venv（Python標準ツール）
@@ -59,7 +64,8 @@ $ git clone https://github.com/xhighhongo41/PPTrepair.git
 $ cd PPTrepair
 $ python -m venv .venv
 $ source .venv/bin/activate    # Windowsの場合: .venv\Scripts\activate
-(.venv) $ pip install .
+(.venv) $ pip install .            # CLIのみ
+(.venv) $ pip install '.[gui]'     # CLI + GUI
 (.venv) $ pptrepair check presentation.pptx
 ```
 
@@ -68,13 +74,14 @@ $ source .venv/bin/activate    # Windowsの場合: .venv\Scripts\activate
 ```console
 $ git clone https://github.com/xhighhongo41/PPTrepair.git
 $ cd PPTrepair
-$ pipenv install -e .
+$ pipenv install -e .           # CLIのみ
+$ pipenv install -e '.[gui]'    # CLI + GUI
 $ pipenv run pptrepair check presentation.pptx
 ```
 
 ### pyenv / conda をお使いの場合
 
-pyenvはPythonのバージョン管理ツールなので、`python` が3.12以降を指すようにした上で（例: `pyenv install 3.13 && pyenv shell 3.13`）、上記いずれかの方法を使ってください。condaの場合は環境を作ってからpipでインストールします: `conda create -n pptrepair python=3.13 && conda activate pptrepair && pip install .`
+pyenvはPythonのバージョン管理ツールなので、`python` が3.12以降を指すようにした上で（例: `pyenv install 3.13 && pyenv shell 3.13`）、上記いずれかの方法を使ってください。condaの場合は環境を作ってからpipでインストールします: `conda create -n pptrepair python=3.13 && conda activate pptrepair && pip install .`（GUIありは `pip install '.[gui]'`）
 
 ## 使い方
 
@@ -225,11 +232,11 @@ OneDrive破損は、同じプレゼンの「壊れ方の違う」コピーを複
 ターミナルを使わずに操作したい場合は、`pptrepair gui` でPySide6製のデスクトップアプリを起動できます。内部ではCLIと同じスキャン・修復エンジンを使用します。
 
 ```console
-$ pipx install "pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git"
+$ pipx install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'
 $ pptrepair gui
 ```
 
-GUIにはオプションの `[gui]` エクストラ（PySide6）が、上記の通常インストールに加えて必要です。クローン済みのディレクトリでは `pip install '.[gui]'` でも同様にインストールできます。
+GUIにはオプションの `[gui]` エクストラ（PySide6）が、通常のCLIインストールに加えて必要です。pipx / uv / pip / pipenv それぞれの `[gui]` 付きコマンドは[インストール](#インストール)の節を参照してください。なお本パッケージはPyPIには公開していないため、`pip install 'pptrepair[gui]'` のようにパッケージ名だけを指定する形では解決できません。上記のようにエクストラとgit URL（またはローカルパス）を1つの指定にまとめてください。
 
 ウィンドウにファイル・フォルダ（`.pptx`/`.pptm`を再帰的に走査）・バックアップアーカイブをドラッグ&ドロップすると、複数回のドロップ結果が1つの作業対象として蓄積されます。**Scan**を実行すると全件をリアルタイム進捗表示＋キャンセルボタン付きで診断し、結果は**Files**タブ（判定を色分け表示）と**Candidates**タブ（`scan --report`が書き出すのと同じ復元/別バージョン/マージ候補）に表示されます。続く**Repair**は2つのモードで実行できます:
 
