@@ -429,6 +429,9 @@ msgstr "Standard-Ausgabeordner"
 msgid "Default repair mode:"
 msgstr "Standard-Reparaturmodus:"
 
+msgid "Deselect all"
+msgstr "Alle abwählen"
+
 msgid "Detail"
 msgstr "Detail"
 
@@ -534,6 +537,9 @@ msgstr "Bereit"
 msgid "Recent Folders"
 msgstr "Zuletzt verwendete Ordner"
 
+msgid "Rejected sources"
+msgstr "Abgewiesene Quellen"
+
 msgid "Remove Selected"
 msgstr "Auswahl entfernen"
 
@@ -576,6 +582,9 @@ msgstr "Wird repariert… {done} von {total}"
 msgid "Repairing… {n} file(s) processed"
 msgstr "Wird repariert… {n} Datei(en) verarbeitet"
 
+msgid "Reset to default"
+msgstr "Auf Standard zurücksetzen"
+
 msgid "Review the donors for each corrupted file, then click Repair."
 msgstr "Überprüfen Sie die Quellen für jede beschädigte Datei und klicken Sie dann auf „Reparieren“."
 
@@ -602,6 +611,9 @@ msgstr "Wird gescannt…"
 
 msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
 msgstr "Wird gescannt… {files} Datei(en) diagnostiziert, {materials} Material(ien) extrahiert"
+
+msgid "Select all"
+msgstr "Alle auswählen"
 
 msgid "Settings"
 msgstr "Einstellungen"
@@ -630,6 +642,9 @@ msgstr "Der Scan wurde unerwartet gestoppt:\n{message}"
 msgid "Twin candidates"
 msgstr "Wiederherstellungskandidaten"
 
+msgid "could not be accessed ({detail})"
+msgstr "Zugriff nicht möglich ({detail})"
+
 msgid "error"
 msgstr "Fehler"
 
@@ -651,6 +666,9 @@ msgstr "Zusammenführung fehlgeschlagen {n}"
 msgid "merge failed: no output could be reconstructed"
 msgstr "Zusammenführung fehlgeschlagen: Es konnte keine Ausgabe rekonstruiert werden"
 
+msgid "not found"
+msgstr "nicht gefunden"
+
 msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
 msgstr "pptrepair: Fehler: PySide6 ist nicht installiert. Installieren Sie das GUI-Extra mit: pip install 'pptrepair[gui]'"
 
@@ -665,6 +683,9 @@ msgstr "übersprungen (Größenbegrenzung)"
 
 msgid "skipped (temp file)"
 msgstr "übersprungen (Temporärdatei)"
+
+msgid "unsupported file type"
+msgstr "nicht unterstützter Dateityp"
 
 msgid "{n} archive material(s)"
 msgstr "{n} Archivmaterial(ien)"

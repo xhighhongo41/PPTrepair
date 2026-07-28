@@ -429,6 +429,9 @@ msgstr "기본 출력 폴더"
 msgid "Default repair mode:"
 msgstr "기본 복구 모드:"
 
+msgid "Deselect all"
+msgstr "모두 선택 해제"
+
 msgid "Detail"
 msgstr "세부 정보"
 
@@ -534,6 +537,9 @@ msgstr "준비 완료"
 msgid "Recent Folders"
 msgstr "최근 폴더"
 
+msgid "Rejected sources"
+msgstr "거부된 소스"
+
 msgid "Remove Selected"
 msgstr "선택 항목 제거"
 
@@ -576,6 +582,9 @@ msgstr "복구 중… 총 {total}개 중 {done}개"
 msgid "Repairing… {n} file(s) processed"
 msgstr "복구 중… {n}개 처리됨"
 
+msgid "Reset to default"
+msgstr "기본값으로 재설정"
+
 msgid "Review the donors for each corrupted file, then click Repair."
 msgstr "손상된 각 파일의 제공 소스를 검토한 후 \"복구\"를 클릭하세요."
 
@@ -602,6 +611,9 @@ msgstr "스캔 중…"
 
 msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
 msgstr "스캔 중… 파일 {files}개 진단됨, 소재 {materials}개 추출됨"
+
+msgid "Select all"
+msgstr "모두 선택"
 
 msgid "Settings"
 msgstr "설정"
@@ -630,6 +642,9 @@ msgstr "스캔이 예기치 않게 중지되었습니다:\n{message}"
 msgid "Twin candidates"
 msgstr "복구 후보"
 
+msgid "could not be accessed ({detail})"
+msgstr "접근할 수 없습니다 ({detail})"
+
 msgid "error"
 msgstr "오류"
 
@@ -651,6 +666,9 @@ msgstr "병합 실패 {n}개"
 msgid "merge failed: no output could be reconstructed"
 msgstr "병합 실패: 출력을 재구성할 수 없습니다"
 
+msgid "not found"
+msgstr "찾을 수 없음"
+
 msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
 msgstr "pptrepair: 오류: PySide6이 설치되어 있지 않습니다. 다음 명령으로 GUI 확장을 설치하세요: pip install 'pptrepair[gui]'"
 
@@ -665,6 +683,9 @@ msgstr "건너뜀(크기 상한)"
 
 msgid "skipped (temp file)"
 msgstr "건너뜀(임시 파일)"
+
+msgid "unsupported file type"
+msgstr "지원되지 않는 파일 형식"
 
 msgid "{n} archive material(s)"
 msgstr "아카이브 소재 {n}개"

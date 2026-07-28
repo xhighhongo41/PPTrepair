@@ -429,6 +429,9 @@ msgstr "默认输出文件夹"
 msgid "Default repair mode:"
 msgstr "默认修复模式:"
 
+msgid "Deselect all"
+msgstr "全部取消选择"
+
 msgid "Detail"
 msgstr "详情"
 
@@ -534,6 +537,9 @@ msgstr "就绪"
 msgid "Recent Folders"
 msgstr "最近使用的文件夹"
 
+msgid "Rejected sources"
+msgstr "已拒绝的来源"
+
 msgid "Remove Selected"
 msgstr "删除所选"
 
@@ -576,6 +582,9 @@ msgstr "修复中… 共 {total} 个中的 {done} 个"
 msgid "Repairing… {n} file(s) processed"
 msgstr "修复中… 已处理 {n} 个文件"
 
+msgid "Reset to default"
+msgstr "恢复默认"
+
 msgid "Review the donors for each corrupted file, then click Repair."
 msgstr "请查看每个损坏文件的提供源，然后点击\"修复\"。"
 
@@ -602,6 +611,9 @@ msgstr "扫描中…"
 
 msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
 msgstr "扫描中… 已诊断 {files} 个文件，已提取素材 {materials} 个"
+
+msgid "Select all"
+msgstr "全选"
 
 msgid "Settings"
 msgstr "设置"
@@ -630,6 +642,9 @@ msgstr "扫描意外停止:\n{message}"
 msgid "Twin candidates"
 msgstr "恢复候选"
 
+msgid "could not be accessed ({detail})"
+msgstr "无法访问（{detail}）"
+
 msgid "error"
 msgstr "错误"
 
@@ -651,6 +666,9 @@ msgstr "合并失败 {n} 个"
 msgid "merge failed: no output could be reconstructed"
 msgstr "合并失败: 无法重建输出"
 
+msgid "not found"
+msgstr "未找到"
+
 msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
 msgstr "pptrepair: 错误: 未安装 PySide6。请使用以下命令安装 GUI 扩展: pip install 'pptrepair[gui]'"
 
@@ -665,6 +683,9 @@ msgstr "已跳过(大小超限)"
 
 msgid "skipped (temp file)"
 msgstr "已跳过(临时文件)"
+
+msgid "unsupported file type"
+msgstr "不支持的文件类型"
 
 msgid "{n} archive material(s)"
 msgstr "压缩包素材 {n} 个"

@@ -429,6 +429,9 @@ msgstr "既定の出力フォルダ"
 msgid "Default repair mode:"
 msgstr "既定の修復モード:"
 
+msgid "Deselect all"
+msgstr "すべて解除"
+
 msgid "Detail"
 msgstr "詳細"
 
@@ -534,6 +537,9 @@ msgstr "準備完了"
 msgid "Recent Folders"
 msgstr "最近使用したフォルダ"
 
+msgid "Rejected sources"
+msgstr "受け付けられなかったソース"
+
 msgid "Remove Selected"
 msgstr "選択項目を削除"
 
@@ -576,6 +582,9 @@ msgstr "修復中… {total} 件中 {done} 件"
 msgid "Repairing… {n} file(s) processed"
 msgstr "修復中… {n} 件処理済み"
 
+msgid "Reset to default"
+msgstr "初期状態に戻す"
+
 msgid "Review the donors for each corrupted file, then click Repair."
 msgstr "各破損ファイルの提供元を確認し、「修復」をクリックしてください。"
 
@@ -602,6 +611,9 @@ msgstr "スキャン中…"
 
 msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
 msgstr "スキャン中… 診断済み {files} 件、採掘済み素材 {materials} 件"
+
+msgid "Select all"
+msgstr "すべて選択"
 
 msgid "Settings"
 msgstr "設定"
@@ -630,6 +642,9 @@ msgstr "スキャンが予期せず停止しました:\n{message}"
 msgid "Twin candidates"
 msgstr "復元候補"
 
+msgid "could not be accessed ({detail})"
+msgstr "アクセスできませんでした({detail})"
+
 msgid "error"
 msgstr "エラー"
 
@@ -651,6 +666,9 @@ msgstr "マージ失敗 {n} 件"
 msgid "merge failed: no output could be reconstructed"
 msgstr "マージ失敗: 出力を再構築できませんでした"
 
+msgid "not found"
+msgstr "見つかりません"
+
 msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
 msgstr "pptrepair: エラー: PySide6 がインストールされていません。次のコマンドでGUI拡張をインストールしてください: pip install 'pptrepair[gui]'"
 
@@ -665,6 +683,9 @@ msgstr "スキップ(サイズ上限)"
 
 msgid "skipped (temp file)"
 msgstr "スキップ(一時ファイル)"
+
+msgid "unsupported file type"
+msgstr "対応していないファイル形式です"
 
 msgid "{n} archive material(s)"
 msgstr "アーカイブ素材 {n} 件"

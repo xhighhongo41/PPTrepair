@@ -429,6 +429,9 @@ msgstr "Carpeta de salida predeterminada"
 msgid "Default repair mode:"
 msgstr "Modo de reparación predeterminado:"
 
+msgid "Deselect all"
+msgstr "Deseleccionar todo"
+
 msgid "Detail"
 msgstr "Detalle"
 
@@ -534,6 +537,9 @@ msgstr "Listo"
 msgid "Recent Folders"
 msgstr "Carpetas recientes"
 
+msgid "Rejected sources"
+msgstr "Fuentes rechazadas"
+
 msgid "Remove Selected"
 msgstr "Eliminar seleccionados"
 
@@ -576,6 +582,9 @@ msgstr "Reparando… {done} de {total}"
 msgid "Repairing… {n} file(s) processed"
 msgstr "Reparando… {n} archivo(s) procesado(s)"
 
+msgid "Reset to default"
+msgstr "Restablecer valores predeterminados"
+
 msgid "Review the donors for each corrupted file, then click Repair."
 msgstr "Revise las fuentes de cada archivo dañado y luego haga clic en \"Reparar\"."
 
@@ -602,6 +611,9 @@ msgstr "Analizando…"
 
 msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
 msgstr "Analizando… {files} archivo(s) diagnosticado(s), {materials} material(es) extraído(s)"
+
+msgid "Select all"
+msgstr "Seleccionar todo"
 
 msgid "Settings"
 msgstr "Configuración"
@@ -630,6 +642,9 @@ msgstr "El análisis se detuvo inesperadamente:\n{message}"
 msgid "Twin candidates"
 msgstr "Candidatos de restauración"
 
+msgid "could not be accessed ({detail})"
+msgstr "no se pudo acceder ({detail})"
+
 msgid "error"
 msgstr "Error"
 
@@ -651,6 +666,9 @@ msgstr "fusión fallida {n}"
 msgid "merge failed: no output could be reconstructed"
 msgstr "fusión fallida: no se pudo reconstruir la salida"
 
+msgid "not found"
+msgstr "no encontrado"
+
 msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
 msgstr "pptrepair: error: PySide6 no está instalado. Instale el extra de GUI con: pip install 'pptrepair[gui]'"
 
@@ -665,6 +683,9 @@ msgstr "omitido (límite de tamaño)"
 
 msgid "skipped (temp file)"
 msgstr "omitido (archivo temporal)"
+
+msgid "unsupported file type"
+msgstr "tipo de archivo no compatible"
 
 msgid "{n} archive material(s)"
 msgstr "{n} material(es) de archivo comprimido"
