@@ -26,6 +26,18 @@ Three entry points cover the whole workflow:
   extracting separately means decompressing the whole archive once per
   member.
 
+An Evernote export (``.enex``) is accepted as another donor container
+alongside zip/tar backups: it is not a compressed archive in that
+sense, but :mod:`pptrepair.enex` mines PowerPoint attachments out of it
+the same way this module mines files out of a zip/tar, and reports
+them as the same :class:`ArchiveMember` values. All three entry points
+below simply dispatch to that module for an ``.enex`` path (see
+:func:`iter_materialized_members`), so every downstream consumer of
+this module -- the GUI's drag-and-drop,
+:func:`pptrepair.walker.discover_targets`'s ``collect_archives``, the
+CLI's ``--search-archives``, ... -- picks up ``.enex`` support without
+any change of its own.
+
 All three are defensive against a hostile or damaged archive: opening
 the archive itself never raises (a failure degrades to an empty result
 plus a note), a single unreadable member never aborts the rest (on a
@@ -41,6 +53,7 @@ import posixpath
 import re
 import shutil
 import tarfile
+import tempfile
 import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -52,10 +65,17 @@ from pptrepair.walker import TARGET_SUFFIXES, TEMP_PREFIX
 #: Archive name suffixes handled by this module (matched
 #: case-insensitively against the full file name, since several of
 #: these -- e.g. ``.tar.gz`` -- span more than one dot-segment and
-#: ``Path.suffix`` only ever returns the last one).
+#: ``Path.suffix`` only ever returns the last one). ``.enex``
+#: (Evernote export) is included here too: it is not a compressed
+#: container in the zip/tar sense, but it is accepted as another donor
+#: container everywhere this set gates acceptance (GUI drag-and-drop,
+#: :func:`pptrepair.walker.discover_targets`'s ``collect_archives``,
+#: the CLI's ``--search-archives``); see :func:`iter_materialized_members`
+#: for how it is actually read.
 ARCHIVE_SUFFIXES = frozenset({
     ".zip",
     ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz",
+    ".enex",
 })
 
 #: Characters allowed, unescaped, in a materialized destination file
@@ -102,6 +122,15 @@ def _is_zip_archive(archive_path: Path) -> bool:
     :mod:`tarfile`'s auto-detecting ``"r:*"`` mode instead.
     """
     return archive_path.name.lower().endswith(".zip")
+
+
+def _is_enex(path: Path) -> bool:
+    """Return True when *path*'s name ends with ``.enex`` (case-insensitive).
+
+    Used to route *archive_path* to :mod:`pptrepair.enex` instead of the
+    zip/tar handling the rest of this module implements.
+    """
+    return path.name.lower().endswith(".enex")
 
 
 def _is_target_name(name: str) -> bool:
@@ -169,13 +198,43 @@ def _list_tar_members(
     return members, []
 
 
+def _list_enex_members(
+    archive_path: Path,
+) -> tuple[list[ArchiveMember], list[str]]:
+    """Enumerate the PowerPoint attachments of an ``.enex`` export.
+
+    Unlike the zip/tar paths above, an export has no separate index to
+    stop at: :mod:`pptrepair.enex` only ever learns whether an
+    attachment is a presentation after decoding it (see
+    :mod:`pptrepair.enex`'s module docstring), so listing it means a
+    full parse of the whole export into a throwaway temporary
+    directory, discarded once every attachment has been reported. This
+    is expensive; callers that also need the payload should prefer the
+    one-pass :func:`iter_materialized_members` over calling this and
+    :func:`materialize` separately.
+    """
+    # Local import: pptrepair.enex imports ArchiveMember from this
+    # module, so a top-level import here would be a cycle.
+    from pptrepair.enex import iter_materialized_attachments
+
+    members: list[ArchiveMember] = []
+    notes: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        for member, _path in iter_materialized_attachments(
+                archive_path, Path(tmp_dir), on_note=notes.append):
+            members.append(member)
+    return members, notes
+
+
 def list_members(archive_path: Path) -> tuple[list[ArchiveMember], list[str]]:
     """List the ``.pptx``/``.pptm`` members recorded in *archive_path*.
 
     Uses :class:`zipfile.ZipFile` for ``.zip`` archives and
     :func:`tarfile.open` (auto-detecting compression, ``"r:*"``) for
     every other recognised suffix. Members are returned in the order
-    the archive itself records them.
+    the archive itself records them. For an ``.enex`` export this
+    dispatches to :func:`_list_enex_members` instead -- see there for
+    why that path is comparatively costly.
 
     Skipped silently, without a note: directories; non-regular tar
     members (symlinks, devices, ...); members whose suffix is not
@@ -191,6 +250,8 @@ def list_members(archive_path: Path) -> tuple[list[ArchiveMember], list[str]]:
     is returned instead.
     """
     try:
+        if _is_enex(archive_path):
+            return _list_enex_members(archive_path)
         if _is_zip_archive(archive_path):
             return _list_zip_members(archive_path)
         return _list_tar_members(archive_path)
@@ -281,6 +342,45 @@ def _extract_member(opener, is_zip: bool, member: ArchiveMember,
     extracted[member] = dest_path
 
 
+def _materialize_enex(
+    archive_path: Path, members: list[ArchiveMember], dest_dir: Path,
+) -> tuple[dict[ArchiveMember, Path], list[str]]:
+    """Extract *members* from an ``.enex`` export via a full re-parse.
+
+    An export has no random-access index to seek a chosen member out
+    of (unlike a zip's central directory or a tar's headers), so the
+    only way to honour an arbitrary *members* subset here is to sweep
+    the whole export with :func:`pptrepair.enex.iter_materialized_attachments`
+    and keep only what was asked for, discarding every other extracted
+    attachment again. This is expensive and only meant as a fallback
+    for a cache miss against an already-listed enex; a fresh caller
+    should use the one-pass :func:`iter_materialized_members` instead.
+
+    A requested member never met while sweeping the export (e.g. the
+    export changed between the earlier :func:`list_members` call and
+    this one) is reported as a note instead of silently missing from
+    the result.
+    """
+    # Local import: pptrepair.enex imports ArchiveMember from this
+    # module, so a top-level import here would be a cycle.
+    from pptrepair.enex import iter_materialized_attachments
+
+    wanted = set(members)
+    extracted: dict[ArchiveMember, Path] = {}
+    notes: list[str] = []
+    for member, path in iter_materialized_attachments(
+            archive_path, dest_dir, on_note=notes.append):
+        if member in wanted:
+            extracted[member] = path
+        else:
+            path.unlink(missing_ok=True)
+    for member in members:
+        if member not in extracted:
+            notes.append(f"failed to extract member {member.display()}: "
+                          "not found in export")
+    return extracted, notes
+
+
 def materialize(
     archive_path: Path, members: list[ArchiveMember], dest_dir: Path,
 ) -> tuple[dict[ArchiveMember, Path], list[str]]:
@@ -301,10 +401,17 @@ def materialize(
     itself cannot be opened, ``({}, [note])`` is returned and no member
     is touched.
 
+    For an ``.enex`` export this dispatches to :func:`_materialize_enex`
+    instead, which incurs a full re-parse of the export -- see there for
+    why that path is only meant as a fallback.
+
     :return: a mapping from each successfully extracted member to its
         destination path, plus the list of notes collected along the
         way (in encounter order).
     """
+    if _is_enex(archive_path):
+        return _materialize_enex(archive_path, members, dest_dir)
+
     extracted: dict[ArchiveMember, Path] = {}
     notes: list[str] = []
     is_zip = _is_zip_archive(archive_path)
@@ -672,6 +779,13 @@ def iter_materialized_members(
     documents, and with the same note wording; a member whose payload
     cannot be extracted is likewise noted and left out.
 
+    For an ``.enex`` export this dispatches straight to
+    :func:`pptrepair.enex.iter_materialized_attachments`, which fuses
+    listing and extraction the same way for that format; *on_note* and
+    *progress* are passed through unchanged, and its own module
+    docstring documents the skip rules and note wording that apply in
+    that case instead.
+
     *on_note* receives those English notes as they happen, instead of
     the note *lists* the older two functions return -- a generator has
     nowhere to put a trailing list.
@@ -702,7 +816,14 @@ def iter_materialized_members(
     :class:`pptrepair.cancel.OperationCancelled`); the member being
     copied when that happens is removed rather than left half-written.
     """
-    if _is_zip_archive(archive_path):
+    if _is_enex(archive_path):
+        # Local import: pptrepair.enex imports ArchiveMember from this
+        # module, so a top-level import here would be a cycle.
+        from pptrepair.enex import iter_materialized_attachments
+        yield from iter_materialized_attachments(archive_path, dest_dir,
+                                                  on_note=on_note,
+                                                  progress=progress)
+    elif _is_zip_archive(archive_path):
         yield from _iter_zip_materialized(archive_path, dest_dir, on_note,
                                            progress)
     else:
