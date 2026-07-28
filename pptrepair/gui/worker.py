@@ -44,6 +44,7 @@ from pptrepair.merge import MERGE_SUFFIX, merge_restore
 from pptrepair.repair import RepairOutcome, predict_auto_mode, repair_file
 from pptrepair.scan import (
     ArchiveMaterial,
+    ArchiveMaterialCache,
     FileOutcome,
     ScanResult,
     diagnose_archive_materials,
@@ -112,6 +113,11 @@ class ScanWorker(QThread):
       emit per :data:`_WALK_PROGRESS_INTERVAL_S`. Fired before any file
       is diagnosed, so a large tree shows activity during the
       otherwise-silent discovery phase.
+    * :attr:`archive_progress` -- how far into one backup archive
+      (``str`` path, done bytes, total bytes) the mining pass has got,
+      throttled the same way. The only sign of life while a single
+      multi-gigabyte archive is being read, where whole minutes can
+      pass between two :attr:`material_scanned` emits.
     * :attr:`file_scanned` -- one on-disk file was diagnosed
       (:class:`~pptrepair.scan.FileOutcome`).
     * :attr:`material_scanned` -- one archive member was mined as donor
@@ -131,6 +137,7 @@ class ScanWorker(QThread):
     """
 
     walk_progress = Signal(str)
+    archive_progress = Signal(str, int, int)
     file_scanned = Signal(object)
     material_scanned = Signal(object)
     download_started = Signal(object)
@@ -139,21 +146,40 @@ class ScanWorker(QThread):
     cancelled = Signal()
 
     def __init__(self, request: ScanRequest,
-                 parent: QObject | None = None) -> None:
+                 parent: QObject | None = None, *,
+                 cache: ArchiveMaterialCache | None = None) -> None:
         """Store *request* and prepare the cancellation flag.
 
         Runs on the UI thread (the thread that constructs the worker).
 
         :param request: the scan to run once :meth:`start` is called.
         :param parent: optional Qt parent object.
+        :param cache: the session-lifetime archive material cache to mine
+            into, typically owned by the window that starts this worker.
+            The extracted donor bytes stay in it after the scan, so a
+            rescan -- and the repair phase (see
+            :class:`MultiRepairWorker`) -- never has to read the same
+            archive twice. It is *not* thread-safe, which is why it is
+            only ever touched from :meth:`run`, on this one worker
+            thread, and why the UI must not start a second worker while
+            this one is alive. ``None`` restores the pre-cache
+            behaviour: every archive mined into a private temporary
+            directory that is deleted again on the way out.
         """
         super().__init__(parent)
         self._request = request
+        self._cache = cache
         self._cancel_event = threading.Event()
         #: Monotonic timestamp of the last walk_progress emit, or None
         #: before the first directory is visited (so that first visit
         #: always emits regardless of the throttling interval).
         self._last_walk_progress: float | None = None
+        #: Monotonic timestamp of the last archive_progress emit, kept
+        #: apart from the walk's so neither phase can throttle the
+        #: other, and the archive that emit reported (None before the
+        #: first one).
+        self._last_archive_progress: float | None = None
+        self._last_archive_path: Path | None = None
 
     def cancel(self) -> None:
         """Request cooperative cancellation of the running scan.
@@ -209,6 +235,11 @@ class ScanWorker(QThread):
         the start, between the two phases, and inside every progress
         callback, so a cancel request never has to wait for a whole
         phase to complete.
+
+        The archive phase mines into this worker's session cache (when
+        it was given one), so an archive already mined in this session
+        is replayed rather than reopened, and the members extracted here
+        stay on disk for the repair phase to splice from.
         """
         self._raise_if_cancelled()
 
@@ -235,6 +266,8 @@ class ScanWorker(QThread):
                 on_download=self._on_download,
                 download_targets=(),
                 material_progress=self._on_material_scanned,
+                cache=self._cache,
+                archive_progress=self._on_archive_progress,
             )
 
         return GuiScanResult(scan=scan_result, materials=materials,
@@ -272,6 +305,36 @@ class ScanWorker(QThread):
             return
         self._last_walk_progress = now
         self.walk_progress.emit(str(path))
+
+    def _on_archive_progress(self, path: Path, done: int,
+                             total: int) -> None:
+        """Core ``archive_progress`` callback: relay one archive's position.
+
+        Runs on the worker thread, while an archive is being swept.
+        Honours a pending cancellation first -- and that check is the
+        whole reason this callback polls at all: reading a single
+        multi-gigabyte archive can take minutes during which no member
+        is finished, so without it a Cancel click would appear to do
+        nothing until the archive had been read in full.
+
+        The emit itself is then throttled to at most one per
+        :data:`_WALK_PROGRESS_INTERVAL_S`, off a timestamp of its own
+        (the discovery walk's must not be able to swallow an archive
+        update, or the other way round). Moving on to a *different*
+        archive always emits, whatever the interval says: that
+        transition is the one update the user must not miss, since it
+        is what renames the file being read.
+        """
+        self._raise_if_cancelled()
+        now = time.monotonic()
+        if (path == self._last_archive_path
+                and self._last_archive_progress is not None
+                and now - self._last_archive_progress
+                < _WALK_PROGRESS_INTERVAL_S):
+            return
+        self._last_archive_progress = now
+        self._last_archive_path = path
+        self.archive_progress.emit(str(path), done, total)
 
     def _on_file_scanned(self, outcome: FileOutcome) -> None:
         """Core ``progress`` callback: relay one diagnosed file.
@@ -407,7 +470,8 @@ class MultiRepairWorker(QThread):
     cancelled = Signal()
 
     def __init__(self, request: MultiRepairRequest,
-                 parent: QObject | None = None) -> None:
+                 parent: QObject | None = None, *,
+                 cache: ArchiveMaterialCache | None = None) -> None:
         """Store *request* and prepare the cancellation flag.
 
         Runs on the UI thread (the thread that constructs the worker).
@@ -415,9 +479,18 @@ class MultiRepairWorker(QThread):
         :param request: the multi-source repair to run once
             :meth:`start` is called.
         :param parent: optional Qt parent object.
+        :param cache: the session-lifetime archive material cache the
+            preceding scan mined into, whose extracted donors this run
+            splices straight from (see :meth:`_materialize_donors`). It
+            is *not* thread-safe; the GUI only ever runs one worker at a
+            time (a repair starts from a finished scan's result), so
+            access to it stays strictly sequential across the two
+            workers. ``None`` -- or a member the cache can no longer
+            vouch for -- falls back to extracting the donor afresh.
         """
         super().__init__(parent)
         self._request = request
+        self._cache = cache
         self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
@@ -459,10 +532,12 @@ class MultiRepairWorker(QThread):
 
         Runs on the worker thread under a single
         :class:`tempfile.TemporaryDirectory` spanning the whole run, so
-        every archive donor materialized into it is cleaned up on exit
-        (the merged/repaired artifacts themselves are written elsewhere,
-        on disk, and survive). The cancellation flag is polled before
-        materialization and at every item boundary.
+        every archive donor extracted *here* is cleaned up on exit (the
+        merged/repaired artifacts themselves are written elsewhere, on
+        disk, and survive). A donor served from the session cache lives
+        outside this directory and is deliberately left alone: the cache
+        belongs to the window, not to this run. The cancellation flag is
+        polled before materialization and at every item boundary.
         """
         self._raise_if_cancelled()
         result = MultiRepairResult()
@@ -505,19 +580,35 @@ class MultiRepairWorker(QThread):
     def _materialize_donors(
             self, tmp_root: Path
     ) -> tuple[dict[ArchiveMember, Path], dict[Path, str]]:
-        """Extract every archive donor once, grouped by source archive.
+        """Obtain every archive donor's bytes, reusing the scan's extraction.
 
         Returns ``(material_paths, display)``: *material_paths* maps each
-        materialized archive member to its temporary on-disk path, and
-        *display* maps that temporary path back to the member's
+        archive member to the plain on-disk file holding its payload, and
+        *display* maps that file back to the member's
         ``"<archive>::<member>"`` label -- the map
         :func:`pptrepair.merge.merge_restore`'s ``display`` argument uses
-        to keep the temporary path out of every note. Each archive is
-        opened once and its members streamed into their own subdirectory,
-        so names never collide across archives. A member whose extraction
-        fails is simply absent from *material_paths* (its donor is then
+        to keep the temporary path out of every note.
+
+        A member the session cache still vouches for is taken from there
+        as-is, never copied: the scan already streamed it out of the
+        archive, and re-reading a hundred-gigabyte ``.tar.gz`` a second
+        time -- which, being a single compressed stream, means
+        decompressing it from its very first byte -- purely to fetch
+        bytes that are already sitting on disk is exactly the cost this
+        cache exists to avoid. Only the members it cannot serve (no
+        cache at all, an archive rewritten since the scan, an extraction
+        that had failed) are grouped by archive and extracted into their
+        own subdirectory of *tmp_root*, one open per archive, so names
+        never collide across archives. A member whose extraction fails
+        too is simply absent from *material_paths* (its donor is then
         dropped when the merge's sources are assembled).
+
+        The cache is read here, on the worker thread, and is not
+        thread-safe -- see :meth:`__init__` for why that is nevertheless
+        sound.
         """
+        material_paths: dict[ArchiveMember, Path] = {}
+        display: dict[Path, str] = {}
         members_by_archive: dict[Path, list[ArchiveMember]] = {}
         seen: set[ArchiveMember] = set()
         for merge in self._request.merges:
@@ -526,11 +617,15 @@ class MultiRepairWorker(QThread):
                 if material is None or material.member in seen:
                     continue
                 seen.add(material.member)
+                cached_path = self._cached_member_path(
+                    material.archive_path, material.member)
+                if cached_path is not None:
+                    material_paths[material.member] = cached_path
+                    display[cached_path] = material.member.display()
+                    continue
                 members_by_archive.setdefault(
                     material.archive_path, []).append(material.member)
 
-        material_paths: dict[ArchiveMember, Path] = {}
-        display: dict[Path, str] = {}
         for index, (archive_path, members) in enumerate(
                 members_by_archive.items()):
             self._raise_if_cancelled()
@@ -541,6 +636,19 @@ class MultiRepairWorker(QThread):
                 material_paths[member] = dest_path
                 display[dest_path] = member.display()
         return material_paths, display
+
+    def _cached_member_path(self, archive_path: Path,
+                            member: ArchiveMember) -> Path | None:
+        """Return *member*'s already-extracted file, when the cache has it.
+
+        None whenever this run has no cache, or the cache cannot vouch
+        for that member any more, which tells
+        :meth:`_materialize_donors` to extract it from the archive
+        itself.
+        """
+        if self._cache is None:
+            return None
+        return self._cache.member_path(archive_path, member)
 
     def _run_one_merge(
             self, merge: ApprovedMerge,

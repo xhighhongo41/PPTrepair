@@ -531,6 +531,12 @@ msgstr "Preferencias…"
 msgid "Quit"
 msgstr "Salir"
 
+msgid "Reading archive {name}…"
+msgstr "Leyendo archivo comprimido {name}…"
+
+msgid "Reading archive {name}… {percent}%"
+msgstr "Leyendo archivo comprimido {name}… {percent}%"
+
 msgid "Ready"
 msgstr "Listo"
 

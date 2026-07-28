@@ -538,6 +538,8 @@ def scan_paths(roots: Sequence[Path], *,
                on_download: Callable[[Path], None] | None = None,
                material_progress: Callable[[ArchiveMaterial], None] | None = None,
                on_directory: Callable[[Path], None] | None = None,
+               archive_cache: ArchiveMaterialCache | None = None,
+               archive_progress: Callable[[Path, int, int], None] | None = None,
                ) -> ScanResult:
     """Scan *roots* and return the aggregate result.
 
@@ -571,6 +573,14 @@ def scan_paths(roots: Sequence[Path], *,
       archive member actually diagnosed, right after that member's
       :class:`ArchiveMaterial` is produced. A no-op whenever
       *search_archives* is False, or left at the default ``None``.
+    * *archive_cache* / *archive_progress* are forwarded unchanged to
+      :func:`diagnose_archive_materials` (as its ``cache`` /
+      ``archive_progress`` arguments), so a caller that owns a
+      session-lifetime :class:`ArchiveMaterialCache` gets one read per
+      archive per session -- and the extracted donor bytes kept for a
+      later repair -- while a caller that wants byte-level progress
+      inside one huge archive can display it. Both are no-ops whenever
+      *search_archives* is False, or left at the default ``None``.
     * *exclude*: subtrees to leave out of every discovery bucket (e.g.
       a batch driver's own aggregate output directory, which would
       otherwise be diagnosed as part of the very tree it is writing
@@ -601,11 +611,11 @@ def scan_paths(roots: Sequence[Path], *,
       and file output share one implementation.
 
     Coordinated cancellation: *progress*, *on_download*,
-    *material_progress* and *on_directory* may raise to abort the run
-    in progress -- none of their exceptions are caught here, so they
-    propagate to the caller exactly like any other exception. That
-    propagation is the supported, official contract for cooperative
-    cancellation; see
+    *material_progress*, *on_directory* and *archive_progress* may raise
+    to abort the run in progress -- none of their exceptions are caught
+    here, so they propagate to the caller exactly like any other
+    exception. That propagation is the supported, official contract for
+    cooperative cancellation; see
     :class:`pptrepair.cancel.OperationCancelled`. Every temporary
     directory this function (or the archive-mining path it calls into)
     opens is a context manager, so it is always cleaned up whether the
@@ -673,7 +683,8 @@ def scan_paths(roots: Sequence[Path], *,
         materials, material_notes = diagnose_archive_materials(
             walk.archives, on_download=on_download,
             download_targets=walk.download_targets,
-            material_progress=material_progress)
+            material_progress=material_progress,
+            cache=archive_cache, archive_progress=archive_progress)
         result.materials = materials
         result.material_notes = material_notes
 

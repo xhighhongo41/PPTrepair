@@ -531,6 +531,12 @@ msgstr "환경설정…"
 msgid "Quit"
 msgstr "종료"
 
+msgid "Reading archive {name}…"
+msgstr "{name} 아카이브 읽는 중…"
+
+msgid "Reading archive {name}… {percent}%"
+msgstr "{name} 아카이브 읽는 중… {percent}%"
+
 msgid "Ready"
 msgstr "준비 완료"
 

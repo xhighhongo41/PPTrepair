@@ -9,7 +9,9 @@ PySide6 is not installed (the optional ``[gui]`` extra); see
 
 from __future__ import annotations
 
+import io
 import os
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -35,6 +37,7 @@ from pptrepair.gui.worker import (
     ScanWorker,
 )
 from pptrepair.scan import (
+    ArchiveMaterialCache,
     diagnose_archive_materials,
     scan_paths,
 )
@@ -75,11 +78,51 @@ def _write_zip_with_pptx(path: Path, member: str = "backup/deck.pptx") -> Path:
     return path
 
 
+def _write_targz_with_pptx(path: Path, *members: str) -> Path:
+    """Write a tar.gz archive holding one intact .pptx per *members* name."""
+    with tarfile.open(path, mode="w:gz") as tf:
+        for index, name in enumerate(members):
+            data = build_minimal_pptx(num_slides=1, media_bytes=20_000,
+                                      seed=index)
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    return path
+
+
+def _count_tar_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Patch tarfile.open to record the mode of every *read* open.
+
+    Mirrors :func:`test_scan_archive._count_tar_reads`: returns the
+    (initially empty) list the modes land in, ignoring write opens so a
+    test may keep writing fixture archives after the patch is installed.
+    """
+    modes: list[str] = []
+    real_open = tarfile.open
+
+    def _counting_open(*args: object, **kwargs: object) -> tarfile.TarFile:
+        mode = kwargs.get("mode", args[1] if len(args) > 1 else "r")
+        if isinstance(mode, str) and mode.startswith("r"):
+            modes.append(mode)
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(tarfile, "open", _counting_open)
+    return modes
+
+
 def _mkroot(tmp_path: Path, name: str = "root") -> Path:
     """Create and return an empty scan-root directory under *tmp_path*."""
     root = tmp_path / name
     root.mkdir()
     return root
+
+
+def _run_worker(qtbot: QtBot, worker: ScanWorker) -> GuiScanResult:
+    """Run *worker* to completion and return its :class:`GuiScanResult`."""
+    with qtbot.waitSignal(worker.finished_ok, timeout=15000) as blocker:
+        worker.start()
+    assert worker.wait(5000)
+    return blocker.args[0]
 
 
 # --------------------------------------------------------------------------
@@ -260,6 +303,161 @@ def test_scan_worker_cancellation_during_walk_stops_early(
     assert worker.wait(5000)
 
 
+def test_scan_worker_cache_serves_a_rescan_without_reopening_the_archive(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scanning the same archive twice with one session cache reads it
+    once: the second run is replayed from the cache, materials and all."""
+    archive = _write_targz_with_pptx(
+        tmp_path / "backup.tar.gz", "backup/one.pptx", "backup/two.pptx")
+    cache = ArchiveMaterialCache(tmp_path / "cache")
+    modes = _count_tar_reads(monkeypatch)
+    request = ScanRequest(roots=(), archives=(archive,))
+
+    first = _run_worker(qtbot, ScanWorker(request, cache=cache))
+    second = _run_worker(qtbot, ScanWorker(request, cache=cache))
+
+    assert modes == ["r|*"]
+    assert len(first.materials) == 2
+    assert second.materials == first.materials
+    assert second.material_notes == first.material_notes == []
+
+
+def test_scan_worker_without_cache_reads_the_archive_every_time(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Left without a cache the worker keeps its pre-cache behaviour: one
+    full read of the archive per run."""
+    archive = _write_targz_with_pptx(tmp_path / "backup.tar.gz",
+                                     "backup/one.pptx")
+    modes = _count_tar_reads(monkeypatch)
+    request = ScanRequest(roots=(), archives=(archive,))
+
+    first = _run_worker(qtbot, ScanWorker(request))
+    second = _run_worker(qtbot, ScanWorker(request))
+
+    assert modes == ["r|*", "r|*"]
+    assert len(first.materials) == len(second.materials) == 1
+
+
+def test_scan_worker_cache_keeps_the_donor_bytes_for_the_repair_phase(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Every member mined through the cache is still on disk afterwards,
+    which is what lets the repair phase splice it without a second read."""
+    archive = _write_targz_with_pptx(tmp_path / "backup.tar.gz",
+                                     "backup/one.pptx")
+    cache_root = tmp_path / "cache"
+    cache = ArchiveMaterialCache(cache_root)
+
+    result = _run_worker(qtbot, ScanWorker(
+        ScanRequest(roots=(), archives=(archive,)), cache=cache))
+
+    [material] = result.materials
+    donor_path = cache.member_path(archive, material.member)
+    assert donor_path is not None
+    assert donor_path.is_file()
+    assert cache_root in donor_path.parents
+
+
+def test_scan_worker_emits_archive_progress_when_interval_is_zero(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the throttle interval at 0 every byte-position report reaches
+    the UI, tagged with the archive and ending on its full size."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 0)
+    archive = _write_targz_with_pptx(
+        tmp_path / "backup.tar.gz", "backup/one.pptx", "backup/two.pptx")
+
+    worker = ScanWorker(ScanRequest(roots=(), archives=(archive,)))
+    emitted: list[tuple[str, int, int]] = []
+    worker.archive_progress.connect(
+        lambda path, done, total: emitted.append((path, done, total)))
+
+    _run_worker(qtbot, worker)
+
+    total_bytes = archive.stat().st_size
+    assert len(emitted) > 1
+    assert {path for path, _done, _total in emitted} == {str(archive)}
+    assert {total for _path, _done, total in emitted} == {total_bytes}
+    done_values = [done for _path, done, _total in emitted]
+    assert done_values == sorted(done_values)
+    assert done_values[-1] == total_bytes
+
+
+def test_scan_worker_archive_progress_throttled_with_large_interval(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a very large throttle interval a single archive reports its
+    position exactly once, however many times the core calls back."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 9999)
+    archive = _write_targz_with_pptx(
+        tmp_path / "backup.tar.gz", "backup/one.pptx", "backup/two.pptx")
+
+    worker = ScanWorker(ScanRequest(roots=(), archives=(archive,)))
+    emitted: list[tuple[str, int, int]] = []
+    worker.archive_progress.connect(
+        lambda path, done, total: emitted.append((path, done, total)))
+
+    _run_worker(qtbot, worker)
+
+    assert [path for path, _done, _total in emitted] == [str(archive)]
+
+
+def test_scan_worker_archive_progress_always_emits_on_a_new_archive(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Moving on to the next archive emits immediately even under a
+    throttle interval that suppresses everything else: that transition is
+    what renames the file the user is told is being read."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 9999)
+    first = _write_targz_with_pptx(tmp_path / "first.tar.gz",
+                                   "backup/one.pptx", "backup/two.pptx")
+    second = _write_targz_with_pptx(tmp_path / "second.tar.gz",
+                                    "backup/three.pptx", "backup/four.pptx")
+
+    worker = ScanWorker(ScanRequest(roots=(), archives=(first, second)))
+    emitted: list[str] = []
+    worker.archive_progress.connect(
+        lambda path, _done, _total: emitted.append(path))
+
+    _run_worker(qtbot, worker)
+
+    assert emitted == [str(first), str(second)]
+
+
+def test_scan_worker_cancellation_during_archive_read_stops_early(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancelling from an archive_progress handler stops the mining pass
+    before the archive has been read out, emitting cancelled rather than
+    finished_ok -- the point of polling that callback at all."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 0)
+    archive = _write_targz_with_pptx(
+        tmp_path / "backup.tar.gz", "backup/one.pptx", "backup/two.pptx")
+
+    worker = ScanWorker(ScanRequest(roots=(), archives=(archive,)))
+    mined: list[object] = []
+    worker.material_scanned.connect(lambda material: mined.append(material))
+    finished: list[object] = []
+    worker.finished_ok.connect(lambda result: finished.append(result))
+    # A blocking-queued connection makes the stop deterministic: the
+    # worker thread parks at the first emit (the first member's tar
+    # header, always emitted) until this UI-thread slot has set the
+    # cancel flag, so the next callback is guaranteed to raise.
+    worker.archive_progress.connect(
+        lambda *_args: worker.cancel(),
+        Qt.ConnectionType.BlockingQueuedConnection,
+    )
+
+    with qtbot.waitSignal(worker.cancelled, timeout=15000):
+        worker.start()
+
+    assert finished == []
+    assert mined == []
+    assert worker.wait(5000)
+
+
 # --------------------------------------------------------------------------
 # RunOptionsPanel
 # --------------------------------------------------------------------------
@@ -418,6 +616,43 @@ def test_on_walk_progress_shows_path_on_status_bar(
     main_window._on_walk_progress("X")
 
     assert "X" in main_window.statusBar().currentMessage()
+
+
+def test_on_archive_progress_shows_a_percentage_when_the_total_is_known(
+    main_window: MainWindow,
+) -> None:
+    """_on_archive_progress names the archive and its completion percent."""
+    main_window._on_archive_progress("/backups/big.tar.gz", 25, 200)
+
+    message = main_window.statusBar().currentMessage()
+    assert "big.tar.gz" in message
+    assert "12%" in message
+    # The archive is named by its file name alone, never its full path.
+    assert "/backups/" not in message
+
+
+def test_on_archive_progress_omits_the_percentage_without_a_total(
+    main_window: MainWindow,
+) -> None:
+    """An unknown archive size (total 0) drops the percentage rather than
+    faking one, and never divides by zero."""
+    main_window._on_archive_progress("/backups/big.tar.gz", 0, 0)
+
+    message = main_window.statusBar().currentMessage()
+    assert "big.tar.gz" in message
+    assert "%" not in message
+
+
+def test_close_event_removes_the_session_cache_directory(
+    main_window: MainWindow,
+) -> None:
+    """Closing the window deletes the archive material cache it owns."""
+    cache_root = Path(main_window._cache_dir.name)
+    assert cache_root.is_dir()
+
+    main_window.close()
+
+    assert not cache_root.exists()
 
 
 def test_scan_populates_results_panel(

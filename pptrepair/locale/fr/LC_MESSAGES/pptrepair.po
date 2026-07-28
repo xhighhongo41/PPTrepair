@@ -531,6 +531,12 @@ msgstr "Préférences…"
 msgid "Quit"
 msgstr "Quitter"
 
+msgid "Reading archive {name}…"
+msgstr "Lecture de l'archive {name}…"
+
+msgid "Reading archive {name}… {percent}%"
+msgstr "Lecture de l'archive {name}… {percent}%"
+
 msgid "Ready"
 msgstr "Prêt"
 

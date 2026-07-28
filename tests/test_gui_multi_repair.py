@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import io
 import os
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from pytestqt.qtbot import QtBot
 
 from pptrepair.batch import plan_output_bases, repair_paths
 from pptrepair.classify import Verdict
+from pptrepair.gui import worker as worker_module
 from pptrepair.gui.donor_dialog import DonorApprovalDialog
 from pptrepair.gui.main_window import MainWindow
 from pptrepair.gui.merge_plan import (
@@ -58,7 +60,13 @@ from pptrepair.gui.worker import (
     MultiRepairWorker,
 )
 from pptrepair.merge import MERGE_SUFFIX
-from pptrepair.scan import diagnose_archive_materials, diagnose_file, scan_paths
+from pptrepair.scan import (
+    ArchiveMaterial,
+    ArchiveMaterialCache,
+    diagnose_archive_materials,
+    diagnose_file,
+    scan_paths,
+)
 
 # --------------------------------------------------------------------------
 # fixture helpers
@@ -450,6 +458,145 @@ def test_multi_worker_archive_donor_merge_succeeds(
     assert worker.wait(5000)
 
 
+def _mined_archive_donor(
+    root: Path, cache: ArchiveMaterialCache | None = None, seed: int = 4,
+) -> tuple[Path, Path, ArchiveMaterial, bytes]:
+    """Build a broken target plus a backup archive holding its intact twin.
+
+    The archive is mined exactly as a GUI scan would mine it, through
+    *cache* when one is given -- so the returned material's member is
+    already extracted under that cache's root, which is the state the
+    repair phase actually inherits.
+
+    :returns: ``(target, archive path, material, the intact bytes)``.
+    """
+    original = build_minimal_pptx(num_slides=3, media_bytes=60_000, seed=seed)
+    target = _write(root, "broken.pptx", _media_zeroed(original))
+    archive_path = _write(root, "backup.zip", b"")
+    _write_zip(archive_path, {"backup/intact.pptx": original})
+    materials, _notes = diagnose_archive_materials([archive_path], cache=cache)
+    [material] = materials
+    return target, archive_path, material, original
+
+
+def _archive_merge_request(target: Path, material: ArchiveMaterial,
+                           root: Path) -> MultiRepairRequest:
+    """Return an in-place request merging *target* against one archive donor."""
+    donor = DonorRef(display=material.display(), tier="auto", path=None,
+                     material=material)
+    merge = ApprovedMerge(target=target, donors=(donor,),
+                          allow_candidate=False, allow_lineage=False)
+    return MultiRepairRequest(
+        merges=(merge,), fallback_targets=(), roots=(root,),
+        output_dir=None, in_place=True)
+
+
+def test_multi_worker_reuses_the_scan_cache_instead_of_re_extracting(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A donor the scan already extracted is spliced straight from the
+    session cache: the archive is never opened again for it."""
+    root = _mkroot(tmp_path)
+    cache_root = tmp_path / "cache"
+    cache = ArchiveMaterialCache(cache_root)
+    target, _archive_path, material, _original = _mined_archive_donor(
+        root, cache)
+    calls: list[object] = []
+    real_materialize = worker_module.materialize
+
+    def _recording_materialize(*args: object, **kwargs: object) -> object:
+        calls.append(args)
+        return real_materialize(*args, **kwargs)
+
+    monkeypatch.setattr(worker_module, "materialize", _recording_materialize)
+
+    worker = MultiRepairWorker(
+        _archive_merge_request(target, material, root), cache=cache)
+    with qtbot.waitSignal(worker.finished_ok, timeout=15000) as blocker:
+        worker.start()
+
+    [item] = blocker.args[0].merges
+    assert calls == []
+    assert item.success
+    assert item.output_path == root / f"broken{MERGE_SUFFIX}"
+    diagnosis, _error = diagnose_file(item.output_path)
+    assert diagnosis.verdict == Verdict.NORMAL
+    # The donor is still named by its in-archive label, never by the
+    # cache path it was served from.
+    assert str(cache_root) not in item.detail
+    assert worker.wait(5000)
+
+
+def test_multi_worker_uses_the_cached_file_itself_without_copying(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """The cached donor is handed to the merge where it already lies,
+    under the cache root, not copied into the run's scratch directory."""
+    root = _mkroot(tmp_path)
+    cache_root = tmp_path / "cache"
+    cache = ArchiveMaterialCache(cache_root)
+    target, archive_path, material, original = _mined_archive_donor(
+        root, cache)
+    worker = MultiRepairWorker(
+        _archive_merge_request(target, material, root), cache=cache)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_root = Path(tmp_dir)
+        material_paths, display = worker._materialize_donors(tmp_root)
+
+        donor_path = material_paths[material.member]
+        assert donor_path == cache.member_path(archive_path, material.member)
+        assert cache_root in donor_path.parents
+        assert donor_path.read_bytes() == original
+        # The merge still names the donor by its in-archive label.
+        assert display[donor_path] == material.display()
+        assert list(tmp_root.iterdir()) == []
+
+
+def test_multi_worker_falls_back_when_the_cache_cannot_serve_the_donor(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """A cached extraction that has since disappeared is re-extracted from
+    the archive into the run's own scratch directory."""
+    root = _mkroot(tmp_path)
+    cache = ArchiveMaterialCache(tmp_path / "cache")
+    target, archive_path, material, original = _mined_archive_donor(
+        root, cache)
+    cached_path = cache.member_path(archive_path, material.member)
+    assert cached_path is not None
+    cached_path.unlink()
+    worker = MultiRepairWorker(
+        _archive_merge_request(target, material, root), cache=cache)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_root = Path(tmp_dir)
+        material_paths, display = worker._materialize_donors(tmp_root)
+
+        donor_path = material_paths[material.member]
+        assert tmp_root in donor_path.parents
+        assert donor_path.read_bytes() == original
+        assert display[donor_path] == material.display()
+
+
+def test_multi_worker_without_a_cache_extracts_the_donor_itself(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """With no cache at all the worker keeps its pre-cache behaviour:
+    every archive donor is extracted into the run's scratch directory."""
+    root = _mkroot(tmp_path)
+    target, _archive_path, material, original = _mined_archive_donor(root)
+    worker = MultiRepairWorker(_archive_merge_request(target, material, root))
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_root = Path(tmp_dir)
+        material_paths, display = worker._materialize_donors(tmp_root)
+
+        donor_path = material_paths[material.member]
+        assert tmp_root in donor_path.parents
+        assert donor_path.read_bytes() == original
+        assert display[donor_path] == material.display()
+
+
 def test_multi_worker_donorless_target_falls_back_to_single_repair(
     qtbot: QtBot, tmp_path: Path
 ) -> None:
@@ -648,6 +795,46 @@ def test_main_window_multi_repair_populates_repair_tab(
     assert actions.count("merged") == 2
     assert main_window._open_output_button.isEnabled()
     assert not main_window._open_output_button.isHidden()
+
+
+def test_main_window_multi_repair_reuses_the_scan_cache_for_archive_donors(
+    main_window: MainWindow, qtbot: QtBot, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The window's session cache spans both phases: the archive dropped
+    as donor material is read during the scan and never again during the
+    repair that splices one of its members in."""
+    monkeypatch.setattr(
+        DonorApprovalDialog, "exec",
+        lambda self: QDialog.DialogCode.Accepted)
+
+    root = _mkroot(tmp_path)
+    original = build_minimal_pptx(num_slides=3, media_bytes=60_000, seed=8)
+    _write(root, "broken.pptx", _media_zeroed(original))
+    archive_path = tmp_path / "backup.zip"
+    _write_zip(archive_path, {"backup/intact.pptx": original})
+    main_window._sources.add_paths([root, archive_path])
+    _scan_and_wait(main_window, qtbot)
+
+    calls: list[object] = []
+    real_materialize = worker_module.materialize
+
+    def _recording_materialize(*args: object, **kwargs: object) -> object:
+        calls.append(args)
+        return real_materialize(*args, **kwargs)
+
+    monkeypatch.setattr(worker_module, "materialize", _recording_materialize)
+
+    _select_multi_mode(main_window)
+    main_window._start_repair()
+    qtbot.waitUntil(lambda: main_window._multi_repair_worker is None,
+                    timeout=15000)
+
+    assert calls == []
+    assert _repair_actions(main_window).count("merged") == 1
+    merged = root / f"broken{MERGE_SUFFIX}"
+    diagnosis, _error = diagnose_file(merged)
+    assert diagnosis.verdict == Verdict.NORMAL
 
 
 def test_main_window_sources_changed_clears_stale_result(

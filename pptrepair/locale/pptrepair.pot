@@ -437,6 +437,12 @@ msgstr ""
 msgid "Re-check verdict: {verdict}"
 msgstr ""
 
+msgid "Reading archive {name}…"
+msgstr ""
+
+msgid "Reading archive {name}… {percent}%"
+msgstr ""
+
 msgid "Ready"
 msgstr ""
 

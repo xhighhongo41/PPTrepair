@@ -531,6 +531,12 @@ msgstr "偏好设置…"
 msgid "Quit"
 msgstr "退出"
 
+msgid "Reading archive {name}…"
+msgstr "正在读取压缩包 {name}…"
+
+msgid "Reading archive {name}… {percent}%"
+msgstr "正在读取压缩包 {name}… {percent}%"
+
 msgid "Ready"
 msgstr "就绪"
 

@@ -531,6 +531,12 @@ msgstr "環境設定…"
 msgid "Quit"
 msgstr "終了"
 
+msgid "Reading archive {name}…"
+msgstr "アーカイブ読み取り中 {name}…"
+
+msgid "Reading archive {name}… {percent}%"
+msgstr "アーカイブ読み取り中 {name}… {percent}%"
+
 msgid "Ready"
 msgstr "準備完了"
 

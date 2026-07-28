@@ -13,6 +13,8 @@ cooperatively so a running worker never leaves a dangling thread.
 
 from __future__ import annotations
 
+import contextlib
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -64,6 +66,7 @@ from pptrepair.gui.worker import (
     ScanWorker,
 )
 from pptrepair.report import ISSUE_URL
+from pptrepair.scan import ArchiveMaterialCache
 
 #: How long (ms) window-close waits for a running worker to stop.
 _CLOSE_WAIT_MS = 5000
@@ -84,7 +87,12 @@ class MainWindow(QMainWindow):
     """
 
     def __init__(self) -> None:
-        """Build the window's central widget, menu bar and status bar."""
+        """Build the window's central widget, menu bar and status bar.
+
+        Also opens the session-lifetime archive material cache the scan
+        and repair workers share (see :attr:`_material_cache`), which
+        lives exactly as long as this window does.
+        """
         super().__init__()
         self.setWindowTitle("PPTrepair")
         self.resize(900, 600)
@@ -115,6 +123,18 @@ class MainWindow(QMainWindow):
         #: before starting a repair (see :meth:`_compute_open_target`);
         #: None until the first repair of this session starts.
         self._repair_open_target: Path | None = None
+
+        #: Session-lifetime scratch directory backing
+        #: :attr:`_material_cache`, and the cache itself. Every archive
+        #: member mined by a scan is kept here so the repair phase can
+        #: splice a donor's bytes without re-reading (and, for a
+        #: compressed tar, re-decompressing) the whole backup, and so a
+        #: rescan of the same archive costs nothing. The window owns
+        #: both: they are created here and removed in
+        #: :meth:`closeEvent`.
+        self._cache_dir = tempfile.TemporaryDirectory(
+            prefix="pptrepair-cache-")
+        self._material_cache = ArchiveMaterialCache(Path(self._cache_dir.name))
 
         #: Persisted preferences (QSettings-backed), loaded once here
         #: and applied to the run-options panel below; also reached
@@ -488,8 +508,9 @@ class MainWindow(QMainWindow):
         self._results_panel.clear()
         self._results_panel.hide()
 
-        worker = ScanWorker(request, self)
+        worker = ScanWorker(request, self, cache=self._material_cache)
         worker.walk_progress.connect(self._on_walk_progress)
+        worker.archive_progress.connect(self._on_archive_progress)
         worker.file_scanned.connect(self._on_file_scanned)
         worker.material_scanned.connect(self._on_material_scanned)
         worker.download_started.connect(self._on_download_started)
@@ -595,6 +616,30 @@ class MainWindow(QMainWindow):
         walk reaches its first (throttled) directory.
         """
         self.statusBar().showMessage(tr("Scanning {path}…").format(path=path))
+
+    def _on_archive_progress(self, path: str, done: int, total: int) -> None:
+        """Report how far into a backup archive the mining pass has got.
+
+        The only feedback available while a single huge archive is being
+        read, where minutes can pass between two mined members. *total*
+        is the archive's size in bytes and *done* the position reached
+        in it; a *total* of 0 means the size could not be determined
+        (see :func:`pptrepair.archive.iter_materialized_members`), so
+        the percentage is dropped rather than faked.
+
+        :param path: the archive being read, named to the user by its
+            file name alone.
+        :param done: bytes of *path* processed so far.
+        :param total: *path*'s total size in bytes, or 0 when unknown.
+        """
+        name = Path(path).name
+        if total > 0:
+            self.statusBar().showMessage(
+                tr("Reading archive {name}… {percent}%").format(
+                    name=name, percent=done * 100 // total))
+        else:
+            self.statusBar().showMessage(
+                tr("Reading archive {name}…").format(name=name))
 
     def _on_file_scanned(self, outcome: object) -> None:
         """Count one diagnosed file and refresh the progress readout."""
@@ -890,7 +935,7 @@ class MainWindow(QMainWindow):
         self._open_output_button.setEnabled(False)
         self._open_output_button.hide()
 
-        worker = MultiRepairWorker(request, self)
+        worker = MultiRepairWorker(request, self, cache=self._material_cache)
         worker.merge_done.connect(self._on_merge_done)
         worker.file_repaired.connect(self._on_multi_file_repaired)
         worker.finished_ok.connect(self._on_multi_finished_ok)
@@ -1145,7 +1190,18 @@ class MainWindow(QMainWindow):
 
         Requests cancellation and blocks (briefly) for each worker to
         unwind so the process never exits with a live scan/repair
-        thread. Runs on the UI thread.
+        thread. Only then is the session's archive material cache
+        deleted -- a worker still mining into it must never have the
+        directory pulled out from under it. Runs on the UI thread.
+
+        Deleting the cache is best effort (a file locked by a virus
+        scanner, a vanished directory, ...): a leftover temporary
+        directory must not stop the window from closing. Should this
+        deletion never happen at all -- a hard crash, ``os._exit``, a
+        close event that is not delivered -- :mod:`tempfile`'s own
+        finalizer for the directory object is the backstop, and the
+        operating system's temporary-directory policy the one after
+        that.
 
         :param event: Qt's close event.
         """
@@ -1154,4 +1210,6 @@ class MainWindow(QMainWindow):
             if worker is not None and worker.isRunning():
                 worker.cancel()
                 worker.wait(_CLOSE_WAIT_MS)
+        with contextlib.suppress(OSError):
+            self._cache_dir.cleanup()
         super().closeEvent(event)

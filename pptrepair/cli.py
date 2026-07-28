@@ -500,13 +500,19 @@ def _expand_archive_sources(
 
     Each path in *other_paths* that :func:`pptrepair.archive.is_archive`
     recognises as a backup archive is expanded, via
-    :func:`pptrepair.archive.list_members` and
-    :func:`pptrepair.archive.materialize`, into plain on-disk copies of
-    its ``.pptx``/``.pptm`` members under their own subdirectory of
-    *tmp_dir* (one subdirectory per archive, so destination names never
-    collide across archives); every other path is passed through
-    unchanged. An archive that yields no usable member contributes
-    nothing and is noted.
+    :func:`pptrepair.archive.iter_materialized_members`, into plain
+    on-disk copies of its ``.pptx``/``.pptm`` members under their own
+    subdirectory of *tmp_dir* (one subdirectory per archive, so
+    destination names never collide across archives); every other path
+    is passed through unchanged. An archive that yields no usable member
+    contributes nothing and is noted.
+
+    That single fused pass is what makes a large backup usable as a
+    merge source: enumerating and then extracting were two separate
+    reads of the archive, and for a ``.tar.gz`` -- one compressed stream,
+    with no index to seek by -- extracting each member cost a full
+    decompression of its own, so the work grew with the *number* of
+    members rather than staying at one sweep of the file.
 
     :returns: ``(expanded, display, origin, notes)`` --
 
@@ -533,23 +539,23 @@ def _expand_archive_sources(
         if not archive_module.is_archive(path):
             expanded.append(path)
             continue
-        members, list_notes = archive_module.list_members(path)
-        notes.extend(list_notes)
-        if not members:
-            if not list_notes:
-                notes.append(
-                    f"archive {path} has no usable .pptx/.pptm member; "
-                    "skipped")
-            continue
         member_dir = tmp_dir / f"archive{index:04d}"
         member_dir.mkdir()
-        extracted, materialize_notes = archive_module.materialize(
-            path, members, member_dir)
-        notes.extend(materialize_notes)
-        for member, dest_path in extracted.items():
+        notes_before = len(notes)
+        extracted_count = 0
+        for member, dest_path in archive_module.iter_materialized_members(
+                path, member_dir, on_note=notes.append):
+            extracted_count += 1
             expanded.append(dest_path)
             display[dest_path] = member.display()
             origin[dest_path] = str(path)
+        if extracted_count == 0 and len(notes) == notes_before:
+            # Nothing came out and nothing was reported: the archive is
+            # readable but simply holds no presentation. Anything else
+            # (unreadable archive, encrypted or damaged members) has
+            # already said so in its own words.
+            notes.append(
+                f"archive {path} has no usable .pptx/.pptm member; skipped")
     return expanded, display, origin, notes
 
 

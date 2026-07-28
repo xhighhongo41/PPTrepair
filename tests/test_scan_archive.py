@@ -706,3 +706,34 @@ def test_archive_progress_reports_bytes_tagged_with_the_archive(
     assert done_values == sorted(done_values)
     assert {total for _path, _done, total in calls} == {total_bytes}
     assert done_values[-1] == total_bytes
+
+
+def test_scan_paths_forwards_the_cache_and_the_archive_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """scan_paths hands its archive_cache/archive_progress straight to the
+    mining pass: a second scan of the same tree reads the archive not at
+    all, and the byte counters reach the caller tagged with the archive."""
+    root = _mkroot(tmp_path)
+    _write(root, "deck.pptx", build_minimal_pptx(num_slides=1,
+                                                 media_bytes=20_000, seed=0))
+    archive_path = root / "backup.tar.gz"
+    _two_member_targz(archive_path)
+    cache = scan_module.ArchiveMaterialCache(tmp_path / "cache")
+    reads = _count_tar_reads(monkeypatch)
+    calls: list[tuple[Path, int, int]] = []
+
+    first = scan_module.scan_paths(
+        [root], search_archives=True, archive_cache=cache,
+        archive_progress=lambda path, done, total: calls.append(
+            (path, done, total)))
+    second = scan_module.scan_paths(
+        [root], search_archives=True, archive_cache=cache)
+
+    assert reads == ["r|*"]
+    assert len(first.materials) == 2
+    assert second.materials == first.materials
+    assert calls
+    assert {path for path, _done, _total in calls} == {archive_path}
+    assert {total for _path, _done, total in calls} == {
+        archive_path.stat().st_size}
