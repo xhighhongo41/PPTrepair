@@ -10,4 +10,4 @@ shareable diagnostic fingerprints for unknown corruption patterns;
 interface with drag-and-drop scanning and single-/multi-source repair.
 """
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
