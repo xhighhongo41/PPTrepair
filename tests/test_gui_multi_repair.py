@@ -37,7 +37,7 @@ PySide6 = pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QLabel
+from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QTreeWidgetItem
 from pytestqt.qtbot import QtBot
 
 from pptrepair.batch import plan_output_bases, repair_paths
@@ -284,6 +284,97 @@ def test_donor_dialog_shows_tier_legend(qtbot: QtBot) -> None:
     assert "[auto]" in labels_text
     assert "[candidate]" in labels_text
     assert "[lineage]" in labels_text
+
+
+def _dialog_with_placeholder(qtbot: QtBot) -> DonorApprovalDialog:
+    """Return a dialog covering tiered donors plus a donor-less target.
+
+    Mixes a tiered plan (auto/candidate/lineage) with a donor-less plan,
+    so the bulk-action tests can also confirm the placeholder row is
+    left untouched throughout.
+    """
+    plans = [_tiered_plan(), TargetPlan(target=Path("/x/lonely.pptx"),
+                                        donors=())]
+    dialog = DonorApprovalDialog(plans)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    return dialog
+
+
+def _bulk_action_button(dialog: DonorApprovalDialog,
+                        label: str) -> QPushButton:
+    """Return the dialog's QPushButton whose text matches *label*."""
+    [button] = [b for b in dialog.findChildren(QPushButton)
+                if b.text() == label]
+    return button
+
+
+def _placeholder_item(dialog: DonorApprovalDialog) -> QTreeWidgetItem:
+    """Return the disabled "no donors" child of the donor-less target."""
+    # The donor-less plan is the second one built in _dialog_with_placeholder.
+    target_item = dialog._target_items[1]
+    assert target_item.childCount() == 1
+    return target_item.child(0)
+
+
+def test_donor_dialog_select_all_checks_every_donor(qtbot: QtBot) -> None:
+    """The "Select all" button checks every donor across every target."""
+    dialog = _dialog_with_placeholder(qtbot)
+
+    _bulk_action_button(dialog, "Select all").click()
+
+    assert all(item.checkState(0) == Qt.CheckState.Checked
+              for item in dialog._donor_items)
+    [tiered_approved, lonely_approved] = dialog.approved_plans()
+    tiers = sorted(donor.tier for donor in tiered_approved.donors)
+    assert tiers == ["auto", "candidate", "lineage"]
+    assert tiered_approved.allow_candidate is True
+    assert tiered_approved.allow_lineage is True
+    assert lonely_approved.donors == ()
+    # The placeholder row is never checkable, so it stays untouched.
+    assert (_placeholder_item(dialog).flags()
+            == Qt.ItemFlag.NoItemFlags)
+
+
+def test_donor_dialog_deselect_all_unchecks_every_donor(qtbot: QtBot) -> None:
+    """The "Deselect all" button unchecks every donor across every target."""
+    dialog = _dialog_with_placeholder(qtbot)
+
+    _bulk_action_button(dialog, "Deselect all").click()
+
+    assert all(item.checkState(0) == Qt.CheckState.Unchecked
+              for item in dialog._donor_items)
+    [tiered_approved, lonely_approved] = dialog.approved_plans()
+    assert tiered_approved.donors == ()
+    assert tiered_approved.allow_candidate is False
+    assert tiered_approved.allow_lineage is False
+    assert lonely_approved.donors == ()
+    assert (_placeholder_item(dialog).flags()
+            == Qt.ItemFlag.NoItemFlags)
+
+
+def test_donor_dialog_reset_to_default_restores_auto_only(
+    qtbot: QtBot
+) -> None:
+    """"Reset to default" restores the initial auto-only checkstate."""
+    dialog = _dialog_with_placeholder(qtbot)
+
+    # Scramble the check states away from their initial policy first.
+    _bulk_action_button(dialog, "Select all").click()
+
+    _bulk_action_button(dialog, "Reset to default").click()
+
+    for item, donor in dialog._donor_items.items():
+        expected = (Qt.CheckState.Checked if donor.tier == "auto"
+                    else Qt.CheckState.Unchecked)
+        assert item.checkState(0) == expected
+    [tiered_approved, lonely_approved] = dialog.approved_plans()
+    assert [donor.tier for donor in tiered_approved.donors] == ["auto"]
+    assert tiered_approved.allow_candidate is False
+    assert tiered_approved.allow_lineage is False
+    assert lonely_approved.donors == ()
+    assert (_placeholder_item(dialog).flags()
+            == Qt.ItemFlag.NoItemFlags)
 
 
 # --------------------------------------------------------------------------

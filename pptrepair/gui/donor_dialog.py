@@ -13,6 +13,10 @@ trust model: ``auto``-tier donors (a verified byte-identical copy) are
 checked by default, while the weaker ``candidate``/``lineage`` tiers
 start unchecked and must be opted into deliberately, since their content
 is only cross-checked per entry rather than proven identical up front.
+Three bulk-action buttons ("Select all", "Deselect all", "Reset to
+default") sit above the tier legend, letting the user override or
+restore that default checkstate across every donor at once instead of
+clicking through each one when a repair spans many targets.
 Everything here runs on the UI thread.
 """
 
@@ -24,7 +28,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -70,8 +76,63 @@ class DonorApprovalDialog(QDialog):
         layout.addWidget(QLabel(tr(
             "Review the donors for each corrupted file, then click Repair.")))
         layout.addWidget(self._tree)
+        layout.addLayout(self._build_bulk_action_row())
         layout.addWidget(self._build_tier_legend())
         layout.addWidget(self._build_button_box())
+
+    def _build_bulk_action_row(self) -> QHBoxLayout:
+        """Return the left-aligned row of bulk selection buttons.
+
+        The three buttons act on every donor across every target at
+        once: "Select all" and "Deselect all" set a uniform checkstate,
+        while "Reset to default" restores the initial policy (``auto``
+        checked, other tiers unchecked). The donor-less placeholder rows
+        are never in :attr:`_donor_items`, so all three actions leave
+        them untouched.
+        """
+        row = QHBoxLayout()
+        select_all = QPushButton(tr("Select all"))
+        select_all.clicked.connect(
+            lambda: self._set_all_donors(Qt.CheckState.Checked))
+        row.addWidget(select_all)
+
+        deselect_all = QPushButton(tr("Deselect all"))
+        deselect_all.clicked.connect(
+            lambda: self._set_all_donors(Qt.CheckState.Unchecked))
+        row.addWidget(deselect_all)
+
+        reset_default = QPushButton(tr("Reset to default"))
+        reset_default.clicked.connect(self._reset_to_default)
+        row.addWidget(reset_default)
+
+        row.addStretch()
+        return row
+
+    def _set_all_donors(self, state: Qt.CheckState) -> None:
+        """Set every donor item's checkstate to *state*.
+
+        Only affects entries in :attr:`_donor_items`; a target's
+        disabled "no donors" placeholder is never a key there, so it is
+        left alone.
+
+        :param state: the checkstate to apply to every donor item.
+        """
+        for item in self._donor_items:
+            item.setCheckState(0, state)
+
+    def _reset_to_default(self) -> None:
+        """Restore every donor item to its initial checkstate.
+
+        Mirrors :meth:`_add_donor`'s construction-time policy:
+        ``auto``-tier donors are checked, the weaker tiers unchecked.
+        Only affects entries in :attr:`_donor_items`; placeholder rows
+        have no entry there and are left alone.
+        """
+        for item, donor in self._donor_items.items():
+            checked = donor.tier == "auto"
+            item.setCheckState(
+                0,
+                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
 
     def _build_tier_legend(self) -> QLabel:
         """Return the small, muted label explaining the ``[tier]`` tags.
