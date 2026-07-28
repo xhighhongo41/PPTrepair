@@ -719,3 +719,75 @@ msgstr "本アプリケーションはQt for Python(PySide6)を使用してお�
 msgid "See the LICENSE file in the GitHub repository for details."
 msgstr "詳細はGitHubリポジトリのLICENSEファイルを参照してください。"
 
+
+msgid "Already intact — no repair needed"
+msgstr "破損なし — 修復は不要です"
+
+msgid "Could not repair"
+msgstr "修復できませんでした"
+
+msgid "Download"
+msgstr "ダウンロード"
+
+msgid "Drop .pptx / .pptm files here, or click to choose files"
+msgstr "ここに .pptx / .pptm ファイルをドロップ、またはクリックして選択"
+
+msgid "Error"
+msgstr "エラー"
+
+msgid "File exceeds the {limit} MB size limit."
+msgstr "ファイルがサイズ上限 {limit} MB を超えています。"
+
+msgid "Free software (GPL-3.0). Files are never uploaded."
+msgstr "フリーソフトウェア (GPL-3.0)。ファイルがアップロードされることはありません。"
+
+msgid "Get the desktop version"
+msgstr "デスクトップ版を入手"
+
+msgid "Language"
+msgstr "言語"
+
+msgid "Loading the repair engine (about 14 MB, first visit only)…"
+msgstr "修復エンジンを読み込み中 (約14 MB、初回のみ)…"
+
+msgid "Multiple corrupted copies, an intact twin, or whole folders to scan? The desktop app can merge sources for a better repair."
+msgstr "複数の破損コピーや無傷の双子ファイル、フォルダごとの走査が必要ですか？デスクトップ版は複数ソースを統合してより良い修復ができます。"
+
+msgid "Partially salvaged"
+msgstr "部分的に救出しました"
+
+msgid "Preparing the repair toolkit…"
+msgstr "修復ツールキットを準備中…"
+
+msgid "Queued"
+msgstr "待機中"
+
+msgid "Ready. Your files are processed on this device only."
+msgstr "準備完了。ファイルはこの端末内でのみ処理されます。"
+
+msgid "Repair corrupted PowerPoint files right in your browser."
+msgstr "破損したPowerPointファイルをブラウザ内で直接修復。"
+
+msgid "Repaired"
+msgstr "修復済み"
+
+msgid "Result"
+msgstr "結果"
+
+msgid "Show details"
+msgstr "詳細を表示"
+
+msgid "Size"
+msgstr "サイズ"
+
+msgid "Source code"
+msgstr "ソースコード"
+
+msgid "The repair engine stopped unexpectedly. Reload the page and try again."
+msgstr "修復エンジンが予期せず停止しました。ページを再読み込みしてやり直してください。"
+
+msgid "Unsupported file type (only .pptx / .pptm)."
+msgstr "対応していないファイル形式です (.pptx / .pptm のみ)。"
+
+msgid "Your files never leave this device. All processing happens locally in your browser; nothing is uploaded to any server."
+msgstr "ファイルがこの端末の外に出ることはありません。すべての処理はブラウザ内でローカルに行われ、どのサーバーにも一切アップロードされません。"

@@ -1,6 +1,8 @@
 # PPTrepair
 
-Diagnoses and repairs PowerPoint files that were corrupted while stored on OneDrive — from the command line or a desktop GUI.
+Diagnoses and repairs PowerPoint files that were corrupted while stored on OneDrive — from the command line, a desktop GUI, or right in your browser.
+
+**Try it without installing anything:** the [web version](https://pptrepair.xhigh-hongo-41.workers.dev/) repairs files directly in your browser — nothing is ever uploaded. See [Web version](#web-version-v21).
 
 日本語版は [README_ja.md](README_ja.md) を参照してください。 (For the Japanese version, see [README_ja.md](README_ja.md).)
 
@@ -26,30 +28,35 @@ For corrupted files the report also shows how much content is salvageable (entri
 
 ## Installation
 
-Requires Python 3.12 or later. No runtime dependencies beyond the standard library. Pick whichever workflow matches your Python setup.
+Requires Python 3.12 or later. The core CLI has no runtime dependencies beyond the standard library; only the optional desktop GUI (`pptrepair gui`) additionally needs the `[gui]` extra (PySide6). Each method below shows both the CLI-only and the GUI-included install — pick whichever workflow matches your Python setup.
 
 ### pipx (recommended for CLI tools)
 
 Installs `pptrepair` as an isolated, globally available command:
 
 ```console
-$ pipx install git+https://github.com/xhighhongo41/PPTrepair.git
+$ pipx install git+https://github.com/xhighhongo41/PPTrepair.git                      # CLI only
+$ pipx install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'   # CLI + GUI
 $ pptrepair check presentation.pptx
 ```
 
-From a local clone, `pipx install .` works the same way.
+From a local clone, `pipx install .` (or `pipx install '.[gui]'`) works the same way. To add the GUI to an existing CLI-only install, re-run the `[gui]` command with `--force`.
 
 ### uv
 
 ```console
-$ uv tool install git+https://github.com/xhighhongo41/PPTrepair.git
+$ uv tool install git+https://github.com/xhighhongo41/PPTrepair.git                      # CLI only
+$ uv tool install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'   # CLI + GUI
 $ pptrepair check presentation.pptx
 ```
+
+To add the GUI to an existing CLI-only install, re-run the `[gui]` command with `--force`.
 
 Inside a clone you can also run it without installing anything:
 
 ```console
 $ uv run pptrepair check presentation.pptx
+$ uv run --extra gui pptrepair gui
 ```
 
 ### pip + venv (Python standard tooling)
@@ -59,7 +66,8 @@ $ git clone https://github.com/xhighhongo41/PPTrepair.git
 $ cd PPTrepair
 $ python -m venv .venv
 $ source .venv/bin/activate    # Windows: .venv\Scripts\activate
-(.venv) $ pip install .
+(.venv) $ pip install .            # CLI only
+(.venv) $ pip install '.[gui]'     # CLI + GUI
 (.venv) $ pptrepair check presentation.pptx
 ```
 
@@ -68,13 +76,14 @@ $ source .venv/bin/activate    # Windows: .venv\Scripts\activate
 ```console
 $ git clone https://github.com/xhighhongo41/PPTrepair.git
 $ cd PPTrepair
-$ pipenv install -e .
+$ pipenv install -e .           # CLI only
+$ pipenv install -e '.[gui]'    # CLI + GUI
 $ pipenv run pptrepair check presentation.pptx
 ```
 
 ### pyenv / conda users
 
-pyenv manages Python versions rather than environments: make sure `python` resolves to 3.12+ (e.g. `pyenv install 3.13 && pyenv shell 3.13`), then use any of the methods above. With conda, create an environment first: `conda create -n pptrepair python=3.13 && conda activate pptrepair && pip install .`
+pyenv manages Python versions rather than environments: make sure `python` resolves to 3.12+ (e.g. `pyenv install 3.13 && pyenv shell 3.13`), then use any of the methods above. With conda, create an environment first: `conda create -n pptrepair python=3.13 && conda activate pptrepair && pip install .` (use `pip install '.[gui]'` for the GUI).
 
 ## Usage
 
@@ -225,11 +234,11 @@ If you hit an unknown pattern, please review the fingerprint file yourself and c
 For everyday use without a terminal, `pptrepair gui` launches a PySide6-based desktop application that wraps the same scan/repair engine as the CLI.
 
 ```console
-$ pipx install "pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git"
+$ pipx install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'
 $ pptrepair gui
 ```
 
-The GUI needs the optional `[gui]` extra (PySide6) on top of the plain install described above; from a local clone, `pip install '.[gui]'` works the same way.
+The GUI needs the optional `[gui]` extra (PySide6) on top of the plain CLI install — see [Installation](#installation) for the matching `[gui]` command for pipx, uv, pip and pipenv. Note that name-only forms such as `pip install 'pptrepair[gui]'` cannot work: the package is not published on PyPI, so the extra and the git URL (or local path) must be combined in a single requirement as shown above.
 
 Drop files, folders (scanned recursively for `.pptx`/`.pptm`) or backup archives onto the window — repeated drops keep accumulating into one work set. **Scan** diagnoses everything with live progress and a Cancel button, then lists the results in a **Files** tab (colour-coded verdicts) and a **Candidates** tab (the same restore/lineage/merge candidates `scan --report` writes to disk). **Repair** then runs in one of two modes:
 
@@ -238,7 +247,32 @@ Drop files, folders (scanned recursively for `.pptx`/`.pptm`) or backup archives
 
 Output goes either **in place** next to each source, or into a chosen folder that mirrors the input tree — the GUI equivalents of `--in-place` and aggregate `-o OUTDIR`. A Preferences dialog controls whether cloud-only files may be downloaded, the maximum file size examined (default 2 GB, the GUI equivalent of `--max-file-size`), and the UI/report language — the same 7 languages as the CLI, with a change taking effect after restart. Every setting persists across launches. As with the CLI, dropped archives are only donor material: the files inside them are never repaired themselves.
 
+### Web version (v2.1)
+
+**https://pptrepair.xhigh-hongo-41.workers.dev/**
+
+The web version runs the very same repair engine as the CLI — as Python compiled to WebAssembly (Pyodide) — entirely inside your browser. There is no server-side processing and no account:
+
+* **Your files never leave your device.** They are read, diagnosed and repaired locally in a browser worker; nothing is uploaded anywhere. The site's Content-Security-Policy forbids the page from talking to any other host.
+* Drop (or pick) one or more `.pptx` / `.pptm` files; each is repaired in turn and the result is offered as a download: a repaired `.pptx`, or a `.salvaged.zip` recovery archive when only parts could be rescued, plus the same detailed report the CLI prints.
+* Same 7 report/UI languages as the CLI, auto-detected from the browser and switchable on the page.
+* Limits compared to the desktop versions: single-file repair only (no multi-source merge, no folder scan — the page points to the desktop app for those), and files up to 200 MB each. The first visit downloads the engine (about 14 MB); afterwards it loads from the browser cache.
+* Works in current Chrome, Edge, Safari and Firefox.
+
+To run it locally instead of using the hosted site (requires Python 3.12+):
+
+```console
+$ git clone https://github.com/xhighhongo41/PPTrepair.git
+$ cd PPTrepair
+$ bash tools/build_webapp.sh        # builds the wheel and fetches the pinned Pyodide runtime
+$ python tools/serve_webapp.py      # serves http://127.0.0.1:8760 with production headers
+```
+
 ## Changelog
+
+### ver 2.1.0 (2026-07-28)
+- New web version at https://pptrepair.xhigh-hongo-41.workers.dev/ — the same repair engine compiled to WebAssembly (Pyodide, pinned and self-hosted) running entirely in the browser. Files are never uploaded; a strict Content-Security-Policy (`default-src 'none'`) enforces that the page cannot talk to any other host. Drag & drop with sequential processing, per-file reports, `.salvaged.zip` download for partial rescues, 200 MB/file limit, 7-language UI with browser-language auto-detection
+- Hosted as a fully static site on Cloudflare (free tier, no server-side processing); `tools/build_webapp.sh` reproduces the build, `tools/serve_webapp.py` serves it locally with the production security headers
 
 ### ver 2.0.0 (2026-07-25)
 - New PySide6 desktop GUI (`pptrepair gui`, optional `[gui]` extra): drag & drop accumulation, recursive folder scan, live progress with cancellation, single-file / multi-source repair modes with donor approval, archive donor mining, in-place / mirrored folder output, persistent settings, 7-language UI

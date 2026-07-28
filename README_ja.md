@@ -1,8 +1,11 @@
 # PPTrepair
 
-OneDriveに置いている間に破損したPowerPointファイルを診断・修復するツール。コマンドラインまたはデスクトップGUIから利用できる。
+OneDriveに置いている間に破損したPowerPointファイルを診断・修復するツール。コマンドライン、デスクトップGUI、そしてブラウザからそのまま利用できる。
+
+**インストール不要で試せます:** [Web版](https://pptrepair.xhigh-hongo-41.workers.dev/) はブラウザ内で直接修復します — ファイルがアップロードされることは一切ありません。詳細は [Web版](#web版-v21) を参照。
 
 English version: [README.md](README.md)
+
 
 ## このツールができること
 
@@ -26,30 +29,35 @@ English version: [README.md](README.md)
 
 ## インストール
 
-Python 3.12以降が必要です。標準ライブラリ以外の実行時依存はありません。お使いのPython環境管理ツールに合わせて以下のいずれかの方法を選んでください。
+Python 3.12以降が必要です。CLI本体は標準ライブラリ以外の実行時依存はありません。オプションのデスクトップGUI（`pptrepair gui`）を使う場合のみ、`[gui]` エクストラ（PySide6）が追加で必要です。以下の各方法に「CLIのみ」「GUIあり」両方のコマンドを載せているので、お使いのPython環境管理ツールに合わせて選んでください。
 
 ### pipx（CLIツールにおすすめ）
 
 `pptrepair` を独立した環境にインストールし、どこからでも使えるコマンドにします:
 
 ```console
-$ pipx install git+https://github.com/xhighhongo41/PPTrepair.git
+$ pipx install git+https://github.com/xhighhongo41/PPTrepair.git                      # CLIのみ
+$ pipx install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'   # CLI + GUI
 $ pptrepair check presentation.pptx
 ```
 
-クローン済みのディレクトリ内なら `pipx install .` でも同様です。
+クローン済みのディレクトリ内なら `pipx install .`（GUIありは `pipx install '.[gui]'`）でも同様です。CLIのみでインストール済みの環境にGUIを追加するには、`[gui]` 付きコマンドに `--force` を付けて再実行してください。
 
 ### uv
 
 ```console
-$ uv tool install git+https://github.com/xhighhongo41/PPTrepair.git
+$ uv tool install git+https://github.com/xhighhongo41/PPTrepair.git                      # CLIのみ
+$ uv tool install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'   # CLI + GUI
 $ pptrepair check presentation.pptx
 ```
+
+CLIのみでインストール済みの環境にGUIを追加するには、`[gui]` 付きコマンドに `--force` を付けて再実行してください。
 
 クローン内であればインストールせずに直接実行することもできます:
 
 ```console
 $ uv run pptrepair check presentation.pptx
+$ uv run --extra gui pptrepair gui
 ```
 
 ### pip + venv（Python標準ツール）
@@ -59,7 +67,8 @@ $ git clone https://github.com/xhighhongo41/PPTrepair.git
 $ cd PPTrepair
 $ python -m venv .venv
 $ source .venv/bin/activate    # Windowsの場合: .venv\Scripts\activate
-(.venv) $ pip install .
+(.venv) $ pip install .            # CLIのみ
+(.venv) $ pip install '.[gui]'     # CLI + GUI
 (.venv) $ pptrepair check presentation.pptx
 ```
 
@@ -68,13 +77,14 @@ $ source .venv/bin/activate    # Windowsの場合: .venv\Scripts\activate
 ```console
 $ git clone https://github.com/xhighhongo41/PPTrepair.git
 $ cd PPTrepair
-$ pipenv install -e .
+$ pipenv install -e .           # CLIのみ
+$ pipenv install -e '.[gui]'    # CLI + GUI
 $ pipenv run pptrepair check presentation.pptx
 ```
 
 ### pyenv / conda をお使いの場合
 
-pyenvはPythonのバージョン管理ツールなので、`python` が3.12以降を指すようにした上で（例: `pyenv install 3.13 && pyenv shell 3.13`）、上記いずれかの方法を使ってください。condaの場合は環境を作ってからpipでインストールします: `conda create -n pptrepair python=3.13 && conda activate pptrepair && pip install .`
+pyenvはPythonのバージョン管理ツールなので、`python` が3.12以降を指すようにした上で（例: `pyenv install 3.13 && pyenv shell 3.13`）、上記いずれかの方法を使ってください。condaの場合は環境を作ってからpipでインストールします: `conda create -n pptrepair python=3.13 && conda activate pptrepair && pip install .`（GUIありは `pip install '.[gui]'`）
 
 ## 使い方
 
@@ -225,11 +235,11 @@ OneDrive破損は、同じプレゼンの「壊れ方の違う」コピーを複
 ターミナルを使わずに操作したい場合は、`pptrepair gui` でPySide6製のデスクトップアプリを起動できます。内部ではCLIと同じスキャン・修復エンジンを使用します。
 
 ```console
-$ pipx install "pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git"
+$ pipx install 'pptrepair[gui] @ git+https://github.com/xhighhongo41/PPTrepair.git'
 $ pptrepair gui
 ```
 
-GUIにはオプションの `[gui]` エクストラ（PySide6）が、上記の通常インストールに加えて必要です。クローン済みのディレクトリでは `pip install '.[gui]'` でも同様にインストールできます。
+GUIにはオプションの `[gui]` エクストラ（PySide6）が、通常のCLIインストールに加えて必要です。pipx / uv / pip / pipenv それぞれの `[gui]` 付きコマンドは[インストール](#インストール)の節を参照してください。なお本パッケージはPyPIには公開していないため、`pip install 'pptrepair[gui]'` のようにパッケージ名だけを指定する形では解決できません。上記のようにエクストラとgit URL（またはローカルパス）を1つの指定にまとめてください。
 
 ウィンドウにファイル・フォルダ（`.pptx`/`.pptm`を再帰的に走査）・バックアップアーカイブをドラッグ&ドロップすると、複数回のドロップ結果が1つの作業対象として蓄積されます。**Scan**を実行すると全件をリアルタイム進捗表示＋キャンセルボタン付きで診断し、結果は**Files**タブ（判定を色分け表示）と**Candidates**タブ（`scan --report`が書き出すのと同じ復元/別バージョン/マージ候補）に表示されます。続く**Repair**は2つのモードで実行できます:
 
@@ -238,7 +248,32 @@ GUIにはオプションの `[gui]` エクストラ（PySide6）が、上記の�
 
 出力先は各ファイルの隣（**in-place**）、または入力ツリーをミラーする指定フォルダのいずれかを選べます——それぞれCLIの`--in-place`と集約`-o OUTDIR`に相当します。環境設定ダイアログでは、クラウド専用ファイルのダウンロード可否、検査する1ファイルの上限サイズ（既定2GB。`--max-file-size`に相当）、UI・レポート言語（CLIと同じ7言語。変更は再起動後に反映されます）を設定でき、これらの設定はすべて自動保存され、次回起動時にも引き継がれます。CLIと同様、ドロップしたアーカイブはあくまでドナー素材であり、アーカイブ内のファイル自体が修復対象になることはありません。
 
+### Web版 (v2.1)
+
+**https://pptrepair.xhigh-hongo-41.workers.dev/**
+
+Web版は、CLIとまったく同じ修復エンジンをWebAssemblyにコンパイルしたPython（Pyodide）として、すべてブラウザの中だけで実行します。サーバー側の処理はなく、アカウントも不要です:
+
+* **ファイルが端末の外に出ることはありません。** 読み取り・診断・修復はすべてブラウザ内のワーカーでローカルに行われ、どこにもアップロードされません。サイトのContent-Security-Policyにより、ページが他のホストと通信すること自体が禁止されています。
+* `.pptx` / `.pptm` ファイルをドロップ（または選択）すると1つずつ順番に修復され、結果をダウンロードできます: 修復済み `.pptx`、または部分救出のみ可能だった場合は `.salvaged.zip` レスキューアーカイブ。CLIと同じ詳細レポートも表示されます。
+* レポート・UIはCLIと同じ7言語。ブラウザの言語から自動検出され、ページ上で切り替えもできます。
+* デスクトップ版との違い: 単一ファイル修復のみ（複数ソース統合修復やフォルダスキャンはなし — それらが必要な場合に向けてページ内からデスクトップ版を案内しています）、1ファイル200MBまで。初回アクセス時に修復エンジン（約14MB）をダウンロードし、以降はブラウザキャッシュから読み込まれます。
+* 最新のChrome / Edge / Safari / Firefoxで動作します。
+
+ホスティングされたサイトではなくローカルで動かす場合（Python 3.12+が必要）:
+
+```console
+$ git clone https://github.com/xhighhongo41/PPTrepair.git
+$ cd PPTrepair
+$ bash tools/build_webapp.sh        # wheelのビルドとバージョン固定Pyodideの取得
+$ python tools/serve_webapp.py      # 本番と同じヘッダーで http://127.0.0.1:8760 を配信
+```
+
 ## Changelog
+
+### ver 2.1.0 (2026-07-28)
+- Web版を公開: https://pptrepair.xhigh-hongo-41.workers.dev/ — 同じ修復エンジンをWebAssembly化（Pyodide、バージョン固定・セルフホスト）し、すべてブラウザ内で実行。ファイルは一切アップロードされず、厳格なContent-Security-Policy（`default-src 'none'`）が他ホストとの通信自体を禁止。ドラッグ&ドロップの逐次処理、ファイルごとの詳細レポート、部分救出時の `.salvaged.zip` ダウンロード、1ファイル200MB上限、ブラウザ言語自動検出付き7言語UI
+- 完全静的サイトとしてCloudflare（無料枠、サーバー側処理なし）でホスティング。`tools/build_webapp.sh` でビルドを再現でき、`tools/serve_webapp.py` が本番と同一のセキュリティヘッダーでローカル配信
 
 ### ver 2.0.0 (2026-07-25)
 - PySide6製のデスクトップGUIを追加（`pptrepair gui`、オプションの `[gui]` エクストラ）: ドラッグ&ドロップの蓄積、フォルダの再帰スキャン、キャンセル可能なリアルタイム進捗表示、ドナー承認付きのsingle-file/multi-source修復モード、アーカイブからのドナー採掘、in-place/ミラーフォルダ出力、設定の自動保存、7言語UI

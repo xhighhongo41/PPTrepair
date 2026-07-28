@@ -719,3 +719,75 @@ msgstr "本应用程序使用 Qt for Python（PySide6），依据 GNU LGPL v3 �
 msgid "See the LICENSE file in the GitHub repository for details."
 msgstr "详情请参阅 GitHub 仓库中的 LICENSE 文件。"
 
+
+msgid "Already intact — no repair needed"
+msgstr "文件完好 — 无需修复"
+
+msgid "Could not repair"
+msgstr "无法修复"
+
+msgid "Download"
+msgstr "下载"
+
+msgid "Drop .pptx / .pptm files here, or click to choose files"
+msgstr "将 .pptx / .pptm 文件拖放到此处，或点击选择文件"
+
+msgid "Error"
+msgstr "错误"
+
+msgid "File exceeds the {limit} MB size limit."
+msgstr "文件超过 {limit} MB 的大小上限。"
+
+msgid "Free software (GPL-3.0). Files are never uploaded."
+msgstr "自由软件 (GPL-3.0)。文件绝不会被上传。"
+
+msgid "Get the desktop version"
+msgstr "获取桌面版"
+
+msgid "Language"
+msgstr "语言"
+
+msgid "Loading the repair engine (about 14 MB, first visit only)…"
+msgstr "正在加载修复引擎（约 14 MB，仅首次访问）…"
+
+msgid "Multiple corrupted copies, an intact twin, or whole folders to scan? The desktop app can merge sources for a better repair."
+msgstr "有多个损坏副本、完好的孪生文件，或需要扫描整个文件夹？桌面版可以合并多个来源以获得更好的修复效果。"
+
+msgid "Partially salvaged"
+msgstr "已部分抢救"
+
+msgid "Preparing the repair toolkit…"
+msgstr "正在准备修复工具包…"
+
+msgid "Queued"
+msgstr "排队中"
+
+msgid "Ready. Your files are processed on this device only."
+msgstr "已就绪。文件仅在此设备上处理。"
+
+msgid "Repair corrupted PowerPoint files right in your browser."
+msgstr "直接在浏览器中修复损坏的 PowerPoint 文件。"
+
+msgid "Repaired"
+msgstr "已修复"
+
+msgid "Result"
+msgstr "结果"
+
+msgid "Show details"
+msgstr "显示详情"
+
+msgid "Size"
+msgstr "大小"
+
+msgid "Source code"
+msgstr "源代码"
+
+msgid "The repair engine stopped unexpectedly. Reload the page and try again."
+msgstr "修复引擎意外停止。请重新加载页面并重试。"
+
+msgid "Unsupported file type (only .pptx / .pptm)."
+msgstr "不支持的文件类型（仅支持 .pptx / .pptm）。"
+
+msgid "Your files never leave this device. All processing happens locally in your browser; nothing is uploaded to any server."
+msgstr "文件绝不会离开此设备。所有处理都在浏览器中本地完成，不会向任何服务器上传任何内容。"
