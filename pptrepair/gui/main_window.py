@@ -13,6 +13,7 @@ cooperatively so a running worker never leaves a dangling thread.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QUrl
@@ -45,7 +46,13 @@ from pptrepair.gui.results import ResultsPanel
 from pptrepair.gui.run_options import RepairMode, RunOptionsPanel
 from pptrepair.gui.settings import Settings, SettingsDialog
 from pptrepair.gui.source_panel import SourcePanel
-from pptrepair.gui.sources import AddResult, SourceKind, SourceListModel
+from pptrepair.gui.sources import (
+    AddResult,
+    RejectedSource,
+    RejectReason,
+    SourceKind,
+    SourceListModel,
+)
 from pptrepair.gui.worker import (
     GuiScanResult,
     MultiRepairRequest,
@@ -1008,7 +1015,10 @@ class MainWindow(QMainWindow):
         :attr:`_settings`'s most-recently-used list exactly once,
         regardless of how it was added. A path already present (a
         duplicate, per :attr:`AddResult.duplicates`) is left where it
-        is in that list.
+        is in that list. Any rejected source (per
+        :attr:`AddResult.rejected`) is additionally reported through
+        :meth:`_show_reject_details`, since the status bar's one-line
+        summary has no room for individual reasons.
 
         :param result: the outcome of one
             :meth:`~pptrepair.gui.sources.SourceListModel.add_paths` call.
@@ -1017,6 +1027,24 @@ class MainWindow(QMainWindow):
         for entry in result.added:
             if entry.kind is SourceKind.FOLDER:
                 self._settings.push_recent_folder(entry.path)
+        if result.rejected:
+            self._show_reject_details(result.rejected)
+
+    def _show_reject_details(
+        self, rejected: Sequence[RejectedSource]
+    ) -> None:
+        """Show a dialog detailing why each path in *rejected* was skipped.
+
+        A thin wrapper around :func:`QMessageBox.warning` -- kept as its
+        own method so tests can monkeypatch it and record its calls
+        without having to drive a real modal dialog.
+
+        :param rejected: the rejected sources to report, as returned by
+            :meth:`~pptrepair.gui.sources.SourceListModel.add_paths`.
+        """
+        QMessageBox.warning(
+            self, tr("Rejected sources"),
+            self._format_reject_details(rejected))
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         """Accept a drag that carries at least one local file URL.
@@ -1054,6 +1082,27 @@ class MainWindow(QMainWindow):
         if not mime_data.hasUrls():
             return False
         return any(url.isLocalFile() for url in mime_data.urls())
+
+    @staticmethod
+    def _format_reject_details(rejected: Sequence[RejectedSource]) -> str:
+        """Render one reason line per rejected source, newline-joined.
+
+        :param rejected: the rejected sources to describe, as returned
+            by :meth:`~pptrepair.gui.sources.SourceListModel.add_paths`.
+        :returns: the message body for :meth:`_show_reject_details`.
+        """
+        lines = []
+        for item in rejected:
+            if item.reason is RejectReason.NOT_FOUND:
+                reason_text = tr("not found")
+            elif item.reason is RejectReason.ACCESS_ERROR:
+                reason_text = tr(
+                    "could not be accessed ({detail})").format(
+                        detail=item.detail)
+            else:
+                reason_text = tr("unsupported file type")
+            lines.append(f"{item.path} — {reason_text}")
+        return "\n".join(lines)
 
     @staticmethod
     def _format_add_result(result: AddResult) -> str:

@@ -5,7 +5,7 @@ archives onto the main window across several drag-and-drop gestures
 (and/or the equivalent "Add Files…"/"Add Folder…" dialogs). This
 module owns that accumulated list: :func:`classify_source` decides
 what kind of thing a path is (without touching its content -- only
-``Path.is_dir()`` and the name are consulted), and
+an ``os.stat`` call and the name are consulted), and
 :class:`SourceListModel` is the Qt list model that stores the
 resulting :class:`SourceEntry` objects for a ``QListView``.
 
@@ -17,6 +17,9 @@ lists the paths the user dropped.
 from __future__ import annotations
 
 import enum
+import os
+import stat
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,6 +44,54 @@ class SourceKind(enum.Enum):
     ARCHIVE = "archive"
 
 
+class RejectReason(enum.Enum):
+    """Why :func:`classify_source` could not classify a dropped path."""
+
+    #: Neither the initial ``os.stat`` nor its one retry found the path.
+    NOT_FOUND = "not-found"
+    #: Both stat attempts raised an ``OSError`` other than "not found"
+    #: (e.g. a transient VPN/SMB mount hiccup) and the path's name did
+    #: not match a supported suffix either.
+    ACCESS_ERROR = "access-error"
+    #: The path exists (or was accepted by name; see
+    #: :func:`classify_source`) but is neither a folder, a supported
+    #: file suffix nor a recognised archive name.
+    UNSUPPORTED_SUFFIX = "unsupported-suffix"
+
+
+@dataclass(frozen=True)
+class Classification:
+    """The outcome of classifying one dropped path.
+
+    :ivar kind: the matching :class:`SourceKind`, or ``None`` when the
+        path was rejected.
+    :ivar reason: why the path was rejected; ``None`` when *kind* is
+        not ``None``.
+    :ivar detail: extra, human-readable context for *reason* (only
+        populated for :attr:`RejectReason.ACCESS_ERROR`, where it holds
+        the underlying ``OSError``'s message).
+    """
+
+    kind: SourceKind | None
+    reason: RejectReason | None = None
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class RejectedSource:
+    """One input path :meth:`SourceListModel.add_paths` could not add.
+
+    :ivar path: the rejected path, as passed in (not yet resolved).
+    :ivar reason: why the path was rejected.
+    :ivar detail: extra, human-readable context for *reason* (see
+        :attr:`Classification.detail`).
+    """
+
+    path: Path
+    reason: RejectReason
+    detail: str = ""
+
+
 @dataclass(frozen=True)
 class SourceEntry:
     """One classified source path held by :class:`SourceListModel`.
@@ -61,37 +112,72 @@ class AddResult:
     :ivar duplicates: input paths that resolved to an already-present
         entry and were therefore skipped.
     :ivar rejected: input paths that :func:`classify_source` could not
-        classify (unsupported suffix or nonexistent path).
+        classify, together with why.
     """
 
     added: list[SourceEntry] = field(default_factory=list)
     duplicates: list[Path] = field(default_factory=list)
-    rejected: list[Path] = field(default_factory=list)
+    rejected: list[RejectedSource] = field(default_factory=list)
 
 
-def classify_source(path: Path) -> SourceKind | None:
+#: Delay before the one-shot ``os.stat`` retry in :func:`classify_source`.
+#: A module attribute (rather than a literal in the function body) so
+#: tests can monkeypatch it down to ``0`` and keep the retry path fast.
+_STAT_RETRY_DELAY_S = 1.0
+
+
+def classify_source(path: Path) -> Classification:
     """Classify *path* as a file, folder or archive source.
 
     Directories are always :data:`SourceKind.FOLDER`, regardless of
     name. A file is :data:`SourceKind.FILE` when its suffix matches
     :data:`pptrepair.walker.TARGET_SUFFIXES` (case-insensitively) and
     :data:`SourceKind.ARCHIVE` when :func:`pptrepair.archive.is_archive`
-    recognises its name. Anything else -- including a path that does
-    not exist on disk -- returns ``None``.
+    recognises its name. Anything else is rejected with
+    :attr:`RejectReason.UNSUPPORTED_SUFFIX`.
+
+    Classification is driven by ``os.stat`` rather than
+    :meth:`Path.exists`/:meth:`Path.is_dir` so a single ``OSError`` --
+    observed on VPN/SMB-mounted drives right after a drag-and-drop,
+    where the mount can briefly bounce a fresh path -- does not
+    immediately reject a path the user just dropped (and which
+    therefore is known to exist). Such an error triggers exactly one
+    retry after :data:`_STAT_RETRY_DELAY_S`; if that retry also fails
+    with an ``OSError`` (but not a "not found" error), the path is
+    classified by name alone, on the assumption that a just-dropped
+    path exists even though its filesystem is currently unreachable.
 
     :param path: the path to classify.
-    :returns: the matching :class:`SourceKind`, or ``None`` if *path*
-        does not exist or is otherwise unsupported.
+    :returns: the resulting :class:`Classification`.
     """
-    if not path.exists():
-        return None
-    if path.is_dir():
-        return SourceKind.FOLDER
+    try:
+        st = os.stat(path)
+    except OSError:
+        # Even a "not found" error gets the one retry: a bouncing
+        # network mount can make a whole subtree vanish for a moment,
+        # which surfaces as ENOENT just like a genuinely missing path.
+        time.sleep(_STAT_RETRY_DELAY_S)
+        try:
+            st = os.stat(path)
+        except (FileNotFoundError, NotADirectoryError):
+            return Classification(None, RejectReason.NOT_FOUND)
+        except OSError as exc:
+            # Both attempts failed for a reason other than "not
+            # found" -- classify by name alone; see the docstring.
+            if path.suffix.lower() in TARGET_SUFFIXES:
+                return Classification(SourceKind.FILE)
+            if is_archive(path):
+                return Classification(SourceKind.ARCHIVE)
+            return Classification(
+                None, RejectReason.ACCESS_ERROR, detail=str(exc))
+
+    if stat.S_ISDIR(st.st_mode):
+        return Classification(SourceKind.FOLDER)
     if path.suffix.lower() in TARGET_SUFFIXES:
-        return SourceKind.FILE
+        return Classification(SourceKind.FILE)
     if is_archive(path):
-        return SourceKind.ARCHIVE
-    return None
+        return Classification(SourceKind.ARCHIVE)
+    return Classification(None, RejectReason.UNSUPPORTED_SUFFIX)
 
 
 class SourceListModel(QAbstractListModel):
@@ -186,14 +272,15 @@ class SourceListModel(QAbstractListModel):
 
         for raw_path in paths:
             resolved = raw_path.resolve()
-            kind = classify_source(resolved)
-            if kind is None:
-                result.rejected.append(raw_path)
+            classification = classify_source(resolved)
+            if classification.kind is None:
+                result.rejected.append(RejectedSource(
+                    raw_path, classification.reason, classification.detail))
                 continue
             if resolved in existing:
                 result.duplicates.append(raw_path)
                 continue
-            entry = SourceEntry(path=resolved, kind=kind)
+            entry = SourceEntry(path=resolved, kind=classification.kind)
             new_entries.append(entry)
             existing.add(resolved)
 
