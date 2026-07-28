@@ -606,6 +606,9 @@ msgstr "Scan fehlgeschlagen: {message}"
 msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
 msgstr "Gescannt {n} Datei(en): {corrupted} beschädigt, {intact} intakt"
 
+msgid "Scanning {path}…"
+msgstr "Durchsuche {path}…"
+
 msgid "Scanning…"
 msgstr "Wird gescannt…"
 

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,6 +50,12 @@ from pptrepair.scan import (
     diagnose_file,
     scan_paths,
 )
+
+#: Minimum time (seconds) between two ``walk_progress`` emits, so a huge
+#: tree does not flood the UI thread with one signal per directory. A
+#: module attribute (rather than a class constant) so tests can
+#: monkeypatch it to make the throttling deterministic.
+_WALK_PROGRESS_INTERVAL_S = 0.2
 
 
 @dataclass(frozen=True)
@@ -100,6 +107,11 @@ class ScanWorker(QThread):
 
     Signals (all delivered on the UI thread via queued connections):
 
+    * :attr:`walk_progress` -- the directory (as a ``str`` path) the
+      discovery walk is currently visiting, throttled to at most one
+      emit per :data:`_WALK_PROGRESS_INTERVAL_S`. Fired before any file
+      is diagnosed, so a large tree shows activity during the
+      otherwise-silent discovery phase.
     * :attr:`file_scanned` -- one on-disk file was diagnosed
       (:class:`~pptrepair.scan.FileOutcome`).
     * :attr:`material_scanned` -- one archive member was mined as donor
@@ -118,6 +130,7 @@ class ScanWorker(QThread):
     :attr:`~PySide6.QtCore.QThread.finished` signal.
     """
 
+    walk_progress = Signal(str)
     file_scanned = Signal(object)
     material_scanned = Signal(object)
     download_started = Signal(object)
@@ -137,6 +150,10 @@ class ScanWorker(QThread):
         super().__init__(parent)
         self._request = request
         self._cancel_event = threading.Event()
+        #: Monotonic timestamp of the last walk_progress emit, or None
+        #: before the first directory is visited (so that first visit
+        #: always emits regardless of the throttling interval).
+        self._last_walk_progress: float | None = None
 
     def cancel(self) -> None:
         """Request cooperative cancellation of the running scan.
@@ -205,6 +222,7 @@ class ScanWorker(QThread):
                 search_archives=False,
                 progress=self._on_file_scanned,
                 on_download=self._on_download,
+                on_directory=self._on_directory,
             )
 
         self._raise_if_cancelled()
@@ -231,6 +249,29 @@ class ScanWorker(QThread):
         """
         if self._cancel_event.is_set():
             raise OperationCancelled("scan cancelled by user")
+
+    def _on_directory(self, path: Path) -> None:
+        """Core ``on_directory`` callback: relay the walk's current directory.
+
+        Runs on the worker thread, during the discovery walk (before
+        any file is diagnosed). Honours a pending cancellation first --
+        this is what makes cancellation responsive even while the walk
+        itself is still enumerating a large tree, with no file yet
+        diagnosed to hang the check off of. Then emits
+        :attr:`walk_progress` for delivery on the UI thread, but only
+        when at least :data:`_WALK_PROGRESS_INTERVAL_S` has elapsed
+        since the previous emit (the first directory visited always
+        emits), so a huge tree does not flood the UI thread with one
+        signal per directory.
+        """
+        self._raise_if_cancelled()
+        now = time.monotonic()
+        if (self._last_walk_progress is not None
+                and now - self._last_walk_progress
+                < _WALK_PROGRESS_INTERVAL_S):
+            return
+        self._last_walk_progress = now
+        self.walk_progress.emit(str(path))
 
     def _on_file_scanned(self, outcome: FileOutcome) -> None:
         """Core ``progress`` callback: relay one diagnosed file.

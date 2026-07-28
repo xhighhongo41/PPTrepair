@@ -551,6 +551,9 @@ msgstr ""
 msgid "Scanned: {n} file(s)"
 msgstr ""
 
+msgid "Scanning {path}…"
+msgstr ""
+
 msgid "Scanning…"
 msgstr ""
 

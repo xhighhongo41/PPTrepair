@@ -606,6 +606,9 @@ msgstr "スキャンに失敗しました: {message}"
 msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
 msgstr "スキャン済み {n} 件: 破損 {corrupted} 件、無傷 {intact} 件"
 
+msgid "Scanning {path}…"
+msgstr "スキャン中 {path}…"
+
 msgid "Scanning…"
 msgstr "スキャン中…"
 

@@ -289,7 +289,8 @@ def scan_paths(roots: Sequence[Path], *,
                max_file_bytes: int | None = None,
                progress: Callable[[FileOutcome], None] | None = None,
                on_download: Callable[[Path], None] | None = None,
-               material_progress: Callable[[ArchiveMaterial], None] | None = None
+               material_progress: Callable[[ArchiveMaterial], None] | None = None,
+               on_directory: Callable[[Path], None] | None = None,
                ) -> ScanResult:
     """Scan *roots* and return the aggregate result.
 
@@ -305,6 +306,10 @@ def scan_paths(roots: Sequence[Path], *,
       through; a candidate over the limit is excluded before it ever
       reaches the diagnosis loop (see ``WalkResult.skipped_oversize``).
       Left at the default ``None`` this is a complete no-op.
+    * *on_directory* (when given) is forwarded unchanged to
+      :func:`discover_targets`, which invokes it once per directory
+      visited during the walk (root included); a no-op whenever left at
+      the default ``None``.
     * *search_archives*: opt-in only. When True, backup archives found
       during the walk are enumerated and their members diagnosed as
       donor *material* (:func:`diagnose_archive_materials`), stored on
@@ -348,11 +353,12 @@ def scan_paths(roots: Sequence[Path], *,
       the CLI renders them via :mod:`pptrepair.report` so that stdout
       and file output share one implementation.
 
-    Coordinated cancellation: *progress*, *on_download* and
-    *material_progress* may raise to abort the run in progress -- none
-    of their exceptions are caught here, so they propagate to the caller
-    exactly like any other exception. That propagation is the supported,
-    official contract for cooperative cancellation; see
+    Coordinated cancellation: *progress*, *on_download*,
+    *material_progress* and *on_directory* may raise to abort the run
+    in progress -- none of their exceptions are caught here, so they
+    propagate to the caller exactly like any other exception. That
+    propagation is the supported, official contract for cooperative
+    cancellation; see
     :class:`pptrepair.cancel.OperationCancelled`. Every temporary
     directory this function (or the archive-mining path it calls into)
     opens is a context manager, so it is always cleaned up whether the
@@ -371,7 +377,8 @@ def scan_paths(roots: Sequence[Path], *,
     walk = discover_targets(roots, follow_symlinks=follow_symlinks,
                             allow_download=allow_download,
                             collect_archives=search_archives,
-                            max_file_bytes=max_file_bytes)
+                            max_file_bytes=max_file_bytes,
+                            on_directory=on_directory)
     if exclude:
         walk = _apply_exclusions(walk, exclude)
     result = ScanResult(roots=[Path(root) for root in roots],

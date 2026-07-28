@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import os
 import stat
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -243,7 +243,9 @@ def _enter_directory(result: WalkResult, path: Path, st: os.stat_result, *,
 def _walk_directory(root: Path, result: WalkResult, *, follow_symlinks: bool,
                      allow_download: bool, collect_archives: bool,
                      visited: set[tuple[int, int]],
-                     max_file_bytes: int | None = None) -> None:
+                     max_file_bytes: int | None = None,
+                     on_directory: Callable[[Path], None] | None = None
+                     ) -> None:
     """Recursively walk *root* (already confirmed to be a directory).
 
     Uses ``os.walk`` for the traversal itself but takes over both the
@@ -258,6 +260,12 @@ def _walk_directory(root: Path, result: WalkResult, *, follow_symlinks: bool,
     for top, dirs, files in os.walk(root, followlinks=follow_symlinks,
                                      onerror=_onerror):
         top_path = Path(top)
+        if on_directory is not None:
+            # *root* itself is always the first `top`, so the root is
+            # covered without any special-casing here; an exception
+            # raised by the callback is left to propagate (see the
+            # coordinated cancellation contract on discover_targets).
+            on_directory(top_path)
         # Sort in place: os.walk uses `dirs` to decide what to recurse
         # into next, and both lists must be in deterministic order.
         dirs.sort()
@@ -300,7 +308,9 @@ def discover_targets(roots: Sequence[Path], *,
                      follow_symlinks: bool = False,
                      allow_download: bool = False,
                      collect_archives: bool = False,
-                     max_file_bytes: int | None = None) -> WalkResult:
+                     max_file_bytes: int | None = None,
+                     on_directory: Callable[[Path], None] | None = None
+                     ) -> WalkResult:
     """Discover PowerPoint files under *roots* without opening any file.
 
     Implementation requirements:
@@ -352,6 +362,15 @@ def discover_targets(roots: Sequence[Path], *,
     * Unreadable directories or files (``PermissionError``,
       ``FileNotFoundError`` from a race, ``OSError``) append
       ``(path, str(exc))`` to ``errors`` and never abort the walk.
+    * *on_directory* (when given) is invoked once per directory visited
+      while descending a directory root, with that directory's path --
+      including the root directory itself, since ``os.walk``'s first
+      ``top`` is always the root. Not invoked for a root that is a
+      file. Its exception is not caught here and propagates to the
+      caller uncaught, exactly like *progress*/*on_download* in
+      :func:`pptrepair.scan.scan_paths`; see
+      :class:`pptrepair.cancel.OperationCancelled` for the coordinated
+      cancellation contract this enables (walk-time cancellation).
     """
     result = WalkResult()
     visited: set[tuple[int, int]] = set()
@@ -378,7 +397,8 @@ def discover_targets(roots: Sequence[Path], *,
                                  allow_download=allow_download,
                                  collect_archives=collect_archives,
                                  visited=visited,
-                                 max_file_bytes=max_file_bytes)
+                                 max_file_bytes=max_file_bytes,
+                                 on_directory=on_directory)
         elif stat.S_ISREG(root_st.st_mode):
             _classify_file(result, root, root_st,
                             allow_download=allow_download,

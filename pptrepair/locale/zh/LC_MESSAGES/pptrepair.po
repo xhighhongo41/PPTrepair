@@ -606,6 +606,9 @@ msgstr "扫描失败: {message}"
 msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
 msgstr "已扫描 {n} 个文件: 损坏 {corrupted} 个，完好 {intact} 个"
 
+msgid "Scanning {path}…"
+msgstr "正在扫描 {path}…"
+
 msgid "Scanning…"
 msgstr "扫描中…"
 

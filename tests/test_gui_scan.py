@@ -25,6 +25,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
+from pptrepair.gui import worker as worker_module
 from pptrepair.gui.main_window import MainWindow
 from pptrepair.gui.results import ScanResultsModel
 from pptrepair.gui.run_options import RepairMode, RunOptionsPanel
@@ -181,6 +182,84 @@ def test_scan_worker_respects_max_file_bytes(
     assert worker.wait(5000)
 
 
+def test_scan_worker_emits_walk_progress_when_interval_is_zero(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the throttle interval at 0, every visited directory (root and
+    each subdirectory) emits walk_progress."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 0)
+    root = _mkroot(tmp_path)
+    for name in ("a", "b"):
+        sub_dir = root / name
+        sub_dir.mkdir()
+        _write_normal(sub_dir / "deck.pptx", seed=hash(name) % 1000)
+
+    worker = ScanWorker(ScanRequest(roots=(root,), archives=()))
+    emitted: list[str] = []
+    worker.walk_progress.connect(emitted.append)
+
+    with qtbot.waitSignal(worker.finished_ok, timeout=15000):
+        worker.start()
+
+    assert len(emitted) >= 3  # root + "a" + "b"
+    assert str(root) in emitted
+    assert worker.wait(5000)
+
+
+def test_scan_worker_walk_progress_throttled_with_large_interval(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a very large throttle interval, only the first directory
+    visited (the root) ever emits walk_progress."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 9999)
+    root = _mkroot(tmp_path)
+    for name in ("a", "b", "c"):
+        sub_dir = root / name
+        sub_dir.mkdir()
+        _write_normal(sub_dir / "deck.pptx", seed=hash(name) % 1000)
+
+    worker = ScanWorker(ScanRequest(roots=(root,), archives=()))
+    emitted: list[str] = []
+    worker.walk_progress.connect(emitted.append)
+
+    with qtbot.waitSignal(worker.finished_ok, timeout=15000):
+        worker.start()
+
+    assert emitted == [str(root)]
+    assert worker.wait(5000)
+
+
+def test_scan_worker_cancellation_during_walk_stops_early(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Cancelling from a walk_progress handler stops the scan before any
+    file is diagnosed, emitting cancelled rather than finished_ok."""
+    root = _mkroot(tmp_path)
+    for name in ("a", "b"):
+        sub_dir = root / name
+        sub_dir.mkdir()
+        _write_normal(sub_dir / "deck.pptx", seed=hash(name) % 1000)
+
+    worker = ScanWorker(ScanRequest(roots=(root,), archives=()))
+    scanned: list[object] = []
+    worker.file_scanned.connect(lambda outcome: scanned.append(outcome))
+
+    # A blocking-queued connection makes the stop deterministic: the
+    # worker thread parks at the first walk_progress emit (the root
+    # itself, always emitted) until this UI-thread slot has set the
+    # cancel flag, so the *next* on_directory call is guaranteed to raise.
+    worker.walk_progress.connect(
+        lambda _path: worker.cancel(),
+        Qt.ConnectionType.BlockingQueuedConnection,
+    )
+
+    with qtbot.waitSignal(worker.cancelled, timeout=15000):
+        worker.start()
+
+    assert scanned == []
+    assert worker.wait(5000)
+
+
 # --------------------------------------------------------------------------
 # RunOptionsPanel
 # --------------------------------------------------------------------------
@@ -330,6 +409,15 @@ def test_scan_button_enables_when_sources_added(
     main_window._sources.add_paths([deck])
 
     assert main_window._scan_button.isEnabled()
+
+
+def test_on_walk_progress_shows_path_on_status_bar(
+    main_window: MainWindow,
+) -> None:
+    """_on_walk_progress puts the visited directory on the status bar."""
+    main_window._on_walk_progress("X")
+
+    assert "X" in main_window.statusBar().currentMessage()
 
 
 def test_scan_populates_results_panel(

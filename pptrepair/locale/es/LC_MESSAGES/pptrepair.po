@@ -606,6 +606,9 @@ msgstr "Fallo en el análisis: {message}"
 msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
 msgstr "Analizados {n} archivo(s): {corrupted} dañado(s), {intact} intacto(s)"
 
+msgid "Scanning {path}…"
+msgstr "Explorando {path}…"
+
 msgid "Scanning…"
 msgstr "Analizando…"
 

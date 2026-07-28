@@ -489,6 +489,7 @@ class MainWindow(QMainWindow):
         self._results_panel.hide()
 
         worker = ScanWorker(request, self)
+        worker.walk_progress.connect(self._on_walk_progress)
         worker.file_scanned.connect(self._on_file_scanned)
         worker.material_scanned.connect(self._on_material_scanned)
         worker.download_started.connect(self._on_download_started)
@@ -584,6 +585,16 @@ class MainWindow(QMainWindow):
         self._scan_action.setEnabled(enabled)
 
     # -- worker signal handlers (UI thread) ----------------------------
+
+    def _on_walk_progress(self, path: str) -> None:
+        """Report which directory the discovery walk is currently visiting.
+
+        Fires during the otherwise-silent discovery phase, before any
+        file has been diagnosed; the initial :meth:`_start_scan`
+        ``tr("Scanning…")`` message is overwritten by this once the
+        walk reaches its first (throttled) directory.
+        """
+        self.statusBar().showMessage(tr("Scanning {path}…").format(path=path))
 
     def _on_file_scanned(self, outcome: object) -> None:
         """Count one diagnosed file and refresh the progress readout."""

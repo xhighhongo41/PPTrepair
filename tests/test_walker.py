@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from pptrepair import walker
 from pptrepair.walker import discover_targets, is_cloud_placeholder
 
@@ -431,3 +433,85 @@ def test_discover_targets_permission_error_recorded_and_continues(
     assert result.targets == [ok_file]
     assert len(result.errors) == 1
     assert result.errors[0][0] == blocked
+
+
+# --- discover_targets: on_directory callback --------------------------------
+
+
+def test_discover_targets_on_directory_visits_in_sorted_order(
+        tmp_path: Path) -> None:
+    """on_directory receives every visited directory, root included, in
+    the same deterministic (sorted, top-down) order os.walk produces."""
+    root = tmp_path / "root"
+    (root / "b_dir").mkdir(parents=True)
+    (root / "a_dir").mkdir()
+    (root / "a_dir" / "inner.pptx").write_bytes(b"data")
+    (root / "b_dir" / "inner.pptx").write_bytes(b"data")
+    (root / "loose.pptx").write_bytes(b"data")
+
+    visited: list[Path] = []
+    result = discover_targets([root], on_directory=visited.append)
+
+    assert visited == [root, root / "a_dir", root / "b_dir"]
+    # The callback is purely observational: targets are unaffected.
+    assert result.targets == [
+        root / "loose.pptx",
+        root / "a_dir" / "inner.pptx",
+        root / "b_dir" / "inner.pptx",
+    ]
+
+
+def test_discover_targets_on_directory_not_called_for_file_root(
+        tmp_path: Path) -> None:
+    """A root that is itself a file never triggers on_directory: there is
+    no walk to report progress for."""
+    file_root = tmp_path / "solo.pptx"
+    file_root.write_bytes(b"data")
+
+    visited: list[Path] = []
+    result = discover_targets([file_root], on_directory=visited.append)
+
+    assert visited == []
+    assert result.targets == [file_root]
+
+
+def test_discover_targets_on_directory_exception_propagates(
+        tmp_path: Path) -> None:
+    """An exception raised by on_directory is not caught by the walk: it
+    propagates to the caller, the documented cooperative-cancellation
+    contract shared with progress/on_download."""
+    root = tmp_path / "root"
+    (root / "child").mkdir(parents=True)
+    (root / "child" / "inner.pptx").write_bytes(b"data")
+
+    calls: list[Path] = []
+
+    class _Stop(Exception):
+        pass
+
+    def _raise_on_first(path: Path) -> None:
+        calls.append(path)
+        raise _Stop("cancelled")
+
+    with pytest.raises(_Stop):
+        discover_targets([root], on_directory=_raise_on_first)
+
+    assert calls == [root]
+
+
+def test_discover_targets_on_directory_none_is_unchanged(
+        tmp_path: Path) -> None:
+    """Omitting on_directory (the default None) leaves the result exactly
+    as before this parameter existed."""
+    root = tmp_path / "root"
+    (root / "a").mkdir(parents=True)
+    (root / "a" / "c.pptx").write_bytes(b"data")
+    (root / "b.pptx").write_bytes(b"data")
+
+    without_callback = discover_targets([root])
+    with_none = discover_targets([root], on_directory=None)
+
+    assert without_callback.targets == with_none.targets == [
+        root / "b.pptx",
+        root / "a" / "c.pptx",
+    ]

@@ -498,6 +498,43 @@ def test_scan_paths_progress_cancellation_leaves_no_report_files(
     assert not (report_dir / "scan_report.json").exists()
 
 
+# --- scan_paths() on_directory ---------------------------------------------
+
+
+def test_scan_paths_on_directory_passes_through_to_walker(
+    tmp_path: Path,
+) -> None:
+    """scan_paths forwards on_directory to discover_targets unchanged: the
+    walked root and its subdirectory both reach the caller's callback."""
+    root = _mkroot(tmp_path)
+    sub_dir = root / "sub"
+    sub_dir.mkdir()
+    _write(sub_dir, "deck.pptx",
+          build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+
+    visited: list[Path] = []
+    result = scan_module.scan_paths([root], on_directory=visited.append)
+
+    assert visited == [root, sub_dir]
+    assert len(result.outcomes) == 1
+
+
+def test_scan_paths_on_directory_cancellation_propagates(
+    tmp_path: Path,
+) -> None:
+    """An on_directory callback that raises OperationCancelled aborts the
+    scan before any file is diagnosed."""
+    root = _mkroot(tmp_path)
+    _write(root, "deck.pptx",
+          build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+
+    def _cancel_on_first(_path: Path) -> None:
+        raise OperationCancelled("user requested cancellation")
+
+    with pytest.raises(OperationCancelled):
+        scan_module.scan_paths([root], on_directory=_cancel_on_first)
+
+
 # --- --max-file-size -----------------------------------------------------
 
 
