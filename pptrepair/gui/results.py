@@ -36,11 +36,8 @@ from PySide6.QtWidgets import (
 from pptrepair.batch import BatchItem, BatchResult
 from pptrepair.classify import Verdict
 from pptrepair.gui.i18n import tr
-from pptrepair.gui.worker import (
-    GuiScanResult,
-    MergeItemOutcome,
-    MultiRepairResult,
-)
+from pptrepair.gui.repair_workers import MergeItemOutcome, MultiRepairResult
+from pptrepair.gui.worker import GuiScanResult
 from pptrepair.repair import RepairOutcome
 
 # The three candidate-computation functions below are report.py's own

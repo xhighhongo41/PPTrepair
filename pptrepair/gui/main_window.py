@@ -2,13 +2,14 @@
 
 Owns the whole scan and single-file-repair lifecycle on the UI thread:
 it builds a :class:`~pptrepair.gui.worker.ScanRequest` /
-:class:`~pptrepair.gui.worker.RepairRequest` from the accumulated
-sources, starts a :class:`~pptrepair.gui.worker.ScanWorker` /
-:class:`~pptrepair.gui.worker.RepairWorker` on a background thread, and
-reacts to that worker's signals (all delivered here on the UI thread
-via Qt's queued connections) to stream progress, show results, and
-re-enable the UI. Cancellation and window-close are handled
-cooperatively so a running worker never leaves a dangling thread.
+:class:`~pptrepair.gui.repair_workers.RepairRequest` from the
+accumulated sources, starts a :class:`~pptrepair.gui.worker.ScanWorker`
+/ :class:`~pptrepair.gui.repair_workers.RepairWorker` on a background
+thread, and reacts to that worker's signals (all delivered here on the
+UI thread via Qt's queued connections) to stream progress, show
+results, and re-enable the UI. Cancellation and window-close are
+handled cooperatively so a running worker never leaves a dangling
+thread.
 """
 
 from __future__ import annotations
@@ -44,6 +45,13 @@ from pptrepair.batch import BatchResult
 from pptrepair.gui.donor_dialog import DonorApprovalDialog
 from pptrepair.gui.i18n import tr
 from pptrepair.gui.merge_plan import build_target_plans
+from pptrepair.gui.repair_workers import (
+    MultiRepairRequest,
+    MultiRepairResult,
+    MultiRepairWorker,
+    RepairRequest,
+    RepairWorker,
+)
 from pptrepair.gui.results import ResultsPanel
 from pptrepair.gui.run_options import RepairMode, RunOptionsPanel
 from pptrepair.gui.settings import Settings, SettingsDialog
@@ -55,16 +63,7 @@ from pptrepair.gui.sources import (
     SourceKind,
     SourceListModel,
 )
-from pptrepair.gui.worker import (
-    GuiScanResult,
-    MultiRepairRequest,
-    MultiRepairResult,
-    MultiRepairWorker,
-    RepairRequest,
-    RepairWorker,
-    ScanRequest,
-    ScanWorker,
-)
+from pptrepair.gui.worker import GuiScanResult, ScanRequest, ScanWorker
 from pptrepair.report import ISSUE_URL
 from pptrepair.scan import ArchiveMaterialCache
 

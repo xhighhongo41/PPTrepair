@@ -1,6 +1,6 @@
 """Tests for the GUI's single-file repair worker, results tab and wiring.
 
-Covers :class:`~pptrepair.gui.worker.RepairWorker`,
+Covers :class:`~pptrepair.gui.repair_workers.RepairWorker`,
 :class:`~pptrepair.gui.results.RepairResultsModel` and the repair
 wiring added to :class:`pptrepair.gui.main_window.MainWindow`. Skipped
 wholesale when PySide6 is not installed (the optional ``[gui]``
@@ -28,8 +28,8 @@ from pytestqt.qtbot import QtBot
 
 from pptrepair.batch import BatchResult
 from pptrepair.gui.main_window import MainWindow
+from pptrepair.gui.repair_workers import RepairRequest, RepairWorker
 from pptrepair.gui.run_options import RepairMode
-from pptrepair.gui.worker import RepairRequest, RepairWorker
 
 # --------------------------------------------------------------------------
 # fixture helpers

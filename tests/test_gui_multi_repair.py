@@ -2,8 +2,8 @@
 
 Covers the Qt-free donor planning (:mod:`pptrepair.gui.merge_plan`), the
 donor-approval dialog (:mod:`pptrepair.gui.donor_dialog`), the
-background :class:`~pptrepair.gui.worker.MultiRepairWorker`, and the
-multi-source wiring added to
+background :class:`~pptrepair.gui.repair_workers.MultiRepairWorker`,
+and the multi-source wiring added to
 :class:`pptrepair.gui.main_window.MainWindow`. Skipped wholesale when
 PySide6 is not installed (the optional ``[gui]`` extra); see
 :mod:`tests.conftest` for the matching collection guard.
@@ -43,7 +43,7 @@ from pytestqt.qtbot import QtBot
 
 from pptrepair.batch import plan_output_bases, repair_paths
 from pptrepair.classify import Verdict
-from pptrepair.gui import worker as worker_module
+from pptrepair.gui import repair_workers
 from pptrepair.gui.donor_dialog import DonorApprovalDialog
 from pptrepair.gui.main_window import MainWindow
 from pptrepair.gui.merge_plan import (
@@ -52,13 +52,13 @@ from pptrepair.gui.merge_plan import (
     TargetPlan,
     build_target_plans,
 )
-from pptrepair.gui.run_options import RepairMode
-from pptrepair.gui.worker import (
-    GuiScanResult,
+from pptrepair.gui.repair_workers import (
     MultiRepairRequest,
     MultiRepairResult,
     MultiRepairWorker,
 )
+from pptrepair.gui.run_options import RepairMode
+from pptrepair.gui.worker import GuiScanResult
 from pptrepair.merge import MERGE_SUFFIX
 from pptrepair.scan import (
     ArchiveMaterial,
@@ -502,13 +502,13 @@ def test_multi_worker_reuses_the_scan_cache_instead_of_re_extracting(
     target, _archive_path, material, _original = _mined_archive_donor(
         root, cache)
     calls: list[object] = []
-    real_materialize = worker_module.materialize
+    real_materialize = repair_workers.materialize
 
     def _recording_materialize(*args: object, **kwargs: object) -> object:
         calls.append(args)
         return real_materialize(*args, **kwargs)
 
-    monkeypatch.setattr(worker_module, "materialize", _recording_materialize)
+    monkeypatch.setattr(repair_workers, "materialize", _recording_materialize)
 
     worker = MultiRepairWorker(
         _archive_merge_request(target, material, root), cache=cache)
@@ -817,13 +817,13 @@ def test_main_window_multi_repair_reuses_the_scan_cache_for_archive_donors(
     _scan_and_wait(main_window, qtbot)
 
     calls: list[object] = []
-    real_materialize = worker_module.materialize
+    real_materialize = repair_workers.materialize
 
     def _recording_materialize(*args: object, **kwargs: object) -> object:
         calls.append(args)
         return real_materialize(*args, **kwargs)
 
-    monkeypatch.setattr(worker_module, "materialize", _recording_materialize)
+    monkeypatch.setattr(repair_workers, "materialize", _recording_materialize)
 
     _select_multi_mode(main_window)
     main_window._start_repair()

@@ -28,6 +28,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
+from pptrepair.gui import scan_parallel
 from pptrepair.gui import worker as worker_module
 from pptrepair.gui.main_window import MainWindow
 from pptrepair.gui.results import ScanResultsModel
@@ -466,7 +467,7 @@ def test_scan_worker_cancellation_during_archive_read_stops_early(
 
 def _patch_devices(monkeypatch: pytest.MonkeyPatch,
                    devices: dict[Path, int | None]) -> list[Path]:
-    """Make ``_device_of`` report a synthetic device for each path.
+    """Make ``device_of`` report a synthetic device for each path.
 
     Every real path in a test lives on the one volume ``tmp_path`` is
     on, so the multi-device layouts the parallel path exists for can
@@ -481,7 +482,7 @@ def _patch_devices(monkeypatch: pytest.MonkeyPatch,
         asked.append(Path(path))
         return devices.get(Path(path), 0)
 
-    monkeypatch.setattr(worker_module, "_device_of", _fake_device_of)
+    monkeypatch.setattr(scan_parallel, "device_of", _fake_device_of)
     return asked
 
 
@@ -742,7 +743,7 @@ def test_device_groups_are_capped_at_the_thread_limit(
 ) -> None:
     """More devices than threads share the threads out: no unit is lost,
     none is scheduled twice, and no extra thread is created."""
-    limit = worker_module._MAX_PARALLEL_DEVICE_SCANS
+    limit = scan_parallel.MAX_PARALLEL_DEVICE_SCANS
     roots = tuple(_mkroot(tmp_path, f"disk{index}")
                   for index in range(limit * 2 + 1))
     _patch_devices(monkeypatch,
