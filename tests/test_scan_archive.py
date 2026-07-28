@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from fixtures import (
     make_corrupted_copies,
     make_edited_version,
     truncate,
+    zero_entry_data_tail,
     zero_prefix,
 )
 
@@ -480,3 +482,227 @@ def test_material_progress_cancellation_propagates(tmp_path: Path) -> None:
                                material_progress=_cancel_on_first)
 
     assert len(calls) == 1
+
+
+# --- 10. one-pass mining, session cache and archive progress -----------------
+
+
+def _count_tar_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Patch tarfile.open to record the mode of every *read* open.
+
+    Returns the (initially empty) list the modes land in. Write opens are
+    ignored so a test may keep rewriting its fixture archives after the
+    patch is installed.
+    """
+    modes: list[str] = []
+    real_open = tarfile.open
+
+    def _counting_open(*args: object, **kwargs: object) -> tarfile.TarFile:
+        mode = kwargs.get("mode", args[1] if len(args) > 1 else "r")
+        if isinstance(mode, str) and mode.startswith("r"):
+            modes.append(mode)
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(tarfile, "open", _counting_open)
+    return modes
+
+
+def _two_member_targz(path: Path) -> None:
+    """Write a two-member tar.gz backup of intact decks at *path*."""
+    _write_targz(path, {
+        "backup/one.pptx": build_minimal_pptx(num_slides=1, media_bytes=20_000,
+                                              seed=1),
+        "backup/two.pptx": build_minimal_pptx(num_slides=1, media_bytes=20_000,
+                                              seed=2),
+    })
+
+
+def test_default_mining_keeps_the_materials_and_notes_contract(
+    tmp_path: Path
+) -> None:
+    """Without a cache the (materials, notes) contract is unchanged: one
+    material per extractable member, a damaged member noted and left out,
+    and no extracted file surviving the call."""
+    good = build_minimal_pptx(num_slides=1, media_bytes=20_000, seed=0)
+    bad = build_minimal_pptx(num_slides=1, media_bytes=20_000, seed=1)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w",
+                         compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("backup/good.pptx", good)
+        zf.writestr("backup/bad.pptx", bad)
+    archive_path = _mkroot(tmp_path) / "backup.zip"
+    archive_path.write_bytes(zero_entry_data_tail(
+        buffer.getvalue(), "backup/bad.pptx", keep_fraction=0.3))
+    leftovers_before = set(
+        Path(tempfile.gettempdir()).glob("pptrepair-scan-arc-*"))
+
+    materials, notes = scan_module.diagnose_archive_materials([archive_path])
+
+    assert [m.member.member_name for m in materials] == ["backup/good.pptx"]
+    assert materials[0].error is None
+    assert materials[0].diagnosis is not None
+    assert materials[0].diagnosis.verdict.value == "normal"
+    assert len(notes) == 1
+    assert "backup/bad.pptx" in notes[0]
+    # The temporary extraction directory never outlives the call.
+    assert set(Path(tempfile.gettempdir()).glob(
+        "pptrepair-scan-arc-*")) == leftovers_before
+
+
+def test_cache_hit_serves_material_without_reopening_the_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second mining pass over an unchanged archive is served entirely
+    from the session cache: the tar.gz is opened exactly once, the same
+    materials and notes come back, and material_progress still fires once
+    per member."""
+    archive_path = _mkroot(tmp_path) / "backup.tar.gz"
+    _two_member_targz(archive_path)
+    cache = scan_module.ArchiveMaterialCache(tmp_path / "cache")
+    reads = _count_tar_reads(monkeypatch)
+
+    first, first_notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache)
+    replayed: list[scan_module.ArchiveMaterial] = []
+    second, second_notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache, material_progress=replayed.append)
+
+    assert reads == ["r|*"]
+    assert len(first) == 2
+    assert second == first
+    assert second_notes == first_notes == []
+    assert replayed == second
+
+
+def test_cache_entry_is_invalidated_when_the_archive_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An archive rewritten between two passes no longer matches its
+    (size, mtime) stamp: it is mined again, its stale extraction directory
+    is deleted, and the fresh material replaces the old."""
+    archive_path = _mkroot(tmp_path) / "backup.tar.gz"
+    _two_member_targz(archive_path)
+    cache_root = tmp_path / "cache"
+    cache = scan_module.ArchiveMaterialCache(cache_root)
+    reads = _count_tar_reads(monkeypatch)
+
+    first, _notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache)
+    _write_targz(archive_path, {
+        "backup/three.pptx": build_minimal_pptx(num_slides=2,
+                                                media_bytes=30_000, seed=3),
+    })
+    second, _notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache)
+
+    assert [m.member.member_name for m in first] == ["backup/one.pptx",
+                                                     "backup/two.pptx"]
+    assert [m.member.member_name for m in second] == ["backup/three.pptx"]
+    assert reads == ["r|*", "r|*"]
+    # The superseded arc0000 directory (and its files) is gone.
+    assert sorted(p.name for p in cache_root.iterdir()) == ["arc0001"]
+
+
+def test_cache_member_path_returns_the_extracted_donor(
+    tmp_path: Path
+) -> None:
+    """member_path() hands the repair phase the donor's own bytes without
+    re-reading the archive, and reports None for anything it cannot
+    vouch for."""
+    original = build_minimal_pptx(num_slides=1, media_bytes=20_000)
+    archive_path = _mkroot(tmp_path) / "backup.zip"
+    _write_zip(archive_path, {"backup/deck.pptx": original})
+    cache = scan_module.ArchiveMaterialCache(tmp_path / "cache")
+
+    materials, _notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache)
+    member = materials[0].member
+    donor_path = cache.member_path(archive_path, member)
+
+    assert donor_path is not None
+    assert donor_path.read_bytes() == original
+    # An archive that was never mined has nothing cached.
+    assert cache.member_path(tmp_path / "other.zip", member) is None
+    # Neither has one whose extracted file has since disappeared.
+    donor_path.unlink()
+    assert cache.member_path(archive_path, member) is None
+
+
+def test_cached_material_survives_the_call_and_uncached_does_not(
+    tmp_path: Path
+) -> None:
+    """With a cache the extracted members stay on disk under the cache
+    root (that is what spares the repair phase a second full read); with
+    no cache nothing is left behind at all."""
+    archive_path = _mkroot(tmp_path) / "backup.tar.gz"
+    _two_member_targz(archive_path)
+    cache_root = tmp_path / "cache"
+    cache = scan_module.ArchiveMaterialCache(cache_root)
+
+    materials, _notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache)
+
+    kept = sorted(p.name for p in (cache_root / "arc0000").iterdir())
+    assert kept == ["member0000-one.pptx", "member0001-two.pptx"]
+    assert all(cache.member_path(archive_path, m.member) is not None
+               for m in materials)
+
+    leftovers_before = set(
+        Path(tempfile.gettempdir()).glob("pptrepair-scan-arc-*"))
+    scan_module.diagnose_archive_materials([archive_path])
+    assert set(Path(tempfile.gettempdir()).glob(
+        "pptrepair-scan-arc-*")) == leftovers_before
+
+
+def test_cancelled_mining_is_never_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pass cancelled part way through stores nothing and leaves no
+    extraction directory, so the next pass mines the archive in full
+    instead of serving a truncated view of it."""
+    archive_path = _mkroot(tmp_path) / "backup.tar.gz"
+    _two_member_targz(archive_path)
+    cache_root = tmp_path / "cache"
+    cache = scan_module.ArchiveMaterialCache(cache_root)
+    reads = _count_tar_reads(monkeypatch)
+
+    def _cancel_on_first(material: scan_module.ArchiveMaterial) -> None:
+        raise OperationCancelled("user requested cancellation")
+
+    with pytest.raises(OperationCancelled):
+        scan_module.diagnose_archive_materials(
+            [archive_path], cache=cache, material_progress=_cancel_on_first)
+
+    assert cache.lookup(archive_path) is None
+    assert list(cache_root.iterdir()) == []
+
+    materials, _notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache)
+    assert [m.member.member_name for m in materials] == ["backup/one.pptx",
+                                                         "backup/two.pptx"]
+    assert reads == ["r|*", "r|*"]
+
+
+def test_archive_progress_reports_bytes_tagged_with_the_archive(
+    tmp_path: Path
+) -> None:
+    """archive_progress forwards the one-pass iterator's byte counters,
+    tagged with the archive being read, and ends on that archive's size."""
+    archive_path = _mkroot(tmp_path) / "backup.tar.gz"
+    _two_member_targz(archive_path)
+
+    calls: list[tuple[Path, int, int]] = []
+    materials, notes = scan_module.diagnose_archive_materials(
+        [archive_path],
+        archive_progress=lambda path, done, total: calls.append(
+            (path, done, total)))
+    total_bytes = archive_path.stat().st_size
+
+    assert len(materials) == 2
+    assert notes == []
+    assert calls
+    assert {path for path, _done, _total in calls} == {archive_path}
+    done_values = [done for _path, done, _total in calls]
+    assert done_values == sorted(done_values)
+    assert {total for _path, _done, total in calls} == {total_bytes}
+    assert done_values[-1] == total_bytes

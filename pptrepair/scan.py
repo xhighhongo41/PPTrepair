@@ -13,12 +13,13 @@ directory (never next to the scanned files).
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pptrepair.archive import ArchiveMember, list_members, materialize
+from pptrepair.archive import ArchiveMember, iter_materialized_members
 from pptrepair.census import from_central_directory, from_lfh_scan
 from pptrepair.classify import Diagnosis, Verdict, classify
 from pptrepair.diagnostics import build_fingerprint, file_id, is_fingerprint_target
@@ -70,6 +71,164 @@ class ArchiveMaterial:
     def display(self) -> str:
         """Return the member's ``"<archive>::<member>"`` label for messages."""
         return self.member.display()
+
+
+@dataclass
+class CachedArchive:
+    """Everything one backup archive contributed to a scan, kept for reuse.
+
+    Held by :class:`ArchiveMaterialCache` for as long as the session
+    lasts, so a rescan -- and above all the repair phase, which needs
+    the donor bytes themselves -- can be served without touching the
+    archive a second time.
+    """
+
+    materials: list[ArchiveMaterial]
+    """The diagnosed members, in extraction order."""
+    extracted: dict[ArchiveMember, Path]
+    """Where each successfully extracted member's payload still sits."""
+    notes: list[str]
+    """The English notes that archive's single pass produced."""
+
+
+class ArchiveMaterialCache:
+    """Session-lifetime cache of extracted archive donor material.
+
+    Mining a backup archive is by far the most expensive part of a scan:
+    a compressed tar must be decompressed from its very first byte, and
+    the repair phase used to pay that cost all over again just to get a
+    donor's bytes back. This cache keeps every member extracted during a
+    scan on disk, keyed by ``(resolved path, size, mtime)``, so one
+    archive is read exactly once per session however often its material
+    is asked for.
+
+    Creating *root* and deleting it (with everything below it) belongs to
+    the owner -- typically a :class:`tempfile.TemporaryDirectory` bound
+    to the process (CLI) or to the application object (GUI). Nothing
+    here ever writes outside *root*, and nothing here deletes *root*
+    itself.
+
+    Not thread-safe: one cache belongs to one worker thread.
+    """
+
+    def __init__(self, root: Path) -> None:
+        """Bind the cache to *root*, the only directory it may write in."""
+        self._root = root
+        self._entries: dict[Path, tuple[int, int, CachedArchive]] = {}
+        self._subdirs: dict[Path, Path] = {}
+        self._next_index = 0
+
+    @staticmethod
+    def _key(archive_path: Path) -> Path:
+        """Return the identity an archive is cached under.
+
+        ``Path.resolve()`` normalises symlinks and relative segments, so
+        the same backup reached by two different paths shares one entry.
+        It is non-strict, hence safe on a file that has since vanished.
+        """
+        return Path(archive_path).resolve()
+
+    @staticmethod
+    def _stamp(archive_path: Path) -> tuple[int, int] | None:
+        """Return the archive's ``(size, mtime_ns)``, or None if unknown.
+
+        None means the archive could not be stat'ed at all (deleted,
+        unreadable, an unhydrated placeholder that errored): the caller
+        treats that as "cannot be validated", never as a match.
+        """
+        try:
+            status = archive_path.stat()
+        except OSError:
+            return None
+        return status.st_size, status.st_mtime_ns
+
+    def _discard(self, key: Path) -> None:
+        """Drop the entry cached under *key*, deleting its extracted files."""
+        self._entries.pop(key, None)
+        subdir = self._subdirs.pop(key, None)
+        if subdir is not None:
+            # Best effort: a file we cannot delete is a leak inside a
+            # directory the owner removes wholesale anyway.
+            shutil.rmtree(subdir, ignore_errors=True)
+
+    def subdir_for(self, archive_path: Path) -> Path:
+        """Create and return a fresh ``arcNNNN`` directory for *archive_path*.
+
+        One directory per archive keeps the ``memberNNNN-`` destination
+        names of different archives apart. Every call allocates a *new*
+        number and discards whatever was cached for *archive_path*
+        before: asking for a directory means the archive is about to be
+        mined again, so the previous pass's entry is stale by definition
+        and its files must not be able to collide with the new ones.
+
+        *root* is created on demand here if the owner has not yet.
+        """
+        key = self._key(archive_path)
+        self._discard(key)
+        subdir = self._root / f"arc{self._next_index:04d}"
+        self._next_index += 1
+        subdir.mkdir(parents=True, exist_ok=True)
+        self._subdirs[key] = subdir
+        return subdir
+
+    def store(self, archive_path: Path, entry: CachedArchive) -> None:
+        """Remember *entry* as the result of mining *archive_path*.
+
+        The archive is stat'ed here, and a future :meth:`lookup` hits
+        only while that stamp still holds. A stat failure stores nothing
+        at all: an entry that can never be validated would be worse than
+        no entry, since it could only ever be served stale.
+        """
+        stamp = self._stamp(archive_path)
+        if stamp is None:
+            return
+        size, mtime_ns = stamp
+        self._entries[self._key(archive_path)] = (size, mtime_ns, entry)
+
+    def lookup(self, archive_path: Path) -> CachedArchive | None:
+        """Return the cached result for *archive_path* while it is valid.
+
+        Validity is ``(size, mtime_ns)`` equality with what
+        :meth:`store` recorded. A mismatch means the backup was
+        rewritten since it was mined: the stale entry *and* the
+        extracted files under its ``arcNNNN`` directory are discarded,
+        and None is returned so the caller mines the archive afresh. A
+        stat failure also returns None, but leaves the entry alone --
+        a temporarily unreachable archive should not cost the session
+        the material it already holds.
+        """
+        key = self._key(archive_path)
+        record = self._entries.get(key)
+        if record is None:
+            return None
+        stamp = self._stamp(archive_path)
+        if stamp is None:
+            return None
+        size, mtime_ns, entry = record
+        if stamp != (size, mtime_ns):
+            self._discard(key)
+            return None
+        return entry
+
+    def member_path(self, archive_path: Path,
+                    member: ArchiveMember) -> Path | None:
+        """Return where *member* was extracted to, while it is still cached.
+
+        The repair phase's way of obtaining a donor's bytes without
+        re-reading -- and, for a compressed tar, re-decompressing -- the
+        whole archive. None stands for "not available" whatever the
+        reason (no entry, a stale one, a member whose extraction had
+        failed, or an extracted file that has since disappeared), and
+        tells the caller to fall back to
+        :func:`pptrepair.archive.materialize`.
+        """
+        entry = self.lookup(archive_path)
+        if entry is None:
+            return None
+        dest_path = entry.extracted.get(member)
+        if dest_path is None or not dest_path.is_file():
+            return None
+        return dest_path
 
 
 @dataclass
@@ -164,23 +323,82 @@ def diagnose_file(path: Path) -> tuple[Diagnosis | None, str | None]:
     return diagnosis, None
 
 
+def _mine_archive(
+    archive_path: Path, dest_dir: Path, *, keep_files: bool,
+    material_progress: Callable[[ArchiveMaterial], None] | None,
+    archive_progress: Callable[[Path, int, int], None] | None,
+) -> CachedArchive:
+    """Extract and diagnose one archive's members in a single pass.
+
+    The archive is read exactly once
+    (:func:`pptrepair.archive.iter_materialized_members`): every member
+    is diagnosed the moment it lands in *dest_dir*. With *keep_files*
+    the extracted files stay there afterwards, for a
+    :class:`ArchiveMaterialCache` to serve later; without it each one is
+    deleted as soon as it has been diagnosed, so the disk and memory
+    peak stays at a single member's worth however many an archive holds.
+
+    Callback exceptions (*material_progress*, *archive_progress*) are
+    not caught; see :func:`diagnose_archive_materials`.
+    """
+    materials: list[ArchiveMaterial] = []
+    extracted: dict[ArchiveMember, Path] = {}
+    notes: list[str] = []
+
+    progress: Callable[[int, int], None] | None = None
+    if archive_progress is not None:
+        def _forward(done: int, total: int) -> None:
+            """Tag the iterator's byte counters with the archive read."""
+            archive_progress(archive_path, done, total)
+
+        progress = _forward
+
+    for member, dest_path in iter_materialized_members(
+            archive_path, dest_dir, on_note=notes.append, progress=progress):
+        diagnosis, error = diagnose_file(dest_path)
+        material = ArchiveMaterial(archive_path=archive_path, member=member,
+                                   diagnosis=diagnosis, error=error)
+        materials.append(material)
+        if keep_files:
+            extracted[member] = dest_path
+        if material_progress is not None:
+            material_progress(material)
+        if not keep_files:
+            # Free the disk/memory footprint before the next member.
+            dest_path.unlink(missing_ok=True)
+
+    return CachedArchive(materials=materials, extracted=extracted, notes=notes)
+
+
 def diagnose_archive_materials(
     archives: Sequence[Path], *,
     on_download: Callable[[Path], None] | None = None,
     download_targets: Sequence[Path] = (),
     material_progress: Callable[[ArchiveMaterial], None] | None = None,
+    cache: ArchiveMaterialCache | None = None,
+    archive_progress: Callable[[Path, int, int], None] | None = None,
 ) -> tuple[list[ArchiveMaterial], list[str]]:
     """Enumerate and diagnose the ``.pptx``/``.pptm`` members of *archives*.
 
-    Each archive is opened just far enough to read its member index
-    (:func:`pptrepair.archive.list_members`); every member is then, one
-    at a time, streamed out to a plain file
-    (:func:`pptrepair.archive.materialize` called with a single-element
-    list), diagnosed via :func:`diagnose_file`, and the temporary file
-    deleted immediately -- so the memory and disk peak stays at one
-    member's worth regardless of how many members an archive holds. A
-    single :class:`tempfile.TemporaryDirectory` spans the whole run and
-    is removed on exit.
+    Every archive is swept exactly once
+    (:func:`pptrepair.archive.iter_materialized_members`): each member
+    met is streamed out to a plain file, diagnosed via
+    :func:`diagnose_file` the moment it lands, and -- without a *cache*
+    -- deleted again before the next member is touched, so the memory
+    and disk peak stays at one member's worth regardless of how many
+    members an archive holds. Reading the archive once, rather than once
+    per member, is what makes a hundred-gigabyte compressed backup
+    scannable at all.
+
+    *cache*, when given, turns that single sweep into a single sweep
+    *per session*: an archive whose ``(path, size, mtime)`` is already
+    cached is not opened at all -- its stored materials and notes are
+    replayed, *material_progress* included -- and one that is not gets
+    mined into its own directory under the cache, with the extracted
+    files deliberately left in place for the repair phase to reuse (see
+    :meth:`ArchiveMaterialCache.member_path`). Without a *cache* the
+    extraction happens in a private :class:`tempfile.TemporaryDirectory`
+    that is removed on the way out, exactly as before.
 
     *on_download* (when given) is invoked with an archive's path just
     before it is first read, but only for archives listed in
@@ -189,15 +407,28 @@ def diagnose_archive_materials(
     ``allow_download``): reading such an archive blocks while the sync
     client downloads it, so the announcement must precede the read,
     exactly as the per-file target loop announces a placeholder target.
+    A cache hit reads nothing and therefore announces nothing.
 
     *material_progress* (when given) is invoked once per member that is
     actually diagnosed (i.e. once per element appended to *materials*),
     right after that :class:`ArchiveMaterial` is produced -- so a caller
     can stream progress across a long archive-mining run, or raise to
-    cancel it. Its exception is not caught here and propagates to the
-    caller, exactly like *on_download*'s; see
-    :class:`pptrepair.cancel.OperationCancelled` for the coordinated
-    cancellation contract.
+    cancel it.
+
+    *archive_progress* (when given) is invoked as ``(archive path, done
+    bytes, total bytes)`` while an archive is being swept, which is the
+    only progress signal available inside a single huge archive (where
+    *material_progress* may not fire for minutes). It is the iterator's
+    own ``(done, total)`` tagged with the archive being read; see
+    :func:`pptrepair.archive.iter_materialized_members` for what the
+    counters mean per format.
+
+    No callback exception is caught here: they propagate to the caller,
+    see :class:`pptrepair.cancel.OperationCancelled` for the coordinated
+    cancellation contract. An archive cancelled part way through is
+    never stored in *cache* (and its directory is removed again), so the
+    next run re-mines it in full rather than serving a truncated view of
+    it.
 
     :return: ``(materials, notes)`` -- one :class:`ArchiveMaterial` per
         member that could be extracted (its ``diagnosis`` may still be
@@ -205,9 +436,8 @@ def diagnose_archive_materials(
         enumeration/extraction note collected along the way, in
         encounter order. An unreadable archive or member degrades to a
         note on its own, and the remaining archives/members are still
-        processed; the only way out early is a propagated *on_download*
-        or *material_progress* callback exception (the coordinated
-        cancellation contract above).
+        processed; the only way out early is a propagated callback
+        exception (the cancellation contract above).
     """
     materials: list[ArchiveMaterial] = []
     notes: list[str] = []
@@ -215,30 +445,47 @@ def diagnose_archive_materials(
         return materials, notes
 
     download_set = set(download_targets)
+
+    if cache is not None:
+        for archive_path in archives:
+            entry = cache.lookup(archive_path)
+            if entry is not None:
+                materials.extend(entry.materials)
+                notes.extend(entry.notes)
+                if material_progress is not None:
+                    for material in entry.materials:
+                        material_progress(material)
+                continue
+            if on_download is not None and archive_path in download_set:
+                on_download(archive_path)
+            dest_dir = cache.subdir_for(archive_path)
+            try:
+                mined = _mine_archive(
+                    archive_path, dest_dir, keep_files=True,
+                    material_progress=material_progress,
+                    archive_progress=archive_progress)
+            except BaseException:
+                # Cancelled (or failed) part way through: the half-mined
+                # material is thrown away rather than cached, so it can
+                # never be mistaken for a complete view of the archive.
+                shutil.rmtree(dest_dir, ignore_errors=True)
+                raise
+            cache.store(archive_path, mined)
+            materials.extend(mined.materials)
+            notes.extend(mined.notes)
+        return materials, notes
+
     with tempfile.TemporaryDirectory(prefix="pptrepair-scan-arc-") as tmp_dir:
         tmp_path = Path(tmp_dir)
         for archive_path in archives:
             if on_download is not None and archive_path in download_set:
                 on_download(archive_path)
-            members, list_notes = list_members(archive_path)
-            notes.extend(list_notes)
-            for member in members:
-                # One member at a time: materialize with a single-element
-                # list, diagnose, then delete before touching the next.
-                extracted, materialize_notes = materialize(
-                    archive_path, [member], tmp_path)
-                notes.extend(materialize_notes)
-                dest_path = extracted.get(member)
-                if dest_path is None:
-                    continue  # extraction failed; already noted above
-                diagnosis, error = diagnose_file(dest_path)
-                materials.append(ArchiveMaterial(
-                    archive_path=archive_path, member=member,
-                    diagnosis=diagnosis, error=error))
-                if material_progress is not None:
-                    material_progress(materials[-1])
-                # Free the disk/memory footprint before the next member.
-                dest_path.unlink(missing_ok=True)
+            mined = _mine_archive(
+                archive_path, tmp_path, keep_files=False,
+                material_progress=material_progress,
+                archive_progress=archive_progress)
+            materials.extend(mined.materials)
+            notes.extend(mined.notes)
     return materials, notes
 
 

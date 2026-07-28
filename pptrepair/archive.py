@@ -9,7 +9,7 @@ module only *finds* and *materializes* ``.pptx``/``.pptm`` members
 from such an archive; it never inspects their content and never
 assumes the archive itself is trustworthy.
 
-Two entry points cover the whole workflow:
+Three entry points cover the whole workflow:
 
 * :func:`list_members` opens *archive_path* just far enough to read its
   member index (central directory / tar headers) and returns the
@@ -18,13 +18,21 @@ Two entry points cover the whole workflow:
 * :func:`materialize` streams the payload of a chosen subset of those
   members out to plain files under a destination directory, so the
   rest of the pipeline can treat them exactly like any other file on
-  disk.
+  disk;
+* :func:`iter_materialized_members` fuses the two into a single
+  forward-only pass -- each member is extracted and handed over the
+  moment it is met -- which is the only workable shape for a
+  multi-hundred-gigabyte compressed backup, where listing and
+  extracting separately means decompressing the whole archive once per
+  member.
 
-Both functions are defensive against a hostile or damaged archive:
-opening the archive itself never raises (a failure degrades to an
-empty result plus a note), a single unreadable member never aborts
-the rest, and extraction never trusts a member's own path (zip-slip
-guard -- see :func:`materialize`).
+All three are defensive against a hostile or damaged archive: opening
+the archive itself never raises (a failure degrades to an empty result
+plus a note), a single unreadable member never aborts the rest (on a
+seekable archive; a forward-only tar stream can only give up on the
+remainder -- see :func:`iter_materialized_members`), and extraction
+never trusts a member's own path (zip-slip guard -- see
+:func:`materialize`).
 """
 
 from __future__ import annotations
@@ -34,6 +42,7 @@ import re
 import shutil
 import tarfile
 import zipfile
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
@@ -52,6 +61,12 @@ ARCHIVE_SUFFIXES = frozenset({
 #: Characters allowed, unescaped, in a materialized destination file
 #: name; anything else is folded to ``_`` by :func:`_sanitize_basename`.
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+#: Chunk size used by the one-pass extractor when streaming a member's
+#: payload to disk. One MiB keeps memory flat whatever the member's
+#: size, while still firing the progress callback often enough for a
+#: multi-gigabyte member to stay responsive (and cancellable).
+_COPY_CHUNK_BYTES = 1024 * 1024
 
 
 def is_archive(path: Path) -> bool:
@@ -313,3 +328,383 @@ def materialize(
                              notes)
 
     return extracted, notes
+
+
+class _MemberReadError(Exception):
+    """Internal: a member's payload could not be read from the archive.
+
+    Raised by :func:`_copy_stream` wrapping the original exception, so
+    its ``str()`` stays message-compatible with the notes
+    :func:`materialize` produces. Kept distinct from
+    :class:`_MemberWriteError` because the two mean very different
+    things on a forward-only tar stream: a *source* failure there means
+    the decoder is desynchronised and nothing beyond this point can be
+    read, while a *destination* failure only cost this one member.
+    """
+
+
+class _MemberWriteError(Exception):
+    """Internal: a member's payload could not be written to *dest_dir*."""
+
+
+def _emit(on_note: Callable[[str], None] | None, note: str) -> None:
+    """Hand *note* to *on_note*, when a note sink was supplied.
+
+    A callback exception is deliberately not caught: raising from a
+    callback is the supported cancellation contract (see
+    :func:`iter_materialized_members`).
+    """
+    if on_note is not None:
+        on_note(note)
+
+
+def _report(progress: Callable[[int, int], None] | None,
+            done: int, total: int) -> None:
+    """Hand a ``(done, total)`` byte pair to *progress*, when supplied.
+
+    *done* is clamped to *total* so a consumer can always derive a
+    percentage in ``[0, 100]``, even if the archive grew between the
+    ``stat`` that produced *total* and this call. Callback exceptions
+    propagate, as above.
+    """
+    if progress is None:
+        return
+    if 0 < total < done:
+        done = total
+    progress(done, total)
+
+
+def _archive_size(archive_path: Path) -> int:
+    """Return *archive_path*'s size in bytes, or 0 when it is unknown.
+
+    Zero is a deliberate "no denominator available" marker for the
+    progress callback rather than an error: a stat failure must not stop
+    an archive from being mined.
+    """
+    try:
+        return archive_path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _copy_stream(src: IO[bytes], dst: IO[bytes],
+                 on_chunk: Callable[[], None] | None) -> None:
+    """Copy *src* into *dst*, one :data:`_COPY_CHUNK_BYTES` chunk at a time.
+
+    *on_chunk* (when given) runs after every chunk written, which is
+    what lets the caller report progress -- or cancel by raising -- part
+    way through a member far too large to copy in one go.
+
+    :raises _MemberReadError: *src* could not be read (corrupt or
+        truncated payload, broken decompression stream, ...).
+    :raises _MemberWriteError: *dst* could not be written (out of space,
+        ...).
+    """
+    while True:
+        try:
+            chunk = src.read(_COPY_CHUNK_BYTES)
+        except Exception as exc:
+            raise _MemberReadError(exc) from exc
+        if not chunk:
+            return
+        try:
+            dst.write(chunk)
+        except Exception as exc:
+            raise _MemberWriteError(exc) from exc
+        if on_chunk is not None:
+            on_chunk()
+
+
+def _materialize_one(src: IO[bytes], member: ArchiveMember, dest_path: Path,
+                      on_note: Callable[[str], None] | None,
+                      on_chunk: Callable[[], None] | None) -> bool:
+    """Stream one member's payload from *src* to a fresh *dest_path*.
+
+    *dest_path* is created exclusively (``"xb"``) for the same reason as
+    in :func:`_extract_member`: a destination-name collision is reported
+    instead of overwriting existing data (and, crucially, the colliding
+    file is left untouched). Any other outcome than a complete copy
+    removes the partially written file -- a write failure, an unreadable
+    source, and a callback that raised to cancel the run alike -- so no
+    half-member is ever handed on for diagnosis or left behind in a
+    session cache.
+
+    :raises _MemberReadError: propagated from :func:`_copy_stream`, for
+        the caller to translate: recoverable on a seekable archive,
+        terminal on a tar stream.
+    :return: True when *dest_path* now holds the member's full payload.
+    """
+    try:
+        dst = dest_path.open("xb")
+    except FileExistsError:
+        _emit(on_note,
+              f"destination name collision, member skipped: "
+              f"{member.display()}")
+        return False
+    except OSError as exc:
+        # A member basename too long for the filesystem, a read-only or
+        # full destination, ... : this member is lost, but a sweep that
+        # may already have run for hours must not die of it.
+        _emit(on_note, f"failed to extract member {member.display()}: {exc}")
+        return False
+
+    completed = False
+    try:
+        with dst:
+            _copy_stream(src, dst, on_chunk)
+        completed = True
+    except _MemberWriteError as exc:
+        _emit(on_note, f"failed to extract member {member.display()}: {exc}")
+    finally:
+        if not completed:
+            dest_path.unlink(missing_ok=True)
+    return completed
+
+
+def _extract_zip_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo,
+                         member: ArchiveMember, dest_path: Path,
+                         on_note: Callable[[str], None] | None) -> bool:
+    """Extract one zip member, degrading every payload failure to a note.
+
+    A zip is randomly accessible, so damage confined to one member says
+    nothing about the next one: the failure is noted, the partial file
+    removed, and False returned so the caller simply moves on.
+    """
+    try:
+        src = zf.open(info)
+    except Exception as exc:
+        # Includes a local file header that contradicts the central
+        # directory, i.e. damage that only surfaces at open time.
+        _emit(on_note, f"failed to extract member {member.display()}: {exc}")
+        return False
+    try:
+        with src:
+            return _materialize_one(src, member, dest_path, on_note, None)
+    except _MemberReadError as exc:
+        _emit(on_note, f"failed to extract member {member.display()}: {exc}")
+        return False
+
+
+def _iter_zip_materialized(
+    archive_path: Path, dest_dir: Path,
+    on_note: Callable[[str], None] | None,
+    progress: Callable[[int, int], None] | None,
+) -> Iterator[tuple[ArchiveMember, Path]]:
+    """Drive :func:`iter_materialized_members` for a ``.zip`` archive.
+
+    The archive is opened exactly once and its central directory walked
+    in recorded order. Progress is reported as the running sum of the
+    *compressed* sizes of the members processed so far against the
+    archive file's size -- the closest cheap approximation of "how far
+    through the file are we", since a zip is read by seeking to each
+    member rather than sweeping the file front to back.
+    """
+    total = _archive_size(archive_path)
+    try:
+        zf = zipfile.ZipFile(archive_path)
+    except Exception as exc:
+        # Same wording as list_members': to the user an archive that
+        # cannot be opened and one that cannot be read past its first
+        # member are the same unusable backup.
+        _emit(on_note, f"cannot read archive {archive_path}: {exc}")
+        return
+
+    done = 0
+    index = 0
+    with zf:
+        for info in zf.infolist():
+            if info.is_dir() or not _is_target_name(info.filename):
+                continue
+            if posixpath.basename(info.filename).startswith(TEMP_PREFIX):
+                continue
+            member = ArchiveMember(archive_path=archive_path,
+                                    member_name=info.filename,
+                                    size=info.file_size)
+            if info.flag_bits & 0x1:
+                # General purpose bit 0: encrypted, unreadable without a
+                # password (see _list_zip_members).
+                _emit(on_note, f"encrypted member skipped: {member.display()}")
+                continue
+            dest_path = dest_dir / _dest_filename(index, info.filename)
+            extracted = _extract_zip_member(zf, info, member, dest_path,
+                                             on_note)
+            # Charged whether or not the payload survived: those bytes
+            # were read from the archive either way.
+            done += info.compress_size
+            _report(progress, done, total)
+            if extracted:
+                index += 1
+                yield member, dest_path
+
+
+def _walk_tar_stream(
+    tf: tarfile.TarFile, raw: IO[bytes], archive_path: Path, dest_dir: Path,
+    on_note: Callable[[str], None] | None,
+    progress: Callable[[int, int], None] | None, total: int,
+) -> Iterator[tuple[ArchiveMember, Path]]:
+    """Yield every target member of an already-open forward-only tar stream.
+
+    Each header is read once, in stream order, and a target member's
+    payload is copied out immediately -- before the next header is even
+    looked at -- because a ``"r|"`` stream cannot go back for it later.
+    Damage anywhere in the stream ends this archive (and only this
+    archive): once the decoder has lost its place, every following
+    header is meaningless.
+    """
+    def _notify_position() -> None:
+        # raw.tell() is the position in the *compressed* file, which is
+        # what a progress bar over the archive's size needs; the
+        # uncompressed offsets tarfile tracks would be meaningless here.
+        _report(progress, raw.tell(), total)
+
+    index = 0
+    while True:
+        try:
+            info = tf.next()
+        except Exception as exc:
+            _emit(on_note, f"cannot read archive {archive_path}: {exc}")
+            return
+        if info is None:
+            break
+        # tarfile appends every header it reads to .members; on an
+        # archive with millions of entries that list alone would grow
+        # without bound. Nothing here needs it: extractfile() is always
+        # handed the TarInfo object itself, never a member name.
+        tf.members.clear()
+        _notify_position()
+
+        if not info.isfile():
+            continue  # directories, symlinks, devices, ...
+        if not _is_target_name(info.name):
+            continue
+        if posixpath.basename(info.name).startswith(TEMP_PREFIX):
+            continue
+
+        member = ArchiveMember(archive_path=archive_path,
+                                member_name=info.name, size=info.size)
+        try:
+            src = tf.extractfile(info)
+        except Exception as exc:
+            _emit(on_note, f"cannot read archive {archive_path}: {exc}")
+            return
+        if src is None:
+            _emit(on_note, f"failed to extract member {member.display()}: "
+                            "member has no extractable data stream")
+            continue
+
+        dest_path = dest_dir / _dest_filename(index, info.name)
+        try:
+            with src:
+                extracted = _materialize_one(src, member, dest_path, on_note,
+                                              _notify_position)
+        except _MemberReadError as exc:
+            _emit(on_note, f"cannot read archive {archive_path}: {exc}")
+            return
+        if extracted:
+            index += 1
+            yield member, dest_path
+
+    # The walk ended on the archive's own end-of-data marker, which a
+    # stream stops at without necessarily having consumed the trailing
+    # padding: report completion explicitly so a progress bar always
+    # lands on 100%.
+    _report(progress, total, total)
+
+
+def _iter_tar_materialized(
+    archive_path: Path, dest_dir: Path,
+    on_note: Callable[[str], None] | None,
+    progress: Callable[[int, int], None] | None,
+) -> Iterator[tuple[ArchiveMember, Path]]:
+    """Drive :func:`iter_materialized_members` for a tar-family archive.
+
+    The raw file is opened here rather than by :mod:`tarfile` so its
+    ``tell()`` -- the compressed read position -- can feed the progress
+    callback, and handed to ``tarfile.open(..., mode="r|*")``: the
+    forward-only stream mode, which decodes the (possibly compressed)
+    archive exactly once and never seeks back.
+    """
+    total = _archive_size(archive_path)
+    try:
+        raw = archive_path.open("rb")
+    except OSError as exc:
+        _emit(on_note, f"cannot read archive {archive_path}: {exc}")
+        return
+    with raw:
+        try:
+            tf = tarfile.open(fileobj=raw, mode="r|*")  # noqa: SIM115
+        except Exception as exc:
+            # Broad for the same reason as in list_members: opening a
+            # compressed tar already decodes its first blocks, so
+            # damage can surface here as a raw decompression error.
+            _emit(on_note, f"cannot read archive {archive_path}: {exc}")
+            return
+        with tf:
+            yield from _walk_tar_stream(tf, raw, archive_path, dest_dir,
+                                        on_note, progress, total)
+
+
+def iter_materialized_members(
+    archive_path: Path,
+    dest_dir: Path,
+    *,
+    on_note: Callable[[str], None] | None = None,
+    progress: Callable[[int, int], None] | None = None,
+) -> Iterator[tuple[ArchiveMember, Path]]:
+    """Extract *archive_path*'s ``.pptx``/``.pptm`` members in one pass.
+
+    A generator fusing :func:`list_members` and :func:`materialize`:
+    every target member met while sweeping the archive is streamed out
+    to ``dest_dir / "memberNNNN-<sanitized-basename>"`` and yielded as
+    ``(member, destination path)`` right away, so the archive is read
+    exactly once no matter how many members it holds. That is what makes
+    a hundred-gigabyte compressed backup tractable at all: listing and
+    extracting separately would decompress the whole stream once per
+    member. ``NNNN`` is the yield order of this call, which (as in
+    :func:`materialize`) is what keeps destination names collision-free
+    without ever deriving a directory from a member's own path (zip-slip
+    guard). *dest_dir* must already exist; creating, and eventually
+    cleaning up, is the caller's business -- as is deleting each yielded
+    file once it has been consumed, if the caller does not want them to
+    accumulate.
+
+    Members are skipped by exactly the rules :func:`list_members`
+    documents, and with the same note wording; a member whose payload
+    cannot be extracted is likewise noted and left out.
+
+    *on_note* receives those English notes as they happen, instead of
+    the note *lists* the older two functions return -- a generator has
+    nowhere to put a trailing list.
+
+    *progress* receives ``(done, total)`` byte pairs as the sweep
+    advances: *total* is the archive file's own size (0 when it could
+    not be stat'ed), *done* the position reached in it, monotonically
+    non-decreasing and clamped to *total*. For a tar family archive that
+    is the true compressed read position, updated at every member
+    boundary *and* every chunk copied, and it reaches *total* when the
+    sweep completes; for a zip it is the running sum of the compressed
+    sizes of the members processed, updated once per member (a zip is
+    read by seeking, so there is no single "read position" to report).
+
+    Damage is contained differently per format, following what each can
+    actually recover from: on a zip, an unreadable member is noted and
+    the walk continues with the next one; on a tar, whose stream cannot
+    be resynchronised once the decoder loses its place, the failure is
+    noted as ``"cannot read archive ..."`` and the walk ends -- the
+    members yielded before the damage are still perfectly usable. An
+    archive that cannot be opened at all yields nothing and produces
+    that same note.
+
+    Never raises on its own account: every archive-level and
+    member-level failure degrades to a note. The one exception that does
+    propagate is one raised *by* *on_note* or *progress*, which is the
+    supported cooperative-cancellation contract (see
+    :class:`pptrepair.cancel.OperationCancelled`); the member being
+    copied when that happens is removed rather than left half-written.
+    """
+    if _is_zip_archive(archive_path):
+        yield from _iter_zip_materialized(archive_path, dest_dir, on_note,
+                                           progress)
+    else:
+        yield from _iter_tar_materialized(archive_path, dest_dir, on_note,
+                                           progress)

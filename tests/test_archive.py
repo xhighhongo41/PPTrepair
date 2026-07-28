@@ -11,6 +11,7 @@ throughout this test suite.
 from __future__ import annotations
 
 import io
+import os
 import struct
 import tarfile
 import zipfile
@@ -19,7 +20,13 @@ from pathlib import Path
 import pytest
 from fixtures import build_minimal_pptx, zero_entry_data_tail
 
-from pptrepair.archive import ArchiveMember, is_archive, list_members, materialize
+from pptrepair.archive import (
+    ArchiveMember,
+    is_archive,
+    iter_materialized_members,
+    list_members,
+    materialize,
+)
 
 #: (file name, tarfile open mode) for every non-zip format under test.
 _TAR_FORMATS = {
@@ -270,6 +277,325 @@ def test_materialize_excludes_corrupted_member_but_keeps_others(
     assert good_member in extracted
     assert bad_member not in extracted
     assert extracted[good_member].read_bytes() == good_data
+
+
+# --- iter_materialized_members: one pass over the archive --------------------
+
+
+class _Cancelled(Exception):
+    """Stand-in for the caller's own cancellation exception."""
+
+
+def _collect(archive_path: Path, dest_dir: Path,
+             progress=None) -> tuple[list[tuple[ArchiveMember, Path]],
+                                     list[str]]:
+    """Drain the one-pass iterator, returning its pairs and its notes."""
+    notes: list[str] = []
+    pairs = list(iter_materialized_members(
+        archive_path, dest_dir, on_note=notes.append, progress=progress))
+    return pairs, notes
+
+
+@pytest.mark.parametrize("filename", ["archive.zip", *_TAR_FORMATS])
+def test_iter_materialized_members_matches_list_plus_materialize(
+        tmp_path: Path, filename: str) -> None:
+    """The one-pass iterator is equivalent to list_members + materialize:
+    same members, same order, byte-identical payloads, same (empty) notes,
+    and the same flattened destination directory -- in every format."""
+    entries = {
+        "notes.txt": b"unrelated plain text",
+        "folder/deck.pptx": build_minimal_pptx(num_slides=1,
+                                                media_bytes=500, seed=0),
+        "deck2.pptm": build_minimal_pptx(num_slides=1,
+                                          media_bytes=500, seed=1),
+        "~$deck.pptx": b"lock file placeholder",
+    }
+    path = tmp_path / filename
+    if filename == "archive.zip":
+        _write_zip(path, entries, dirs=("subdir",))
+    else:
+        _write_tar(path, _TAR_FORMATS[filename], entries, dirs=("subdir",))
+
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_members, list_notes = list_members(path)
+    extracted, materialize_notes = materialize(path, old_members, old_dir)
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    pairs, notes = _collect(path, new_dir)
+
+    assert notes == list_notes + materialize_notes == []
+    assert [member for member, _ in pairs] == old_members
+    for member, dest_path in pairs:
+        assert dest_path.parent == new_dir
+        assert dest_path.read_bytes() == extracted[member].read_bytes()
+
+
+def test_iter_materialized_members_opens_the_tar_stream_once(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tar.gz holding several members is decompressed in a single pass:
+    tarfile.open is called exactly once for the whole extraction."""
+    entries = {f"deck{n}.pptx": build_minimal_pptx(num_slides=1,
+                                                    media_bytes=2000, seed=n)
+               for n in range(3)}
+    path = tmp_path / "archive.tar.gz"
+    _write_tar(path, "w:gz", entries)
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+
+    opens: list[object] = []
+    real_open = tarfile.open
+
+    def _counting_open(*args: object, **kwargs: object) -> tarfile.TarFile:
+        opens.append(kwargs.get("mode", args[1] if len(args) > 1 else None))
+        return real_open(*args, **kwargs)
+
+    # Patched only after the fixture is written, so the writer's own open
+    # is not counted.
+    monkeypatch.setattr(tarfile, "open", _counting_open)
+    pairs, notes = _collect(path, dest_dir)
+
+    assert notes == []
+    assert len(pairs) == 3
+    assert opens == ["r|*"]
+
+
+def test_iter_materialized_members_opens_the_zip_once(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A zip holding several members is opened exactly once, instead of
+    once per member as list_members + per-member materialize did."""
+    entries = {f"deck{n}.pptx": build_minimal_pptx(num_slides=1,
+                                                    media_bytes=2000, seed=n)
+               for n in range(3)}
+    path = tmp_path / "archive.zip"
+    _write_zip(path, entries)
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+
+    opens: list[object] = []
+    real_zipfile = zipfile.ZipFile
+
+    class _CountingZipFile(real_zipfile):  # type: ignore[misc, valid-type]
+        """ZipFile that records every construction."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            opens.append(args[0] if args else kwargs.get("file"))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(zipfile, "ZipFile", _CountingZipFile)
+    pairs, notes = _collect(path, dest_dir)
+
+    assert notes == []
+    assert len(pairs) == 3
+    assert opens == [path]
+
+
+def test_iter_materialized_members_tar_progress_reaches_archive_size(
+        tmp_path: Path) -> None:
+    """Progress over a tar is the compressed read position: it is reported
+    inside a long member copy (not only at member boundaries), never goes
+    backwards, never exceeds the archive size, and ends exactly on it."""
+    entries = {
+        "big.pptx": build_minimal_pptx(num_slides=1, media_bytes=3_000_000),
+        "small.pptx": build_minimal_pptx(num_slides=1, media_bytes=500),
+    }
+    path = tmp_path / "archive.tar.gz"
+    _write_tar(path, "w:gz", entries)
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+
+    seen: list[tuple[int, int]] = []
+    pairs, notes = _collect(path, dest_dir, progress=lambda done, total:
+                            seen.append((done, total)))
+    total_bytes = path.stat().st_size
+
+    assert notes == []
+    assert len(pairs) == 2
+    # More calls than there are members: the copy loop reports per chunk.
+    assert len(seen) > len(pairs) + 1
+    assert {total for _, total in seen} == {total_bytes}
+    done_values = [done for done, _ in seen]
+    assert done_values == sorted(done_values)
+    assert done_values[0] >= 0
+    assert done_values[-1] == total_bytes
+
+
+def test_iter_materialized_members_zip_progress_sums_compressed_sizes(
+        tmp_path: Path) -> None:
+    """Progress over a zip accumulates the compressed size of each member
+    processed, reported once per member and never exceeding the file."""
+    entries = {
+        "notes.txt": b"unrelated plain text",
+        "deck1.pptx": build_minimal_pptx(num_slides=1, media_bytes=40_000,
+                                          seed=0),
+        "deck2.pptx": build_minimal_pptx(num_slides=1, media_bytes=40_000,
+                                          seed=1),
+    }
+    path = tmp_path / "archive.zip"
+    _write_zip(path, entries)
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+    with zipfile.ZipFile(path) as zf:
+        expected = sum(info.compress_size for info in zf.infolist()
+                       if info.filename.endswith(".pptx"))
+
+    seen: list[tuple[int, int]] = []
+    pairs, notes = _collect(path, dest_dir, progress=lambda done, total:
+                            seen.append((done, total)))
+    total_bytes = path.stat().st_size
+
+    assert notes == []
+    assert len(pairs) == 2
+    assert len(seen) == 2  # one report per target member
+    done_values = [done for done, _ in seen]
+    assert done_values == sorted(done_values)
+    assert {total for _, total in seen} == {total_bytes}
+    assert done_values[-1] == expected <= total_bytes
+
+
+def test_iter_materialized_members_cancelled_copy_leaves_no_partial_file(
+        tmp_path: Path) -> None:
+    """A progress callback that raises mid-copy propagates untouched, and
+    the half-written destination file is removed rather than left behind
+    for the caller to diagnose as a corrupted member."""
+    path = tmp_path / "archive.tar.gz"
+    _write_tar(path, "w:gz", {
+        "big.pptx": build_minimal_pptx(num_slides=1, media_bytes=4_000_000)})
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+
+    calls = 0
+
+    def _cancel_during_copy(done: int, total: int) -> None:
+        nonlocal calls
+        calls += 1
+        # Call 1 is the member boundary; call 2 lands after the first
+        # chunk of the member's payload has already been written.
+        if calls >= 2:
+            raise _Cancelled("user requested cancellation")
+
+    with pytest.raises(_Cancelled):
+        for _ in iter_materialized_members(path, dest_dir,
+                                           progress=_cancel_during_copy):
+            pass
+
+    assert calls == 2
+    assert list(dest_dir.iterdir()) == []
+
+
+def test_iter_materialized_members_notes_encrypted_zip_member(
+        tmp_path: Path) -> None:
+    """An encrypted member is noted and skipped with the same wording as
+    list_members'; its readable sibling still comes through."""
+    plain_data = build_minimal_pptx(num_slides=1, media_bytes=500, seed=0)
+    secret_data = build_minimal_pptx(num_slides=1, media_bytes=500, seed=1)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w") as zf:
+        zf.writestr("plain.pptx", plain_data)
+        zf.writestr("secret.pptx", secret_data)
+    path = tmp_path / "archive.zip"
+    path.write_bytes(_patch_encrypted_flag(buffer.getvalue(), "secret.pptx"))
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+
+    pairs, notes = _collect(path, dest_dir)
+
+    assert [member.member_name for member, _ in pairs] == ["plain.pptx"]
+    assert notes == [f"encrypted member skipped: {path}::secret.pptx"]
+    assert pairs[0][1].read_bytes() == plain_data
+
+
+def test_iter_materialized_members_stops_at_tar_stream_damage(
+        tmp_path: Path) -> None:
+    """Damage inside a tar stream ends that archive's walk with a note --
+    the stream cannot be resynchronised -- but every member read before
+    the damage is still delivered intact."""
+    good_data = build_minimal_pptx(num_slides=1, media_bytes=200_000, seed=0)
+    late_data = build_minimal_pptx(num_slides=1, media_bytes=200_000, seed=1)
+    path = tmp_path / "backup.tar.gz"
+    _write_tar(path, "w:gz", {"early.pptx": good_data, "late.pptx": late_data})
+    raw = path.read_bytes()
+    path.write_bytes(raw[:int(len(raw) * 0.7)])
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+
+    pairs, notes = _collect(path, dest_dir)
+
+    assert [member.member_name for member, _ in pairs] == ["early.pptx"]
+    assert pairs[0][1].read_bytes() == good_data
+    assert len(notes) == 1
+    assert notes[0].startswith(f"cannot read archive {path}: ")
+    # No half-written leftover from the member the damage cut short.
+    assert [p.name for p in dest_dir.iterdir()] == [pairs[0][1].name]
+
+
+def test_iter_materialized_members_continues_past_damaged_zip_member(
+        tmp_path: Path) -> None:
+    """A zip is randomly accessible, so a damaged member is noted and
+    skipped while the walk carries on to the healthy members after it."""
+    bad_data = build_minimal_pptx(num_slides=1, media_bytes=20_000, seed=0)
+    good_data = build_minimal_pptx(num_slides=1, media_bytes=20_000, seed=1)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w",
+                         compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("bad.pptx", bad_data)
+        zf.writestr("good.pptx", good_data)
+    path = tmp_path / "archive.zip"
+    path.write_bytes(zero_entry_data_tail(buffer.getvalue(), "bad.pptx",
+                                          keep_fraction=0.3))
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+
+    pairs, notes = _collect(path, dest_dir)
+
+    assert [member.member_name for member, _ in pairs] == ["good.pptx"]
+    assert pairs[0][1].read_bytes() == good_data
+    assert len(notes) == 1
+    assert notes[0].startswith(
+        f"failed to extract member {path}::bad.pptx: ")
+    assert [p.name for p in dest_dir.iterdir()] == [pairs[0][1].name]
+
+
+@pytest.mark.skipif(not hasattr(os, "pathconf"),
+                    reason="needs a POSIX name-length probe")
+def test_iter_materialized_members_survives_an_unwritable_destination(
+        tmp_path: Path) -> None:
+    """A member the destination filesystem cannot hold -- here a basename
+    longer than its NAME_MAX -- is noted and skipped instead of aborting a
+    sweep that may already have been running for hours."""
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+    too_long = "x" * (os.pathconf(str(dest_dir), "PC_NAME_MAX") + 50)
+    good_data = build_minimal_pptx(num_slides=1, media_bytes=500)
+    path = tmp_path / "archive.zip"
+    _write_zip(path, {f"{too_long}.pptx": b"payload", "deck.pptx": good_data})
+
+    pairs, notes = _collect(path, dest_dir)
+
+    assert [member.member_name for member, _ in pairs] == ["deck.pptx"]
+    assert pairs[0][1].read_bytes() == good_data
+    assert len(notes) == 1
+    assert notes[0].startswith("failed to extract member ")
+    assert too_long in notes[0]
+
+
+@pytest.mark.parametrize("filename", ["broken.zip", "broken.tar.gz"])
+def test_iter_materialized_members_unopenable_archive_yields_nothing(
+        tmp_path: Path, filename: str) -> None:
+    """An archive that cannot be opened at all degrades to a single note
+    and an empty iteration, never an exception."""
+    path = tmp_path / filename
+    path.write_bytes(b"\x00" * 64)
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+
+    pairs, notes = _collect(path, dest_dir)
+
+    assert pairs == []
+    assert len(notes) == 1
+    assert notes[0].startswith(f"cannot read archive {path}: ")
+    assert list(dest_dir.iterdir()) == []
 
 
 # --- is_archive / ArchiveMember.display -------------------------------------
