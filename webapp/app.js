@@ -29,8 +29,17 @@ function detectLang() {
   return SUPPORTED_LANGS.includes(nav) ? nav : "en";
 }
 
+// worker初期化前(=stringsが空の間)にも表示され得るキーの英語フォールバック。
+// カタログ到着後はstrings側が優先される。
+const PRELOAD_FALLBACK = {
+  loading_engine: "Loading the repair engine (about 14 MB, first visit only)…",
+  loading_package: "Preparing the repair toolkit…",
+  worker_error:
+    "The repair engine stopped unexpectedly. Reload the page and try again.",
+};
+
 function t(key) {
-  return strings[key] || key;
+  return strings[key] || PRELOAD_FALLBACK[key] || key;
 }
 
 function applyStrings() {

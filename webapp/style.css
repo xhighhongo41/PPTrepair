@@ -31,6 +31,9 @@
 
 * { box-sizing: border-box; }
 
+/* 独自display指定(#loadingのflex等)がUAの[hidden]既定を打ち消さないようにする */
+[hidden] { display: none !important; }
+
 body {
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;

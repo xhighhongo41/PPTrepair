@@ -1,6 +1,8 @@
 # PPTrepair
 
-Diagnoses and repairs PowerPoint files that were corrupted while stored on OneDrive — from the command line or a desktop GUI.
+Diagnoses and repairs PowerPoint files that were corrupted while stored on OneDrive — from the command line, a desktop GUI, or right in your browser.
+
+**Try it without installing anything:** the [web version](https://pptrepair.xhigh-hongo-41.workers.dev/) repairs files directly in your browser — nothing is ever uploaded. See [Web version](#web-version-v21).
 
 日本語版は [README_ja.md](README_ja.md) を参照してください。 (For the Japanese version, see [README_ja.md](README_ja.md).)
 
@@ -245,7 +247,32 @@ Drop files, folders (scanned recursively for `.pptx`/`.pptm`) or backup archives
 
 Output goes either **in place** next to each source, or into a chosen folder that mirrors the input tree — the GUI equivalents of `--in-place` and aggregate `-o OUTDIR`. A Preferences dialog controls whether cloud-only files may be downloaded, the maximum file size examined (default 2 GB, the GUI equivalent of `--max-file-size`), and the UI/report language — the same 7 languages as the CLI, with a change taking effect after restart. Every setting persists across launches. As with the CLI, dropped archives are only donor material: the files inside them are never repaired themselves.
 
+### Web version (v2.1)
+
+**https://pptrepair.xhigh-hongo-41.workers.dev/**
+
+The web version runs the very same repair engine as the CLI — as Python compiled to WebAssembly (Pyodide) — entirely inside your browser. There is no server-side processing and no account:
+
+* **Your files never leave your device.** They are read, diagnosed and repaired locally in a browser worker; nothing is uploaded anywhere. The site's Content-Security-Policy forbids the page from talking to any other host.
+* Drop (or pick) one or more `.pptx` / `.pptm` files; each is repaired in turn and the result is offered as a download: a repaired `.pptx`, or a `.salvaged.zip` recovery archive when only parts could be rescued, plus the same detailed report the CLI prints.
+* Same 7 report/UI languages as the CLI, auto-detected from the browser and switchable on the page.
+* Limits compared to the desktop versions: single-file repair only (no multi-source merge, no folder scan — the page points to the desktop app for those), and files up to 200 MB each. The first visit downloads the engine (about 14 MB); afterwards it loads from the browser cache.
+* Works in current Chrome, Edge, Safari and Firefox.
+
+To run it locally instead of using the hosted site (requires Python 3.12+):
+
+```console
+$ git clone https://github.com/xhighhongo41/PPTrepair.git
+$ cd PPTrepair
+$ bash tools/build_webapp.sh        # builds the wheel and fetches the pinned Pyodide runtime
+$ python tools/serve_webapp.py      # serves http://127.0.0.1:8760 with production headers
+```
+
 ## Changelog
+
+### ver 2.1.0 (2026-07-28)
+- New web version at https://pptrepair.xhigh-hongo-41.workers.dev/ — the same repair engine compiled to WebAssembly (Pyodide, pinned and self-hosted) running entirely in the browser. Files are never uploaded; a strict Content-Security-Policy (`default-src 'none'`) enforces that the page cannot talk to any other host. Drag & drop with sequential processing, per-file reports, `.salvaged.zip` download for partial rescues, 200 MB/file limit, 7-language UI with browser-language auto-detection
+- Hosted as a fully static site on Cloudflare (free tier, no server-side processing); `tools/build_webapp.sh` reproduces the build, `tools/serve_webapp.py` serves it locally with the production security headers
 
 ### ver 2.0.0 (2026-07-25)
 - New PySide6 desktop GUI (`pptrepair gui`, optional `[gui]` extra): drag & drop accumulation, recursive folder scan, live progress with cancellation, single-file / multi-source repair modes with donor approval, archive donor mining, in-place / mirrored folder output, persistent settings, 7-language UI
