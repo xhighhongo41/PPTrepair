@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 import tarfile
 import tempfile
+import threading
 import zipfile
 from pathlib import Path
 
@@ -706,6 +708,113 @@ def test_archive_progress_reports_bytes_tagged_with_the_archive(
     assert done_values == sorted(done_values)
     assert {total for _path, _done, total in calls} == {total_bytes}
     assert done_values[-1] == total_bytes
+
+
+# --- 11. the session cache under concurrent mining ---------------------------
+
+
+def test_cache_subdir_numbering_is_unique_under_concurrency(
+    tmp_path: Path
+) -> None:
+    """Threads allocating extraction directories at the same time never
+    share a number: the ``arcNNNN`` sequence is handed out under the
+    cache's lock, so two archives can never be mined into one directory
+    (where their ``memberNNNN-`` files would overwrite each other).
+
+    The interpreter is asked to switch threads as often as it can for
+    the duration, which is what makes the race deterministic enough to
+    test: at the default 5 ms switch interval an unguarded
+    ``self._next_index += 1`` is just as broken but practically never
+    caught in the act (verified: the lock removed, this test fails on
+    its first burst here, and passes every time without the switch
+    interval turned down)."""
+    cache = scan_module.ArchiveMaterialCache(tmp_path / "cache")
+    thread_count = 8
+    per_thread = 30
+    start = threading.Barrier(thread_count)
+    handed_out: list[list[Path]] = [[] for _ in range(thread_count)]
+
+    def _allocate(slot: int) -> None:
+        """Ask for one directory per (distinct) archive path, in a burst."""
+        start.wait(timeout=10)
+        for index in range(per_thread):
+            handed_out[slot].append(
+                cache.subdir_for(tmp_path / f"backup{slot}-{index}.zip"))
+
+    threads = [threading.Thread(target=_allocate, args=(slot,))
+               for slot in range(thread_count)]
+    previous_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+    finally:
+        sys.setswitchinterval(previous_interval)
+
+    allocated = [subdir for slot in handed_out for subdir in slot]
+    assert len(allocated) == thread_count * per_thread
+    assert len(set(allocated)) == len(allocated)
+    assert all(subdir.is_dir() for subdir in allocated)
+
+
+def test_two_threads_mine_different_archives_into_one_cache(
+    tmp_path: Path
+) -> None:
+    """Two threads mining *different* archives into one session cache --
+    what the GUI's per-device parallel scan does -- get correct, fully
+    cached results: every member is diagnosed exactly once, every
+    archive keeps its own extraction directory, and the donor bytes of
+    all of them stay retrievable afterwards."""
+    root = _mkroot(tmp_path)
+    archives = []
+    for index in range(6):
+        archive_path = root / f"backup{index}.zip"
+        _write_zip(archive_path, {
+            f"backup/deck{index}.pptx": build_minimal_pptx(
+                num_slides=1, media_bytes=20_000, seed=index),
+        })
+        archives.append(archive_path)
+    cache = scan_module.ArchiveMaterialCache(tmp_path / "cache")
+    start = threading.Barrier(2)
+    mined: dict[Path, list[scan_module.ArchiveMaterial]] = {}
+    failures: list[BaseException] = []
+
+    def _mine(paths: list[Path]) -> None:
+        """Mine one thread's share of the archives, one after another."""
+        try:
+            start.wait(timeout=10)
+            for archive_path in paths:
+                materials, notes = scan_module.diagnose_archive_materials(
+                    [archive_path], cache=cache)
+                assert notes == []
+                mined[archive_path] = materials
+        except BaseException as exc:
+            failures.append(exc)
+
+    threads = [threading.Thread(target=_mine, args=(share,))
+               for share in (archives[:3], archives[3:])]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert failures == []
+    assert sorted(mined) == sorted(archives)
+    for index, archive_path in enumerate(archives):
+        [material] = mined[archive_path]
+        assert material.member.member_name == f"backup/deck{index}.pptx"
+        assert material.diagnosis is not None
+        assert material.diagnosis.verdict.value == "normal"
+        # The cache still vouches for every donor, each from its own
+        # extraction directory.
+        donor_path = cache.member_path(archive_path, material.member)
+        assert donor_path is not None
+        assert donor_path.is_file()
+    donor_dirs = {cache.member_path(path, mined[path][0].member).parent
+                  for path in archives}
+    assert len(donor_dirs) == len(archives)
 
 
 def test_scan_paths_forwards_the_cache_and_the_archive_progress(

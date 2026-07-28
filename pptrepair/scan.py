@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -108,7 +109,17 @@ class ArchiveMaterialCache:
     here ever writes outside *root*, and nothing here deletes *root*
     itself.
 
-    Not thread-safe: one cache belongs to one worker thread.
+    Thread safety: an internal lock guards the bookkeeping -- the entry
+    table, the per-archive subdirectory map and the ``arcNNNN``
+    numbering -- so several threads may mine *different* archives into
+    one cache at the same time. The mining itself (extraction into, and
+    diagnosis out of, the directory :meth:`subdir_for` returned) happens
+    outside the lock, which is exactly why two threads must never mine
+    the *same* archive path concurrently: the second call would renumber
+    the directory the first one is still writing into. The GUI's
+    device-grouped parallel scan guarantees that on its own -- one path
+    belongs to exactly one device group, and a group's work units run
+    one after another.
     """
 
     def __init__(self, root: Path) -> None:
@@ -117,6 +128,8 @@ class ArchiveMaterialCache:
         self._entries: dict[Path, tuple[int, int, CachedArchive]] = {}
         self._subdirs: dict[Path, Path] = {}
         self._next_index = 0
+        #: Guards the three attributes above; see the class docstring.
+        self._lock = threading.Lock()
 
     @staticmethod
     def _key(archive_path: Path) -> Path:
@@ -143,7 +156,10 @@ class ArchiveMaterialCache:
         return status.st_size, status.st_mtime_ns
 
     def _discard(self, key: Path) -> None:
-        """Drop the entry cached under *key*, deleting its extracted files."""
+        """Drop the entry cached under *key*, deleting its extracted files.
+
+        The caller must hold :attr:`_lock` (both call sites already do).
+        """
         self._entries.pop(key, None)
         subdir = self._subdirs.pop(key, None)
         if subdir is not None:
@@ -162,13 +178,19 @@ class ArchiveMaterialCache:
         and its files must not be able to collide with the new ones.
 
         *root* is created on demand here if the owner has not yet.
+
+        The whole allocation happens under the lock, so two threads
+        mining two different archives can never be handed the same
+        number -- and thus never write their ``memberNNNN-`` files into
+        one directory.
         """
         key = self._key(archive_path)
-        self._discard(key)
-        subdir = self._root / f"arc{self._next_index:04d}"
-        self._next_index += 1
-        subdir.mkdir(parents=True, exist_ok=True)
-        self._subdirs[key] = subdir
+        with self._lock:
+            self._discard(key)
+            subdir = self._root / f"arc{self._next_index:04d}"
+            self._next_index += 1
+            subdir.mkdir(parents=True, exist_ok=True)
+            self._subdirs[key] = subdir
         return subdir
 
     def store(self, archive_path: Path, entry: CachedArchive) -> None:
@@ -183,7 +205,9 @@ class ArchiveMaterialCache:
         if stamp is None:
             return
         size, mtime_ns = stamp
-        self._entries[self._key(archive_path)] = (size, mtime_ns, entry)
+        key = self._key(archive_path)
+        with self._lock:
+            self._entries[key] = (size, mtime_ns, entry)
 
     def lookup(self, archive_path: Path) -> CachedArchive | None:
         """Return the cached result for *archive_path* while it is valid.
@@ -196,19 +220,24 @@ class ArchiveMaterialCache:
         stat failure also returns None, but leaves the entry alone --
         a temporarily unreachable archive should not cost the session
         the material it already holds.
+
+        Lookup, validation and the invalidation it may trigger are one
+        atomic step: two threads must not be able to discard the same
+        stale entry (and its files) twice.
         """
         key = self._key(archive_path)
-        record = self._entries.get(key)
-        if record is None:
-            return None
-        stamp = self._stamp(archive_path)
-        if stamp is None:
-            return None
-        size, mtime_ns, entry = record
-        if stamp != (size, mtime_ns):
-            self._discard(key)
-            return None
-        return entry
+        with self._lock:
+            record = self._entries.get(key)
+            if record is None:
+                return None
+            stamp = self._stamp(archive_path)
+            if stamp is None:
+                return None
+            size, mtime_ns, entry = record
+            if stamp != (size, mtime_ns):
+                self._discard(key)
+                return None
+            return entry
 
     def member_path(self, archive_path: Path,
                     member: ArchiveMember) -> Path | None:
@@ -221,6 +250,11 @@ class ArchiveMaterialCache:
         failed, or an extracted file that has since disappeared), and
         tells the caller to fall back to
         :func:`pptrepair.archive.materialize`.
+
+        Locking is left entirely to :meth:`lookup`: the
+        :class:`CachedArchive` it hands back is never mutated once
+        stored, so reading its ``extracted`` map (and probing the file
+        itself) outside the lock is safe and keeps the syscall off it.
         """
         entry = self.lookup(archive_path)
         if entry is None:
