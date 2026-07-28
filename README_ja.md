@@ -4,6 +4,7 @@ OneDriveに置いている間に破損したPowerPointファイルを診断・�
 
 English version: [README.md](README.md)
 
+
 ## このツールができること
 
 `pptrepair check` は `.pptx` ファイルを検査し、各ファイルが「無傷のPowerPointパッケージ」か「本プロジェクトが特定したOneDrive破損パターンのいずれか」かを判定します。実ファイルの分析により、この破損は256KiB/1MiB境界に整列したチャンク単位の上書き・切断であり、以下のパターンに分類できることがわかっています:
