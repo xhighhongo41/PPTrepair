@@ -373,7 +373,20 @@ def _mine_archive(
     peak stays at a single member's worth however many an archive holds.
 
     Callback exceptions (*material_progress*, *archive_progress*) are
-    not caught; see :func:`diagnose_archive_materials`.
+    not caught; see :func:`diagnose_archive_materials`. (An
+    :class:`OperationCancelled` they raise is not an :class:`OSError`,
+    so the containment below never swallows a cancellation.)
+
+    An :class:`OSError` surfacing anywhere else in the sweep -- the
+    iterator's own guards cover its reads, but the file objects it
+    drives live on whatever mount the archive sits on, and an unusable
+    network handle can fail a syscall outside those guards (observed in
+    the wild as ``EINVAL`` on an SMB mount hours into a read) -- is
+    degraded to the same ``"cannot read archive"`` note the iterator
+    uses for a read failure, and the members landed *before* it are
+    returned: they are complete, diagnosed donor material, and a sweep
+    that may already have run for hours must not lose them to its
+    final stumble.
     """
     materials: list[ArchiveMaterial] = []
     extracted: dict[ArchiveMember, Path] = {}
@@ -387,19 +400,24 @@ def _mine_archive(
 
         progress = _forward
 
-    for member, dest_path in iter_materialized_members(
-            archive_path, dest_dir, on_note=notes.append, progress=progress):
-        diagnosis, error = diagnose_file(dest_path)
-        material = ArchiveMaterial(archive_path=archive_path, member=member,
-                                   diagnosis=diagnosis, error=error)
-        materials.append(material)
-        if keep_files:
-            extracted[member] = dest_path
-        if material_progress is not None:
-            material_progress(material)
-        if not keep_files:
-            # Free the disk/memory footprint before the next member.
-            dest_path.unlink(missing_ok=True)
+    try:
+        for member, dest_path in iter_materialized_members(
+                archive_path, dest_dir, on_note=notes.append,
+                progress=progress):
+            diagnosis, error = diagnose_file(dest_path)
+            material = ArchiveMaterial(archive_path=archive_path,
+                                       member=member,
+                                       diagnosis=diagnosis, error=error)
+            materials.append(material)
+            if keep_files:
+                extracted[member] = dest_path
+            if material_progress is not None:
+                material_progress(material)
+            if not keep_files:
+                # Free the disk/memory footprint before the next member.
+                dest_path.unlink(missing_ok=True)
+    except OSError as exc:
+        notes.append(f"cannot read archive {archive_path}: {exc}")
 
     return CachedArchive(materials=materials, extracted=extracted, notes=notes)
 

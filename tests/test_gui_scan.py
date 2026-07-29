@@ -460,6 +460,50 @@ def test_scan_worker_cancellation_during_archive_read_stops_early(
     assert worker.wait(5000)
 
 
+def test_archive_progress_signal_carries_64bit_byte_counts() -> None:
+    """archive_progress's byte counters survive values well past the
+    2**31 an ``int`` Qt signal argument would wrap: the qulonglong
+    declaration is what keeps a huge archive's position from turning
+    negative on its way to the UI thread."""
+    worker = ScanWorker(ScanRequest(roots=(), archives=()))
+    recorded: list[tuple[str, int, int]] = []
+    worker.archive_progress.connect(
+        lambda path, done, total: recorded.append((path, done, total)))
+
+    # The first call is never throttled, so this reaches the slot
+    # synchronously without needing to run the worker at all.
+    worker._relay_archive_progress(
+        Path("/backup/huge.tar.gz"), 3_000_000_000, 677_910_962_489)
+
+    assert recorded == [
+        ("/backup/huge.tar.gz", 3_000_000_000, 677_910_962_489)]
+
+
+def test_scan_worker_failure_prints_traceback_to_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unexpected exception from _execute prints its full traceback to
+    stderr, while the failed signal still carries only the short summary
+    the UI shows."""
+    worker = ScanWorker(ScanRequest(roots=(), archives=()))
+
+    def _boom() -> GuiScanResult:
+        raise ValueError("boom")
+
+    monkeypatch.setattr(worker, "_execute", _boom)
+    messages: list[str] = []
+    worker.failed.connect(messages.append)
+
+    # Called directly on this thread (not started as a QThread), so the
+    # run is synchronous and capsys can capture stderr from it.
+    worker.run()
+
+    captured = capsys.readouterr()
+    assert "Traceback" in captured.err
+    assert "ValueError: boom" in captured.err
+    assert messages == ["ValueError: boom"]
+
+
 # --------------------------------------------------------------------------
 # ScanWorker: per-device parallel scanning
 # --------------------------------------------------------------------------

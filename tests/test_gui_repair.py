@@ -179,6 +179,34 @@ def test_repair_worker_cancellation_stops_early(
     assert worker.wait(5000)
 
 
+def test_repair_worker_failure_prints_traceback_to_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unexpected exception from _execute prints its full traceback to
+    stderr, while the failed signal still carries only the short summary
+    the UI shows."""
+    root = _mkroot(tmp_path)
+    worker = RepairWorker(RepairRequest(
+        roots=(root,), output_dir=None, in_place=True))
+
+    def _boom() -> BatchResult:
+        raise ValueError("boom")
+
+    monkeypatch.setattr(worker, "_execute", _boom)
+    messages: list[str] = []
+    worker.failed.connect(messages.append)
+
+    # Called directly on this thread (not started as a QThread), so the
+    # run is synchronous and capsys can capture stderr from it.
+    worker.run()
+
+    captured = capsys.readouterr()
+    assert "Traceback" in captured.err
+    assert "ValueError: boom" in captured.err
+    assert messages == ["ValueError: boom"]
+
+
 # --------------------------------------------------------------------------
 # MainWindow integration
 # --------------------------------------------------------------------------

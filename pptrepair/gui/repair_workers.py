@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import tempfile
 import threading
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -204,7 +205,11 @@ class MultiRepairWorker(QThread):
             self.cancelled.emit()
         except Exception as exc:
             # Any unexpected failure is summarised for the UI rather than
-            # left to terminate the worker thread silently.
+            # left to terminate the worker thread silently -- but the
+            # summary alone cannot say *where* it happened, so the full
+            # traceback goes to stderr for the terminal the app was
+            # launched from.
+            traceback.print_exc()
             self.failed.emit(f"{type(exc).__name__}: {exc}")
         else:
             self.finished_ok.emit(result)
@@ -563,7 +568,11 @@ class RepairWorker(QThread):
             self.cancelled.emit()
         except Exception as exc:
             # Any unexpected failure is summarised for the UI rather than
-            # left to terminate the worker thread silently.
+            # left to terminate the worker thread silently -- but the
+            # summary alone cannot say *where* it happened, so the full
+            # traceback goes to stderr for the terminal the app was
+            # launched from.
+            traceback.print_exc()
             self.failed.emit(f"{type(exc).__name__}: {exc}")
         else:
             self.finished_ok.emit(result)

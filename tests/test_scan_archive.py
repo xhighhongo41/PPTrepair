@@ -34,6 +34,7 @@ from fixtures import (
 
 from pptrepair import scan as scan_module
 from pptrepair import walker as walker_module
+from pptrepair.archive import ArchiveMember
 from pptrepair.cancel import OperationCancelled
 from pptrepair.cli import EXIT_CORRUPT, EXIT_OK, main
 
@@ -846,3 +847,136 @@ def test_scan_paths_forwards_the_cache_and_the_archive_progress(
     assert {path for path, _done, _total in calls} == {archive_path}
     assert {total for _path, _done, total in calls} == {
         archive_path.stat().st_size}
+
+
+# --- 12. an OSError mid-sweep is contained without losing the partial pass --
+
+
+def _one_member_then_oserror(archive_path: Path, dest_dir: Path, *,
+                             on_note=None, progress=None):
+    """Yield one member, then fail the sweep with an ``EINVAL`` OSError.
+
+    Stands in for :func:`pptrepair.archive.iter_materialized_members` on an
+    archive whose read fails part way through (the SMB/EINVAL scenario
+    ``_mine_archive``'s docstring describes), while still landing a real
+    file in *dest_dir* for the one member reached first.
+    """
+    member = ArchiveMember(archive_path=archive_path,
+                           member_name="backup/one.pptx", size=4)
+    dest_path = dest_dir / "member0000-one.pptx"
+    dest_path.write_bytes(b"junk")
+    yield member, dest_path
+    raise OSError(22, "Invalid argument")
+
+
+def test_mine_oserror_mid_sweep_keeps_partial_materials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An OSError raised after some members were already yielded degrades
+    to a "cannot read archive" note; the material extracted before the
+    failure is still returned rather than lost."""
+    archive_path = _mkroot(tmp_path) / "backup.zip"
+    archive_path.write_bytes(b"dummy")
+    monkeypatch.setattr(scan_module, "iter_materialized_members",
+                        _one_member_then_oserror)
+
+    materials, notes = scan_module.diagnose_archive_materials([archive_path])
+
+    assert len(materials) == 1
+    assert len(notes) == 1
+    assert "cannot read archive" in notes[0]
+    assert "Invalid argument" in notes[0]
+
+
+def test_mine_oserror_partial_result_is_cached_and_replayed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A partial result produced by a mid-sweep OSError is stored in the
+    session cache like any complete one: a second pass over the same
+    archive is served entirely from the cache, without re-mining it."""
+    archive_path = _mkroot(tmp_path) / "backup.zip"
+    archive_path.write_bytes(b"dummy")
+    cache = scan_module.ArchiveMaterialCache(tmp_path / "cache")
+    monkeypatch.setattr(scan_module, "iter_materialized_members",
+                        _one_member_then_oserror)
+
+    first_materials, first_notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache)
+
+    def _forbidden_re_mine(archive_path: Path, dest_dir: Path, *,
+                           on_note=None, progress=None):
+        """Fail loudly if the cached archive is ever re-mined."""
+        raise AssertionError("re-mined")
+
+    monkeypatch.setattr(scan_module, "iter_materialized_members",
+                        _forbidden_re_mine)
+    second_materials, second_notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache)
+
+    assert len(first_materials) == 1
+    assert len(second_materials) == 1
+    assert second_materials == first_materials
+    assert second_notes == first_notes
+
+
+def test_mine_oserror_before_first_yield_continues_to_next_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An archive whose sweep fails before yielding a single member is
+    noted and left out; the remaining archives are still mined."""
+    root = _mkroot(tmp_path)
+    failing_archive = root / "first.zip"
+    failing_archive.write_bytes(b"dummy")
+    ok_archive = root / "second.zip"
+    ok_archive.write_bytes(b"dummy")
+
+    def _fake_iter(archive_path: Path, dest_dir: Path, *,
+                   on_note=None, progress=None):
+        """Fail outright for *failing_archive*, succeed for the other."""
+        if archive_path == failing_archive:
+            raise OSError(22, "Invalid argument")
+        member = ArchiveMember(archive_path=archive_path,
+                               member_name="backup/two.pptx", size=4)
+        dest_path = dest_dir / "member0000-two.pptx"
+        dest_path.write_bytes(b"junk")
+        yield member, dest_path
+
+    monkeypatch.setattr(scan_module, "iter_materialized_members", _fake_iter)
+
+    materials, notes = scan_module.diagnose_archive_materials(
+        [failing_archive, ok_archive])
+
+    assert [material.archive_path for material in materials] == [ok_archive]
+    assert len(notes) == 1
+    assert "cannot read archive" in notes[0]
+    assert str(failing_archive) in notes[0]
+
+
+def test_cancellation_still_propagates_through_oserror_containment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OperationCancelled is not an OSError: it still propagates uncaught
+    through the containment the OSError case relies on, and the mining
+    pass it interrupted is never cached as a partial result."""
+    archive_path = _mkroot(tmp_path) / "backup.zip"
+    archive_path.write_bytes(b"dummy")
+    cache = scan_module.ArchiveMaterialCache(tmp_path / "cache")
+
+    def _fake_iter(archive_path: Path, dest_dir: Path, *,
+                   on_note=None, progress=None):
+        member = ArchiveMember(archive_path=archive_path,
+                               member_name="backup/one.pptx", size=4)
+        dest_path = dest_dir / "member0000-one.pptx"
+        dest_path.write_bytes(b"junk")
+        yield member, dest_path
+
+    monkeypatch.setattr(scan_module, "iter_materialized_members", _fake_iter)
+
+    def _cancel_on_first(material: scan_module.ArchiveMaterial) -> None:
+        raise OperationCancelled("user requested cancellation")
+
+    with pytest.raises(OperationCancelled):
+        scan_module.diagnose_archive_materials(
+            [archive_path], cache=cache, material_progress=_cancel_on_first)
+
+    assert cache.lookup(archive_path) is None

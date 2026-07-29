@@ -674,6 +674,35 @@ def test_multi_worker_cancellation_stops_before_next_merge(
     assert worker.wait(5000)
 
 
+def test_multi_repair_worker_failure_prints_traceback_to_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unexpected exception from _execute prints its full traceback to
+    stderr, while the failed signal still carries only the short summary
+    the UI shows."""
+    root = _mkroot(tmp_path)
+    worker = MultiRepairWorker(MultiRepairRequest(
+        merges=(), fallback_targets=(), roots=(root,),
+        output_dir=None, in_place=True))
+
+    def _boom() -> MultiRepairResult:
+        raise ValueError("boom")
+
+    monkeypatch.setattr(worker, "_execute", _boom)
+    messages: list[str] = []
+    worker.failed.connect(messages.append)
+
+    # Called directly on this thread (not started as a QThread), so the
+    # run is synchronous and capsys can capture stderr from it.
+    worker.run()
+
+    captured = capsys.readouterr()
+    assert "Traceback" in captured.err
+    assert "ValueError: boom" in captured.err
+    assert messages == ["ValueError: boom"]
+
+
 def test_multi_worker_output_dir_mirrors_single_mode_tree(
     qtbot: QtBot, tmp_path: Path
 ) -> None:

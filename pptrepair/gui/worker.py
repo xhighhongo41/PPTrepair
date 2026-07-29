@@ -43,6 +43,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+import traceback
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -175,7 +176,10 @@ class ScanWorker(QThread):
     """
 
     walk_progress = Signal(str)
-    archive_progress = Signal(str, int, int)
+    # The byte counters must be 64-bit: a backup archive can exceed the
+    # 2 GiB a C++ ``int`` holds, and shiboken delivers overflowing values
+    # wrapped (with a console "OverflowError") rather than raising.
+    archive_progress = Signal(str, "qulonglong", "qulonglong")
     file_scanned = Signal(object)
     material_scanned = Signal(object)
     download_started = Signal(object)
@@ -267,7 +271,11 @@ class ScanWorker(QThread):
             self.cancelled.emit()
         except Exception as exc:
             # Any unexpected failure is summarised for the UI rather than
-            # left to terminate the worker thread silently.
+            # left to terminate the worker thread silently -- but the
+            # summary alone cannot say *where* it happened, so the full
+            # traceback goes to stderr for the terminal the app was
+            # launched from.
+            traceback.print_exc()
             self.failed.emit(f"{type(exc).__name__}: {exc}")
         else:
             self.finished_ok.emit(result)
