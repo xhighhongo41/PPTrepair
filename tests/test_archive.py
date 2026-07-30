@@ -10,6 +10,7 @@ throughout this test suite.
 
 from __future__ import annotations
 
+import gzip
 import io
 import os
 import struct
@@ -20,6 +21,7 @@ from pathlib import Path
 import pytest
 from fixtures import build_minimal_pptx, zero_entry_data_tail
 
+import pptrepair.archive
 from pptrepair.archive import (
     ArchiveMember,
     is_archive,
@@ -96,6 +98,26 @@ def _patch_encrypted_flag(data: bytes, member_name: str) -> bytes:
         idx = buf.find(b"PK\x01\x02", idx + 4)
 
     return bytes(buf)
+
+
+class _CloseFails:
+    """Wraps *inner*, delegating every attribute but failing close().
+
+    Stands in for a handle whose close() raises an environmental OSError
+    (observed: a stale SMB handle going bad only at close time) even
+    though every read through it already succeeded -- see
+    :func:`pptrepair.archive._close_noting`.
+    """
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+    def close(self) -> None:
+        self._inner.close()
+        raise OSError(22, "Invalid argument")
 
 
 # --- list_members: only .pptx/.pptm members are enumerated -----------------
@@ -198,6 +220,67 @@ def test_list_members_truncated_tar_stream_never_raises(
     assert len(notes) == 1
 
 
+# --- _open_with_retry: retry ladder for transient archive-open errors -------
+
+
+def test_open_with_retry_transient_oserror_recovers(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """A transient OSError on each of the first two attempts is retried,
+    sleeping the full delay ladder before the third attempt succeeds."""
+    sentinel = object()
+    attempts = 0
+
+    def _open_call() -> object:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise OSError(22, "Invalid argument")
+        return sentinel
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(pptrepair.archive.time, "sleep", sleeps.append)
+
+    result = pptrepair.archive._open_with_retry(_open_call)
+
+    assert result is sentinel
+    assert sleeps == [2.0, 5.0]
+
+
+def test_open_with_retry_exhausted_raises_last_error(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """An OSError on every attempt propagates from the final one, after
+    sleeping through the delay ladder exactly once each."""
+    def _always_fails() -> None:
+        raise OSError(22, "Invalid argument")
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(pptrepair.archive.time, "sleep", sleeps.append)
+
+    with pytest.raises(OSError):
+        pptrepair.archive._open_with_retry(_always_fails)
+
+    assert sleeps == [2.0, 5.0]
+
+
+@pytest.mark.parametrize("exc", [FileNotFoundError("missing"),
+                                 gzip.BadGzipFile("bad")])
+def test_open_with_retry_deterministic_errors_raise_immediately(
+        exc: Exception, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deterministic failure (missing file, bad gzip signature, ...) is
+    re-raised on the first attempt, without ever sleeping: waiting
+    cannot fix it."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(pptrepair.archive.time, "sleep", sleeps.append)
+
+    def _raise() -> None:
+        raise exc
+
+    with pytest.raises(type(exc)):
+        pptrepair.archive._open_with_retry(_raise)
+
+    assert sleeps == []
+
+
 # --- materialize -------------------------------------------------------------
 
 
@@ -277,6 +360,70 @@ def test_materialize_excludes_corrupted_member_but_keeps_others(
     assert good_member in extracted
     assert bad_member not in extracted
     assert extracted[good_member].read_bytes() == good_data
+
+
+def test_materialize_close_failure_keeps_extracted_members(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A close() failure once every member has already been extracted is
+    degraded to a note; the extracted files themselves are kept intact
+    and byte-correct."""
+    data_a = build_minimal_pptx(num_slides=1, media_bytes=2000, seed=0)
+    data_b = build_minimal_pptx(num_slides=1, media_bytes=2000, seed=1)
+    path = tmp_path / "archive.tar.gz"
+    _write_tar(path, "w:gz", {"deck1.pptx": data_a, "deck2.pptx": data_b})
+    members, notes = list_members(path)
+    assert notes == []
+
+    real_open = tarfile.open
+    monkeypatch.setattr(
+        pptrepair.archive.tarfile, "open",
+        lambda *a, **k: _CloseFails(real_open(*a, **k)))
+
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+    extracted, extract_notes = materialize(path, members, dest_dir)
+
+    assert len(extracted) == len(members) == 2
+    expected = {"deck1.pptx": data_a, "deck2.pptx": data_b}
+    for member in members:
+        assert extracted[member].read_bytes() == expected[member.member_name]
+    assert len(extract_notes) == 1
+    assert "closing archive failed" in extract_notes[0]
+
+
+def test_materialize_open_transient_oserror_retries_and_succeeds(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A transient OSError on the very first archive-open attempt is
+    retried by _open_with_retry: the second (real) attempt lets
+    materialize() succeed as if nothing had happened."""
+    pptx_data = build_minimal_pptx(num_slides=1, media_bytes=2000)
+    path = tmp_path / "archive.tar.gz"
+    _write_tar(path, "w:gz", {"deck.pptx": pptx_data})
+    members, notes = list_members(path)
+    assert notes == []
+
+    real_open = tarfile.open
+    attempts = 0
+
+    def _flaky_open(*args: object, **kwargs: object) -> tarfile.TarFile:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError(22, "Invalid argument")
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(pptrepair.archive.tarfile, "open", _flaky_open)
+    sleeps: list[float] = []
+    monkeypatch.setattr(pptrepair.archive.time, "sleep", sleeps.append)
+
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+    extracted, extract_notes = materialize(path, members, dest_dir)
+
+    assert extract_notes == []
+    assert len(extracted) == 1
+    assert extracted[members[0]].read_bytes() == pptx_data
+    assert sleeps == [2.0]
 
 
 # --- iter_materialized_members: one pass over the archive --------------------
@@ -596,6 +743,56 @@ def test_iter_materialized_members_unopenable_archive_yields_nothing(
     assert len(notes) == 1
     assert notes[0].startswith(f"cannot read archive {path}: ")
     assert list(dest_dir.iterdir()) == []
+
+
+def test_iter_tar_close_failure_yields_all_members_and_notes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A raw file handle whose close() fails once the tar stream sweep is
+    done is degraded to a note; every member reached before that point is
+    still yielded intact."""
+    data_a = build_minimal_pptx(num_slides=1, media_bytes=2000, seed=0)
+    data_b = build_minimal_pptx(num_slides=1, media_bytes=2000, seed=1)
+    path = tmp_path / "archive.tar.gz"
+    _write_tar(path, "w:gz", {"deck1.pptx": data_a, "deck2.pptx": data_b})
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+
+    monkeypatch.setattr(
+        pptrepair.archive, "_open_with_retry",
+        lambda call: _CloseFails(call()))
+
+    pairs, notes = _collect(path, dest_dir)
+
+    assert len(pairs) == 2
+    expected = {"deck1.pptx": data_a, "deck2.pptx": data_b}
+    for member, dest_path in pairs:
+        assert dest_path.read_bytes() == expected[member.member_name]
+    assert any("closing archive failed" in note for note in notes)
+
+
+def test_iter_zip_close_failure_yields_all_members_and_notes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ZipFile handle whose close() fails once the walk is done is
+    degraded to a note; every member reached before that point is still
+    yielded intact."""
+    data_a = build_minimal_pptx(num_slides=1, media_bytes=2000, seed=0)
+    data_b = build_minimal_pptx(num_slides=1, media_bytes=2000, seed=1)
+    path = tmp_path / "archive.zip"
+    _write_zip(path, {"deck1.pptx": data_a, "deck2.pptx": data_b})
+    dest_dir = tmp_path / "out"
+    dest_dir.mkdir()
+
+    monkeypatch.setattr(
+        pptrepair.archive, "_open_with_retry",
+        lambda call: _CloseFails(call()))
+
+    pairs, notes = _collect(path, dest_dir)
+
+    assert len(pairs) == 2
+    expected = {"deck1.pptx": data_a, "deck2.pptx": data_b}
+    for member, dest_path in pairs:
+        assert dest_path.read_bytes() == expected[member.member_name]
+    assert any("closing archive failed" in note for note in notes)
 
 
 # --- is_archive / ArchiveMember.display -------------------------------------

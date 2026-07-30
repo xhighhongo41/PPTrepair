@@ -49,11 +49,13 @@ never trusts a member's own path (zip-slip guard -- see
 
 from __future__ import annotations
 
+import gzip
 import posixpath
 import re
 import shutil
 import tarfile
 import tempfile
+import time
 import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -399,7 +401,10 @@ def materialize(
     is left out of the returned mapping and reported as a note;
     processing continues with the remaining members. If *archive_path*
     itself cannot be opened, ``({}, [note])`` is returned and no member
-    is touched.
+    is touched -- after a brief retry ladder for transient environmental
+    errors (see :func:`_open_with_retry`). A close that fails once the
+    sweep is done is likewise only noted, never raised: the extracted
+    members are already safely on disk (see :func:`_close_noting`).
 
     For an ``.enex`` export this dispatches to :func:`_materialize_enex`
     instead, which incurs a full re-parse of the export -- see there for
@@ -417,22 +422,26 @@ def materialize(
     is_zip = _is_zip_archive(archive_path)
 
     try:
-        # The handle is context-managed by the ``with opener:`` below;
-        # assignment and open are split only so open-time damage can be
+        # Assignment and open are split only so open-time damage can be
         # reported as a note instead of aborting the whole batch.
-        opener = (zipfile.ZipFile(archive_path) if is_zip
-                  else tarfile.open(archive_path, mode="r:*"))  # noqa: SIM115
+        opener = _open_with_retry(
+            lambda: (zipfile.ZipFile(archive_path) if is_zip
+                     else tarfile.open(archive_path, mode="r:*")))  # noqa: SIM115
     except Exception as exc:
         # Broad for the same reason as in list_members: opening a
         # compressed tar already reads its first blocks, so mid-stream
         # damage can surface here as a raw decompression error.
         return {}, [f"cannot open archive {archive_path}: {exc}"]
 
-    with opener:
+    # Not ``with opener:``, because a close that fails must not discard
+    # the extraction it concludes -- see _close_noting.
+    try:
         for index, member in enumerate(members):
             dest_path = dest_dir / _dest_filename(index, member.member_name)
             _extract_member(opener, is_zip, member, dest_path, extracted,
                              notes)
+    finally:
+        _close_noting(opener, archive_path, notes.append)
 
     return extracted, notes
 
@@ -452,6 +461,64 @@ class _MemberReadError(Exception):
 
 class _MemberWriteError(Exception):
     """Internal: a member's payload could not be written to *dest_dir*."""
+
+
+_OPEN_RETRY_DELAYS = (2.0, 5.0)
+"""Seconds slept between archive-open attempts (so three attempts total).
+
+Kept short on purpose: while a retry sleeps, a cooperative cancellation
+request cannot be observed, so the whole ladder must stay well under
+what a user would read as "the app hung".
+"""
+
+
+def _open_with_retry[T](open_call: Callable[[], T]) -> T:
+    """Call *open_call*, retrying transient ``OSError``s a few times.
+
+    Opening an archive on a flaky network mount (observed: smbfs during
+    a reconnection window) can fail with an environmental ``OSError``
+    such as ``EINVAL`` or ``EIO`` that a moment later would not recur.
+    Unlike a mid-read failure -- whose retry would mean re-streaming a
+    compressed archive from its first byte -- retrying an *open* loses
+    no work at all, so a few seconds of patience here can save re-running
+    an hours-long sweep.
+
+    Deterministic failures (missing file, permissions, not-a-file,
+    corrupt gzip signature) are re-raised immediately: waiting cannot
+    fix them. Anything else ``OSError``-shaped sleeps through
+    :data:`_OPEN_RETRY_DELAYS` between attempts; the final attempt's
+    exception propagates untouched, so every existing caller keeps its
+    own note-degrading handler unchanged.
+    """
+    for delay in _OPEN_RETRY_DELAYS:
+        try:
+            return open_call()
+        except (FileNotFoundError, PermissionError, IsADirectoryError,
+                NotADirectoryError, gzip.BadGzipFile):
+            raise
+        except OSError:
+            time.sleep(delay)
+    return open_call()
+
+
+def _close_noting(handle: zipfile.ZipFile | tarfile.TarFile | IO[bytes],
+                  archive_path: Path,
+                  on_note: Callable[[str], None] | None) -> None:
+    """Close *handle*, degrading a failed close to a note.
+
+    On an SMB mount a handle held open for hours can go stale, making
+    the final ``close(2)`` fail (observed as ``EINVAL``) even though
+    every read through it succeeded. By that point all useful work is
+    done -- the extracted bytes are on local disk -- so raising would
+    throw a completed extraction away over housekeeping. The worst a
+    swallowed close can cost is one leaked descriptor.
+    """
+    try:
+        handle.close()
+    except OSError as exc:
+        _emit(on_note,
+              f"closing archive failed (extracted data intact): "
+              f"{archive_path}: {exc}")
 
 
 def _emit(on_note: Callable[[str], None] | None, note: str) -> None:
@@ -608,7 +675,7 @@ def _iter_zip_materialized(
     """
     total = _archive_size(archive_path)
     try:
-        zf = zipfile.ZipFile(archive_path)
+        zf = _open_with_retry(lambda: zipfile.ZipFile(archive_path))
     except Exception as exc:
         # Same wording as list_members': to the user an archive that
         # cannot be opened and one that cannot be read past its first
@@ -618,7 +685,9 @@ def _iter_zip_materialized(
 
     done = 0
     index = 0
-    with zf:
+    # Not ``with zf:``, because a close that fails must not discard the
+    # sweep it concludes -- see _close_noting.
+    try:
         for info in zf.infolist():
             if info.is_dir() or not _is_target_name(info.filename):
                 continue
@@ -642,6 +711,8 @@ def _iter_zip_materialized(
             if extracted:
                 index += 1
                 yield member, dest_path
+    finally:
+        _close_noting(zf, archive_path, on_note)
 
 
 def _walk_tar_stream(
@@ -733,11 +804,13 @@ def _iter_tar_materialized(
     """
     total = _archive_size(archive_path)
     try:
-        raw = archive_path.open("rb")
+        raw = _open_with_retry(lambda: archive_path.open("rb"))
     except OSError as exc:
         _emit(on_note, f"cannot read archive {archive_path}: {exc}")
         return
-    with raw:
+    # Not ``with raw:``/``with tf:``, because a close that fails must
+    # not discard the sweep it concludes -- see _close_noting.
+    try:
         try:
             tf = tarfile.open(fileobj=raw, mode="r|*")  # noqa: SIM115
         except Exception as exc:
@@ -746,9 +819,13 @@ def _iter_tar_materialized(
             # damage can surface here as a raw decompression error.
             _emit(on_note, f"cannot read archive {archive_path}: {exc}")
             return
-        with tf:
+        try:
             yield from _walk_tar_stream(tf, raw, archive_path, dest_dir,
                                         on_note, progress, total)
+        finally:
+            _close_noting(tf, archive_path, on_note)
+    finally:
+        _close_noting(raw, archive_path, on_note)
 
 
 def iter_materialized_members(
@@ -807,7 +884,10 @@ def iter_materialized_members(
     noted as ``"cannot read archive ..."`` and the walk ends -- the
     members yielded before the damage are still perfectly usable. An
     archive that cannot be opened at all yields nothing and produces
-    that same note.
+    that same note, after a brief retry ladder for transient
+    environmental errors (see :func:`_open_with_retry`); a close that
+    fails once the sweep is done is only noted, never raised (see
+    :func:`_close_noting`).
 
     Never raises on its own account: every archive-level and
     member-level failure degrades to a note. The one exception that does

@@ -288,7 +288,10 @@ class MultiRepairWorker(QThread):
         own subdirectory of *tmp_root*, one open per archive, so names
         never collide across archives. A member whose extraction fails
         too is simply absent from *material_paths* (its donor is then
-        dropped when the merge's sources are assembled).
+        dropped when the merge's sources are assembled) -- and so is
+        every member of an archive whose materialization raises an
+        environmental :class:`OSError`, which is contained per archive
+        for the same reason.
 
         The cache is only ever read here, on the worker thread -- see
         :meth:`__init__` for why no other thread is touching it at the
@@ -318,7 +321,18 @@ class MultiRepairWorker(QThread):
             self._raise_if_cancelled()
             member_dir = tmp_root / f"archive{index:04d}"
             member_dir.mkdir()
-            extracted, _notes = materialize(archive_path, members, member_dir)
+            try:
+                extracted, _notes = materialize(archive_path, members,
+                                                member_dir)
+            except OSError:
+                # materialize() degrades everything it anticipates to
+                # notes, so an OSError landing here is environmental
+                # (observed: stale-SMB-handle EINVAL). One archive's
+                # donors must not sink the whole batch: its members stay
+                # absent from material_paths, and each affected merge
+                # proceeds on its remaining sources (see _run_one_merge).
+                traceback.print_exc()
+                continue
             for member, dest_path in extracted.items():
                 material_paths[member] = dest_path
                 display[dest_path] = member.display()

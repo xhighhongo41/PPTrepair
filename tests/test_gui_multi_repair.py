@@ -597,6 +597,42 @@ def test_multi_worker_without_a_cache_extracts_the_donor_itself(
         assert display[donor_path] == material.display()
 
 
+def test_donor_materialize_oserror_skips_archive_and_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An OSError raised while materializing an archive donor is contained
+    per archive: the run still completes (finished_ok, not failed), the
+    affected merge's outcome is still returned, and the traceback reaches
+    stderr."""
+    root = _mkroot(tmp_path)
+    target, _archive_path, material, _original = _mined_archive_donor(root)
+    request = _archive_merge_request(target, material, root)
+
+    def _boom(*args: object, **kwargs: object) -> object:
+        raise OSError(22, "Invalid argument")
+
+    monkeypatch.setattr(repair_workers, "materialize", _boom)
+    # No cache is passed, so the donor cannot be served from a session
+    # cache and _materialize_donors must actually call materialize().
+    worker = MultiRepairWorker(request)
+    finished: list[object] = []
+    failed: list[str] = []
+    worker.finished_ok.connect(finished.append)
+    worker.failed.connect(failed.append)
+
+    # Called directly on this thread (not started as a QThread), so the
+    # run is synchronous and capsys can capture stderr from it.
+    worker.run()
+
+    captured = capsys.readouterr()
+    assert failed == []
+    assert len(finished) == 1
+    [item] = finished[0].merges
+    assert item.target == target
+    assert "OSError" in captured.err
+
+
 def test_multi_worker_donorless_target_falls_back_to_single_repair(
     qtbot: QtBot, tmp_path: Path
 ) -> None:
