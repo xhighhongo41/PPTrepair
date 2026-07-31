@@ -254,6 +254,9 @@ msgstr ""
 msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
 msgstr ""
 
+msgid "Ignore hidden files (names starting with '.')"
+msgstr ""
+
 msgid "Images carved: {n}"
 msgstr ""
 
@@ -599,6 +602,9 @@ msgstr ""
 msgid "Skipped: {n} file(s) over the size limit"
 msgstr ""
 
+msgid "Skipped: {n} hidden file(s)"
+msgstr ""
+
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr ""
 
@@ -795,6 +801,9 @@ msgid "same size only"
 msgstr ""
 
 msgid "skipped (cloud-only)"
+msgstr ""
+
+msgid "skipped (hidden)"
 msgstr ""
 
 msgid "skipped (legacy .ppt)"

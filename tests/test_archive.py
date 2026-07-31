@@ -25,6 +25,7 @@ import pptrepair.archive
 from pptrepair.archive import (
     ArchiveMember,
     is_archive,
+    is_hidden_member,
     iter_materialized_members,
     list_members,
     materialize,
@@ -793,6 +794,25 @@ def test_iter_zip_close_failure_yields_all_members_and_notes(
     for member, dest_path in pairs:
         assert dest_path.read_bytes() == expected[member.member_name]
     assert any("closing archive failed" in note for note in notes)
+
+
+# --- is_hidden_member ---------------------------------------------------
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("._x.pptx", True),
+    (".x.pptx", True),
+    ("dir/._x.pptx", True),
+    ("__MACOSX/._x.pptx", True),
+    ("x.pptx", False),
+    ("dir/x.pptx", False),
+    (".hidden/x.pptx", False),
+])
+def test_is_hidden_member(name: str, expected: bool) -> None:
+    """Only the member's own basename is checked (via posixpath), so a
+    member sitting inside a dot-prefixed directory is not itself
+    considered hidden -- only its own leading dot matters."""
+    assert is_hidden_member(name) is expected
 
 
 # --- is_archive / ArchiveMember.display -------------------------------------

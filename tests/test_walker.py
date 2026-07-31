@@ -408,6 +408,131 @@ def test_discover_targets_max_file_bytes_skips_oversize_placeholder(
     assert cloud_file not in result.download_targets
 
 
+# --- discover_targets: ignore_hidden ----------------------------------------
+
+
+def test_discover_targets_skips_hidden_pptx_by_default(tmp_path: Path) -> None:
+    """A hidden .pptx -- both a leading-dot name and a macOS AppleDouble
+    ``._`` name -- lands in skipped_hidden, not targets, under the
+    default ignore_hidden=True."""
+    root = tmp_path / "root"
+    root.mkdir()
+    apple_double = root / "._deck.pptx"
+    dotted = root / ".deck.pptx"
+    normal = root / "deck.pptx"
+    for path in (apple_double, dotted, normal):
+        path.write_bytes(b"data")
+
+    result = discover_targets([root])
+
+    assert set(result.skipped_hidden) == {apple_double, dotted}
+    assert result.targets == [normal]
+
+
+def test_discover_targets_skips_hidden_legacy_ppt_by_default(
+        tmp_path: Path) -> None:
+    """A hidden legacy .ppt is bucketed as skipped_hidden, not
+    skipped_legacy."""
+    root = tmp_path / "root"
+    root.mkdir()
+    hidden_legacy = root / ".old.ppt"
+    hidden_legacy.write_bytes(b"data")
+
+    result = discover_targets([root])
+
+    assert result.skipped_hidden == [hidden_legacy]
+    assert result.skipped_legacy == []
+
+
+def test_discover_targets_skips_hidden_archive_when_collecting(
+        tmp_path: Path) -> None:
+    """With collect_archives=True, a hidden backup archive is bucketed as
+    skipped_hidden, not archives."""
+    root = tmp_path / "root"
+    root.mkdir()
+    hidden_archive = root / ".backup.zip"
+    hidden_archive.write_bytes(b"data")
+    normal_archive = root / "backup.zip"
+    normal_archive.write_bytes(b"data")
+
+    result = discover_targets([root], collect_archives=True)
+
+    assert result.skipped_hidden == [hidden_archive]
+    assert result.archives == [normal_archive]
+
+
+def test_discover_targets_ignore_hidden_false_restores_legacy_behaviour(
+        tmp_path: Path) -> None:
+    """With ignore_hidden=False, hidden PowerPoint files, a hidden legacy
+    .ppt and (with collect_archives) a hidden archive land in their
+    ordinary buckets exactly as their non-hidden counterparts do."""
+    root = tmp_path / "root"
+    root.mkdir()
+    apple_double = root / "._deck.pptx"
+    dotted = root / ".deck.pptx"
+    hidden_legacy = root / ".old.ppt"
+    hidden_archive = root / ".backup.zip"
+    for path in (apple_double, dotted, hidden_legacy, hidden_archive):
+        path.write_bytes(b"data")
+
+    result = discover_targets([root], collect_archives=True,
+                              ignore_hidden=False)
+
+    assert set(result.targets) == {apple_double, dotted}
+    assert result.skipped_legacy == [hidden_legacy]
+    assert result.archives == [hidden_archive]
+    assert result.skipped_hidden == []
+
+
+def test_discover_targets_ignores_unrelated_hidden_file_silently(
+        tmp_path: Path) -> None:
+    """A hidden file with an unrelated suffix (e.g. .DS_Store) is dropped
+    silently: it appears in no bucket, and no error is recorded."""
+    root = tmp_path / "root"
+    root.mkdir()
+    ds_store = root / ".DS_Store"
+    ds_store.write_bytes(b"data")
+
+    result = discover_targets([root])
+
+    assert result.targets == []
+    assert result.skipped_hidden == []
+    assert result.skipped_legacy == []
+    assert result.errors == []
+
+
+def test_discover_targets_descends_into_hidden_directory(
+        tmp_path: Path) -> None:
+    """A hidden directory is still descended into; an ordinarily named
+    .pptx inside it is discovered as a normal target."""
+    root = tmp_path / "root"
+    hidden_dir = root / ".backup"
+    hidden_dir.mkdir(parents=True)
+    inner = hidden_dir / "deck.pptx"
+    inner.write_bytes(b"data")
+
+    result = discover_targets([root])
+
+    assert result.targets == [inner]
+    assert result.skipped_hidden == []
+
+
+def test_discover_targets_hidden_file_as_explicit_root(
+        tmp_path: Path) -> None:
+    """A hidden file named directly as a root is subject to the same
+    ignore_hidden rule as one found while walking a directory."""
+    hidden_file = tmp_path / ".deck.pptx"
+    hidden_file.write_bytes(b"data")
+
+    default_result = discover_targets([hidden_file])
+    assert default_result.skipped_hidden == [hidden_file]
+    assert default_result.targets == []
+
+    unfiltered_result = discover_targets([hidden_file], ignore_hidden=False)
+    assert unfiltered_result.targets == [hidden_file]
+    assert unfiltered_result.skipped_hidden == []
+
+
 # --- discover_targets: error handling ---------------------------------------
 
 

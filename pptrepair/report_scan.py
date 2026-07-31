@@ -116,6 +116,10 @@ def _scan_summary_lines(result: ScanResult, tr: Callable[[str], str],
         lines.append(
             tr("Skipped: {n} file(s) over the size limit").format(
                 n=oversize_count))
+    hidden_count = len(result.walk.skipped_hidden)
+    if hidden_count > 0:
+        lines.append(
+            tr("Skipped: {n} hidden file(s)").format(n=hidden_count))
 
     if include_files:
         corrupted = result.corrupted()
@@ -208,7 +212,8 @@ def render_scan_json(result: ScanResult) -> str:
             "verdicts": {str: int, ...},      # non-zero only
             "cfb_files": int,
             "skipped": {"legacy": int, "office_temp": int,
-                         "cloud_placeholder": int, "oversize": int},
+                         "cloud_placeholder": int, "oversize": int,
+                         "hidden": int},
             "errors": int,
             "unknown_pattern_files": int,
             "fingerprints_written": int,
@@ -232,6 +237,7 @@ def render_scan_json(result: ScanResult) -> str:
           "skipped_legacy": [str, ...],
           "skipped_temp": [str, ...],
           "skipped_oversize": [str, ...],
+          "skipped_hidden": [str, ...],
           "errors": [{"path": str, "error": str}, ...],
           "report_dir": str | null,
           "schema_version": 4,        # only with --search-archives
@@ -279,6 +285,7 @@ def _scan_payload(result: ScanResult) -> dict:
                 "office_temp": len(result.walk.skipped_temp),
                 "cloud_placeholder": len(result.walk.skipped_cloud),
                 "oversize": len(result.walk.skipped_oversize),
+                "hidden": len(result.walk.skipped_hidden),
             },
             "errors": len(errors),
             "unknown_pattern_files": len(result.unknown_pattern()),
@@ -296,6 +303,8 @@ def _scan_payload(result: ScanResult) -> dict:
         "skipped_temp": [str(path) for path in result.walk.skipped_temp],
         "skipped_oversize": [
             str(path) for path in result.walk.skipped_oversize],
+        "skipped_hidden": [
+            str(path) for path in result.walk.skipped_hidden],
         "errors": [
             {"path": str(path), "error": message}
             for path, message in errors

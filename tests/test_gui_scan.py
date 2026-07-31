@@ -43,6 +43,7 @@ from pptrepair.scan import (
     diagnose_archive_materials,
     scan_paths,
 )
+from pptrepair.walker import WalkResult
 
 #: Media payload large enough that a 256 KiB head zero-fill still leaves
 #: surviving tail bytes (classified head_zero_fill, not empty).
@@ -175,6 +176,28 @@ def test_scan_worker_mines_archive_without_roots(
     assert len(mined) == 1
     assert "::" in result.materials[0].display()
     assert worker.wait(5000)
+
+
+def test_scan_worker_ignore_hidden_filters_dropped_archive_members(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """The request's ignore_hidden reaches the dropped-archive mining
+    path -- a direct diagnose_archive_materials call, not scan_paths --
+    so a hidden AppleDouble member is dropped by default and restored
+    with ignore_hidden=False."""
+    archive = _write_targz_with_pptx(
+        tmp_path / "backup.tar.gz", "backup/deck.pptx", "backup/._deck.pptx")
+
+    default_result = _run_worker(
+        qtbot, ScanWorker(ScanRequest(roots=(), archives=(archive,))))
+    assert [m.member.member_name for m in default_result.materials] == [
+        "backup/deck.pptx"]
+
+    unfiltered_result = _run_worker(
+        qtbot, ScanWorker(ScanRequest(roots=(), archives=(archive,),
+                                      ignore_hidden=False)))
+    assert {m.member.member_name for m in unfiltered_result.materials} == {
+        "backup/deck.pptx", "backup/._deck.pptx"}
 
 
 def test_scan_worker_cancellation_stops_early(
@@ -664,6 +687,18 @@ def test_parallel_scan_result_matches_the_sequential_one(
     assert _device_threads() == []
 
 
+def test_merge_walk_results_merges_skipped_hidden(tmp_path: Path) -> None:
+    """merge_walk_results concatenates skipped_hidden in input order too,
+    exactly like every other discovery bucket."""
+    first = WalkResult(skipped_hidden=[tmp_path / "a" / ".one.pptx"])
+    second = WalkResult(skipped_hidden=[tmp_path / "b" / ".two.pptx"])
+
+    merged = scan_parallel.merge_walk_results([first, second])
+
+    assert merged.skipped_hidden == [
+        tmp_path / "a" / ".one.pptx", tmp_path / "b" / ".two.pptx"]
+
+
 def test_parallel_archives_only_request_keeps_scan_none(
     qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -995,6 +1030,17 @@ def test_run_options_disabled_while_running(
     assert run_options._size_spin.isEnabled()
 
 
+def test_run_options_ignore_hidden_defaults_true(
+    run_options: RunOptionsPanel,
+) -> None:
+    """The "Ignore hidden files" checkbox starts checked, and unchecking
+    it is reflected by the accessor."""
+    assert run_options.ignore_hidden() is True
+
+    run_options._hidden_check.setChecked(False)
+    assert run_options.ignore_hidden() is False
+
+
 # --------------------------------------------------------------------------
 # ScanResultsModel
 # --------------------------------------------------------------------------
@@ -1043,6 +1089,23 @@ def test_results_model_empty_result_has_no_rows() -> None:
     model = ScanResultsModel()
     model.set_result(GuiScanResult(scan=None))
     assert model.rowCount() == 0
+
+
+def test_results_model_shows_a_hidden_skip_row(tmp_path: Path) -> None:
+    """A hidden .pptx -- skipped by default -- renders as a grey "skipped
+    (hidden)" row, not among the diagnosed outcomes."""
+    root = _mkroot(tmp_path)
+    _write_normal(root / ".hidden.pptx", seed=1)
+
+    scan_result = scan_paths([root])
+    gui_result = GuiScanResult(scan=scan_result)
+
+    model = ScanResultsModel()
+    model.set_result(gui_result)
+
+    assert scan_result.outcomes == []
+    assert model.rowCount() == 1
+    assert _display(model, 0, 1) == "skipped (hidden)"
 
 
 # --------------------------------------------------------------------------
@@ -1133,3 +1196,21 @@ def test_scan_populates_results_panel(
     assert not main_window._results_panel.isHidden()
     assert main_window._results_panel._model.rowCount() > 0
     assert main_window._scan_button.isEnabled()
+
+
+def test_scan_request_forwards_ignore_hidden_from_run_options(
+    main_window: MainWindow, qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Unchecking "Ignore hidden files" on the run-options panel reaches
+    the built ScanRequest, so a hidden .pptx is diagnosed rather than
+    silently skipped."""
+    root = _mkroot(tmp_path)
+    _write_normal(root / ".hidden.pptx", seed=1)
+    main_window._sources.add_paths([root])
+    main_window._run_options._hidden_check.setChecked(False)
+
+    main_window._start_scan()
+
+    qtbot.waitUntil(lambda: main_window._scan_worker is None, timeout=15000)
+
+    assert main_window._results_panel._model.rowCount() == 1

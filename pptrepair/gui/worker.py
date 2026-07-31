@@ -86,6 +86,9 @@ class ScanRequest:
     :ivar max_file_bytes: per-file size ceiling; a larger file is
         skipped (counted in ``ScanResult.walk.skipped_oversize``).
         ``None`` disables the limit.
+    :ivar ignore_hidden: skip hidden files/archive members (name
+        starting with ``.``), forwarded to
+        :func:`~pptrepair.scan.scan_paths`.
     """
 
     roots: tuple[Path, ...]
@@ -93,6 +96,7 @@ class ScanRequest:
     follow_symlinks: bool = False
     allow_download: bool = False
     max_file_bytes: int | None = None
+    ignore_hidden: bool = True
 
 
 @dataclass
@@ -320,6 +324,7 @@ class ScanWorker(QThread):
                 follow_symlinks=self._request.follow_symlinks,
                 allow_download=self._request.allow_download,
                 max_file_bytes=self._request.max_file_bytes,
+                ignore_hidden=self._request.ignore_hidden,
                 search_archives=False,
                 progress=self._on_file_scanned,
                 on_download=self._on_download,
@@ -338,6 +343,7 @@ class ScanWorker(QThread):
                 material_progress=self._on_material_scanned,
                 cache=self._cache,
                 archive_progress=self._on_archive_progress,
+                ignore_hidden=self._request.ignore_hidden,
             )
 
         return GuiScanResult(scan=scan_result, materials=materials,
@@ -492,6 +498,7 @@ class ScanWorker(QThread):
             follow_symlinks=self._request.follow_symlinks,
             allow_download=self._request.allow_download,
             max_file_bytes=self._request.max_file_bytes,
+            ignore_hidden=self._request.ignore_hidden,
             search_archives=False,
             progress=relay.on_file_scanned,
             on_download=relay.on_download,
@@ -515,6 +522,7 @@ class ScanWorker(QThread):
             material_progress=relay.on_material_scanned,
             cache=self._cache,
             archive_progress=relay.on_archive_progress,
+            ignore_hidden=self._request.ignore_hidden,
         )
 
     def _pump_events(self, events: queue.Queue[scan_parallel.ScanEvent],

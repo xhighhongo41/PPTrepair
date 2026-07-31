@@ -108,6 +108,7 @@ def merge_walk_results(walks: Sequence[WalkResult]) -> WalkResult:
         merged.archives.extend(walk.archives)
         merged.errors.extend(walk.errors)
         merged.skipped_oversize.extend(walk.skipped_oversize)
+        merged.skipped_hidden.extend(walk.skipped_hidden)
     return merged
 
 

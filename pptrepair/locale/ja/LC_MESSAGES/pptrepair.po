@@ -36,6 +36,9 @@ msgstr "ヒント: 既存の出力を上書きするには --force を指定し�
 msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
 msgstr "ヒント: --report DIR を付けて再実行すると、共有可能な診断用フィンガープリントを保存できます。"
 
+msgid "Ignore hidden files (names starting with '.')"
+msgstr "隠しファイル(「.」で始まる名前)を無視"
+
 msgid "Last Modified By"
 msgstr "最終更新者"
 
@@ -86,6 +89,9 @@ msgstr "スキップ: Officeの一時ファイル {n} 件"
 
 msgid "Skipped: {n} file(s) over the size limit"
 msgstr "スキップ: サイズ上限を超えるファイル {n} 件"
+
+msgid "Skipped: {n} hidden file(s)"
+msgstr "スキップ: 隠しファイル {n} 件"
 
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "スキップ: レガシー .ppt ファイル {n} 件"
@@ -683,6 +689,9 @@ msgstr "pptrepair: エラー: PySide6 がインストールされていません
 
 msgid "skipped (cloud-only)"
 msgstr "スキップ(クラウド専用)"
+
+msgid "skipped (hidden)"
+msgstr "スキップ(隠しファイル)"
 
 msgid "skipped (legacy .ppt)"
 msgstr "スキップ(レガシー .ppt)"

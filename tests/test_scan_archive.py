@@ -980,3 +980,115 @@ def test_cancellation_still_propagates_through_oserror_containment(
             [archive_path], cache=cache, material_progress=_cancel_on_first)
 
     assert cache.lookup(archive_path) is None
+
+
+# --- 13. ignore_hidden: hidden archive members dropped at consumption --------
+
+
+def test_ignore_hidden_default_drops_hidden_member_and_progress(
+    tmp_path: Path
+) -> None:
+    """Without a cache, a hidden member (AppleDouble-style dot name) is
+    dropped from both the returned materials and material_progress under
+    the default ignore_hidden=True; with ignore_hidden=False both members
+    come through."""
+    visible = build_minimal_pptx(num_slides=1, media_bytes=20_000, seed=0)
+    hidden = build_minimal_pptx(num_slides=1, media_bytes=20_000, seed=1)
+    archive_path = _mkroot(tmp_path) / "backup.zip"
+    _write_zip(archive_path, {
+        "backup/deck.pptx": visible,
+        "backup/._deck.pptx": hidden,
+    })
+
+    calls: list[scan_module.ArchiveMaterial] = []
+    materials, notes = scan_module.diagnose_archive_materials(
+        [archive_path], material_progress=calls.append)
+
+    assert [m.member.member_name for m in materials] == ["backup/deck.pptx"]
+    assert calls == materials
+    assert notes == []
+
+    calls_all: list[scan_module.ArchiveMaterial] = []
+    all_materials, all_notes = scan_module.diagnose_archive_materials(
+        [archive_path], ignore_hidden=False,
+        material_progress=calls_all.append)
+
+    assert {m.member.member_name for m in all_materials} == {
+        "backup/deck.pptx", "backup/._deck.pptx"}
+    assert calls_all == all_materials
+    assert all_notes == []
+
+
+def test_ignore_hidden_cache_independent_replay_without_remining(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The session cache always stores the full sweep, hidden members
+    included: toggling ignore_hidden between two calls against the same
+    cache serves the second call entirely from the cache, with no
+    archive re-read."""
+    visible = build_minimal_pptx(num_slides=1, media_bytes=20_000, seed=0)
+    hidden = build_minimal_pptx(num_slides=1, media_bytes=20_000, seed=1)
+    archive_path = _mkroot(tmp_path) / "backup.zip"
+    _write_zip(archive_path, {
+        "backup/deck.pptx": visible,
+        "backup/._deck.pptx": hidden,
+    })
+    cache = scan_module.ArchiveMaterialCache(tmp_path / "cache")
+
+    first, first_notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache)
+    assert [m.member.member_name for m in first] == ["backup/deck.pptx"]
+
+    def _forbidden_re_mine(archive_path: Path, dest_dir: Path, *,
+                           on_note=None, progress=None):
+        """Fail loudly if the cached archive is ever re-mined."""
+        raise AssertionError("re-mined")
+
+    monkeypatch.setattr(scan_module, "iter_materialized_members",
+                        _forbidden_re_mine)
+
+    second, second_notes = scan_module.diagnose_archive_materials(
+        [archive_path], cache=cache, ignore_hidden=False)
+
+    assert {m.member.member_name for m in second} == {
+        "backup/deck.pptx", "backup/._deck.pptx"}
+    assert second_notes == first_notes == []
+
+
+def test_scan_paths_e2e_hidden_disk_file_and_archive_member(
+    tmp_path: Path
+) -> None:
+    """End to end via scan_paths: with the default ignore_hidden=True a
+    hidden on-disk .pptx is skipped_hidden (not scanned) and a hidden
+    archive member is dropped from materials; with ignore_hidden=False
+    both surface in their ordinary places."""
+    root = _mkroot(tmp_path)
+    hidden_disk = _write(root, ".hidden_deck.pptx",
+                         build_minimal_pptx(num_slides=1, media_bytes=20_000,
+                                             seed=0))
+    visible_disk = _write(root, "deck.pptx",
+                          build_minimal_pptx(num_slides=1, media_bytes=20_000,
+                                              seed=1))
+    archive_path = root / "backup.zip"
+    _write_zip(archive_path, {
+        "backup/deck.pptx": build_minimal_pptx(num_slides=1,
+                                                media_bytes=20_000, seed=2),
+        "backup/._deck.pptx": build_minimal_pptx(num_slides=1,
+                                                 media_bytes=20_000, seed=3),
+    })
+
+    default_result = scan_module.scan_paths([root], search_archives=True)
+
+    assert hidden_disk in default_result.walk.skipped_hidden
+    assert hidden_disk not in default_result.walk.targets
+    assert visible_disk in default_result.walk.targets
+    assert [m.member.member_name for m in default_result.materials] == [
+        "backup/deck.pptx"]
+
+    unfiltered_result = scan_module.scan_paths(
+        [root], search_archives=True, ignore_hidden=False)
+
+    assert unfiltered_result.walk.skipped_hidden == []
+    assert hidden_disk in unfiltered_result.walk.targets
+    assert {m.member.member_name for m in unfiltered_result.materials} == {
+        "backup/deck.pptx", "backup/._deck.pptx"}

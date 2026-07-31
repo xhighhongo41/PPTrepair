@@ -261,6 +261,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="skip files larger than SIZE (bytes or with "
                            "K/M/G/T suffix, e.g. 500M, 2G; default: no "
                            "limit)")
+    scan.add_argument("--include-hidden", action="store_true",
+                      help="also examine hidden files (names starting "
+                           "with '.'), which are skipped by default")
 
     repair_all = subparsers.add_parser(
         "repair-all",
@@ -336,6 +339,10 @@ def build_parser() -> argparse.ArgumentParser:
                             help="skip files larger than SIZE (bytes or "
                                  "with K/M/G/T suffix, e.g. 500M, 2G; "
                                  "default: no limit)")
+    repair_all.add_argument("--include-hidden", action="store_true",
+                            help="also examine hidden files (names "
+                                 "starting with '.'), which are skipped "
+                                 "by default")
 
     subparsers.add_parser(
         "gui",
@@ -870,13 +877,15 @@ def main(argv: list[str] | None = None) -> int:
         return run_scan(args.roots, args.report, args.force, args.show_all,
                         args.lang, args.json_output, args.follow_symlinks,
                         args.include_filenames, args.allow_download,
-                        args.search_archives, args.max_file_size)
+                        args.search_archives, args.max_file_size,
+                        ignore_hidden=not args.include_hidden)
     if args.command == "repair-all":
         return run_repair_all(
             args.roots, args.output_dir, args.in_place, args.report,
             args.force, args.show_all, args.dry_run, args.lang,
             args.json_output, args.follow_symlinks, args.include_filenames,
-            args.allow_download, args.search_archives, args.max_file_size)
+            args.allow_download, args.search_archives, args.max_file_size,
+            ignore_hidden=not args.include_hidden)
     if args.command == "gui":
         return run_gui()
     parser.error(f"unknown command: {args.command}")

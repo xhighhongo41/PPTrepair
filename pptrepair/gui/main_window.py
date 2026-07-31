@@ -500,6 +500,7 @@ class MainWindow(QMainWindow):
             follow_symlinks=self._settings.follow_symlinks(),
             allow_download=self._run_options.allow_download(),
             max_file_bytes=self._run_options.max_file_bytes(),
+            ignore_hidden=self._run_options.ignore_hidden(),
         )
 
         self._files_diagnosed = 0

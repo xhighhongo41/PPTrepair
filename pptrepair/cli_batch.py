@@ -28,7 +28,8 @@ def run_scan(roots: list[str], report: str | None, force: bool,
              show_all: bool, lang: str, json_output: bool,
              follow_symlinks: bool, include_filenames: bool,
              allow_download: bool, search_archives: bool,
-             max_file_bytes: int | None = None) -> int:
+             max_file_bytes: int | None = None, *,
+             ignore_hidden: bool = True) -> int:
     """Scan directory trees, print the results, and return an exit code.
 
     Implementation requirements:
@@ -37,7 +38,11 @@ def run_scan(roots: list[str], report: str | None, force: bool,
       through, including *max_file_bytes* (files over the limit are
       excluded from discovery and counted in the scan's
       ``skipped_oversize``; left at its default ``None`` this is a
-      no-op).
+      no-op) and *ignore_hidden* (hidden files -- name starting with
+      ``.`` -- are excluded from discovery and counted in the scan's
+      ``skipped_hidden``; left at its default ``True`` this matches
+      ``scan_paths``'s own default, so ``--include-hidden`` is what
+      flips it to False).
       :class:`pptrepair.repair.OutputExistsError` (existing ``--report``
       dir without ``--force``) prints the error plus a translated
       ``--force`` hint to stderr and returns 2, mirroring ``repair``.
@@ -97,6 +102,7 @@ def run_scan(roots: list[str], report: str | None, force: bool,
             include_filenames=include_filenames,
             search_archives=search_archives,
             max_file_bytes=max_file_bytes,
+            ignore_hidden=ignore_hidden,
             progress=None if json_output else _report_progress,
             on_download=_announce_download,
         )
@@ -138,7 +144,8 @@ def run_repair_all(roots: list[str], output_dir: str | None, in_place: bool,
                    dry_run: bool, lang: str, json_output: bool,
                    follow_symlinks: bool, include_filenames: bool,
                    allow_download: bool, search_archives: bool,
-                   max_file_bytes: int | None = None) -> int:
+                   max_file_bytes: int | None = None, *,
+                   ignore_hidden: bool = True) -> int:
     """Diagnose and repair directory trees, print the results, and return
     an exit code.
 
@@ -151,11 +158,12 @@ def run_repair_all(roots: list[str], output_dir: str | None, in_place: bool,
       needs no ``--force`` (unlike ``--report``): per-artifact existence
       is checked by :func:`pptrepair.batch.repair_paths` itself.
     * Call :func:`pptrepair.batch.repair_paths` with the options mapped
-      through, including *max_file_bytes* (mirroring ``run_scan``'s own
-      no-op default); :class:`pptrepair.repair.OutputExistsError` (an
-      existing ``--report`` dir without ``--force``) prints the error
-      plus a translated ``--force`` hint to stderr and returns 2,
-      mirroring ``repair``/``scan``.
+      through, including *max_file_bytes* and *ignore_hidden* (mirroring
+      ``run_scan``'s own no-op / True defaults);
+      :class:`pptrepair.repair.OutputExistsError` (an existing
+      ``--report`` dir without ``--force``) prints the error plus a
+      translated ``--force`` hint to stderr and returns 2, mirroring
+      ``repair``/``scan``.
     * Text mode streams phase 1 exactly like ``run_scan``'s own
       ``progress`` callback (corrupted files always, intact ones only
       with *show_all*, pipeline errors to stderr) and additionally
@@ -246,6 +254,7 @@ def run_repair_all(roots: list[str], output_dir: str | None, in_place: bool,
             include_filenames=include_filenames,
             search_archives=search_archives,
             max_file_bytes=max_file_bytes,
+            ignore_hidden=ignore_hidden,
             lang=lang,
             progress=None if json_output else _report_progress,
             repair_progress=None if json_output else _repair_progress,

@@ -62,7 +62,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
-from pptrepair.walker import TARGET_SUFFIXES, TEMP_PREFIX
+from pptrepair.walker import HIDDEN_PREFIX, TARGET_SUFFIXES, TEMP_PREFIX
 
 #: Archive name suffixes handled by this module (matched
 #: case-insensitively against the full file name, since several of
@@ -146,6 +146,23 @@ def _is_target_name(name: str) -> bool:
     ``TARGET_SUFFIXES``, so no separate nesting check is needed.
     """
     return posixpath.splitext(name)[1].lower() in TARGET_SUFFIXES
+
+
+def is_hidden_member(name: str) -> bool:
+    """Return True when *name*'s basename starts with ``.``.
+
+    Archive member names use ``/`` separators on every platform, so the
+    basename is taken with :mod:`posixpath`. Catches macOS AppleDouble
+    entries (``._foo.pptx``, including those filed under ``__MACOSX/``
+    in Finder-made zips) and other hidden files, which are metadata or
+    importer debris rather than presentations.
+
+    Enumeration and mining in this module deliberately do NOT apply
+    this predicate: the session cache must stay independent of the
+    ignore-hidden option, so the filter runs at the consumption point
+    instead (see :func:`pptrepair.scan.diagnose_archive_materials`).
+    """
+    return posixpath.basename(name).startswith(HIDDEN_PREFIX)
 
 
 def _list_zip_members(

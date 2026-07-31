@@ -20,7 +20,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pptrepair.archive import ArchiveMember, iter_materialized_members
+from pptrepair.archive import (
+    ArchiveMember,
+    is_hidden_member,
+    iter_materialized_members,
+)
 from pptrepair.census import from_central_directory, from_lfh_scan
 from pptrepair.classify import Diagnosis, Verdict, classify
 from pptrepair.diagnostics import build_fingerprint, file_id, is_fingerprint_target
@@ -429,6 +433,7 @@ def diagnose_archive_materials(
     material_progress: Callable[[ArchiveMaterial], None] | None = None,
     cache: ArchiveMaterialCache | None = None,
     archive_progress: Callable[[Path, int, int], None] | None = None,
+    ignore_hidden: bool = True,
 ) -> tuple[list[ArchiveMaterial], list[str]]:
     """Enumerate and diagnose the ``.pptx``/``.pptm`` members of *archives*.
 
@@ -482,6 +487,18 @@ def diagnose_archive_materials(
     next run re-mines it in full rather than serving a truncated view of
     it.
 
+    With *ignore_hidden* (the default), members whose basename starts
+    with ``.`` (:func:`pptrepair.archive.is_hidden_member` -- macOS
+    AppleDouble ``._foo.pptx``, ``__MACOSX/`` debris) are dropped from
+    the returned *materials* and never announced via
+    *material_progress*. The filter is applied here, at the consumption
+    point, and NOT during mining: an archive is always mined -- and
+    stored in *cache* -- in full, so the cache stays independent of this
+    option and toggling it between runs of one session replays the
+    stored sweep instead of re-reading a huge archive. Hidden members'
+    diagnosis cost during the sweep is negligible (they are tiny
+    metadata files riding a read that happens anyway).
+
     :return: ``(materials, notes)`` -- one :class:`ArchiveMaterial` per
         member that could be extracted (its ``diagnosis`` may still be
         None if the pipeline failed on the member's bytes), plus every
@@ -496,16 +513,32 @@ def diagnose_archive_materials(
     if not archives:
         return materials, notes
 
+    def _visible(mined_materials: list[ArchiveMaterial]) -> list[ArchiveMaterial]:
+        """Drop hidden members from a full sweep, per *ignore_hidden*."""
+        if not ignore_hidden:
+            return mined_materials
+        return [material for material in mined_materials
+                if not is_hidden_member(material.member.member_name)]
+
+    emit_progress = material_progress
+    if ignore_hidden and material_progress is not None:
+        def _visible_progress(material: ArchiveMaterial) -> None:
+            """Announce only non-hidden members during a live sweep."""
+            if not is_hidden_member(material.member.member_name):
+                material_progress(material)
+        emit_progress = _visible_progress
+
     download_set = set(download_targets)
 
     if cache is not None:
         for archive_path in archives:
             entry = cache.lookup(archive_path)
             if entry is not None:
-                materials.extend(entry.materials)
+                visible = _visible(entry.materials)
+                materials.extend(visible)
                 notes.extend(entry.notes)
                 if material_progress is not None:
-                    for material in entry.materials:
+                    for material in visible:
                         material_progress(material)
                 continue
             if on_download is not None and archive_path in download_set:
@@ -514,7 +547,7 @@ def diagnose_archive_materials(
             try:
                 mined = _mine_archive(
                     archive_path, dest_dir, keep_files=True,
-                    material_progress=material_progress,
+                    material_progress=emit_progress,
                     archive_progress=archive_progress)
             except BaseException:
                 # Cancelled (or failed) part way through: the half-mined
@@ -522,8 +555,11 @@ def diagnose_archive_materials(
                 # never be mistaken for a complete view of the archive.
                 shutil.rmtree(dest_dir, ignore_errors=True)
                 raise
+            # The cache stores the FULL sweep, hidden members included,
+            # so a later run with ignore_hidden=False can replay them
+            # without re-reading the archive.
             cache.store(archive_path, mined)
-            materials.extend(mined.materials)
+            materials.extend(_visible(mined.materials))
             notes.extend(mined.notes)
         return materials, notes
 
@@ -534,9 +570,9 @@ def diagnose_archive_materials(
                 on_download(archive_path)
             mined = _mine_archive(
                 archive_path, tmp_path, keep_files=False,
-                material_progress=material_progress,
+                material_progress=emit_progress,
                 archive_progress=archive_progress)
-            materials.extend(mined.materials)
+            materials.extend(_visible(mined.materials))
             notes.extend(mined.notes)
     return materials, notes
 
@@ -544,10 +580,10 @@ def diagnose_archive_materials(
 def _apply_exclusions(walk: WalkResult, exclude: Sequence[Path]) -> WalkResult:
     """Return a copy of *walk* with every path under *exclude* removed.
 
-    Applied to all seven path buckets (``targets`` / ``skipped_legacy`` /
+    Applied to all eight path buckets (``targets`` / ``skipped_legacy`` /
     ``skipped_temp`` / ``skipped_cloud`` / ``download_targets`` /
-    ``archives`` / ``skipped_oversize``) plus ``errors`` (matched on its
-    path element). *walker* itself is never touched; this only
+    ``archives`` / ``skipped_oversize`` / ``skipped_hidden``) plus
+    ``errors`` (matched on its path element). *walker* itself is never touched; this only
     post-filters its output. Comparison resolves
     both sides with ``Path.resolve()``, a best-effort symlink-following
     normalisation, so an exclusion given as a relative path or through
@@ -574,6 +610,7 @@ def _apply_exclusions(walk: WalkResult, exclude: Sequence[Path]) -> WalkResult:
         errors=[(path, message) for path, message in walk.errors
                if not _is_excluded(path)],
         skipped_oversize=_filter(walk.skipped_oversize),
+        skipped_hidden=_filter(walk.skipped_hidden),
     )
 
 
@@ -592,6 +629,7 @@ def scan_paths(roots: Sequence[Path], *,
                on_directory: Callable[[Path], None] | None = None,
                archive_cache: ArchiveMaterialCache | None = None,
                archive_progress: Callable[[Path, int, int], None] | None = None,
+               ignore_hidden: bool = True,
                ) -> ScanResult:
     """Scan *roots* and return the aggregate result.
 
@@ -607,6 +645,13 @@ def scan_paths(roots: Sequence[Path], *,
       through; a candidate over the limit is excluded before it ever
       reaches the diagnosis loop (see ``WalkResult.skipped_oversize``).
       Left at the default ``None`` this is a complete no-op.
+    * *ignore_hidden* (default True) is forwarded both to
+      :func:`discover_targets` (hidden on-disk files land in
+      ``WalkResult.skipped_hidden``) and to
+      :func:`diagnose_archive_materials` (hidden archive members are
+      dropped from ``materials``/*material_progress*; the session cache
+      itself stays unfiltered, see there). ``ignore_hidden=False``
+      restores the pre-option behaviour everywhere.
     * *on_directory* (when given) is forwarded unchanged to
       :func:`discover_targets`, which invokes it once per directory
       visited during the walk (root included); a no-op whenever left at
@@ -687,7 +732,8 @@ def scan_paths(roots: Sequence[Path], *,
                             allow_download=allow_download,
                             collect_archives=search_archives,
                             max_file_bytes=max_file_bytes,
-                            on_directory=on_directory)
+                            on_directory=on_directory,
+                            ignore_hidden=ignore_hidden)
     if exclude:
         walk = _apply_exclusions(walk, exclude)
     result = ScanResult(roots=[Path(root) for root in roots],
@@ -736,7 +782,8 @@ def scan_paths(roots: Sequence[Path], *,
             walk.archives, on_download=on_download,
             download_targets=walk.download_targets,
             material_progress=material_progress,
-            cache=archive_cache, archive_progress=archive_progress)
+            cache=archive_cache, archive_progress=archive_progress,
+            ignore_hidden=ignore_hidden)
         result.materials = materials
         result.material_notes = material_notes
 

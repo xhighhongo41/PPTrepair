@@ -36,6 +36,9 @@ msgstr "Sugerencia: use --force para sobrescribir la salida existente."
 msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
 msgstr "Sugerencia: vuelva a ejecutar con --report DIR para guardar huellas de diagnóstico compartibles."
 
+msgid "Ignore hidden files (names starting with '.')"
+msgstr "Ignorar archivos ocultos (nombres que empiezan por '.')"
+
 msgid "Last Modified By"
 msgstr "Última modificación por"
 
@@ -86,6 +89,9 @@ msgstr "Omitidos: {n} archivo(s) temporal(es) de Office"
 
 msgid "Skipped: {n} file(s) over the size limit"
 msgstr "Omitidos: {n} archivo(s) por encima del límite de tamaño"
+
+msgid "Skipped: {n} hidden file(s)"
+msgstr "Omitidos: {n} archivo(s) oculto(s)"
 
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "Omitidos: {n} archivo(s) .ppt antiguos"
@@ -683,6 +689,9 @@ msgstr "pptrepair: error: PySide6 no está instalado. Instale el extra de GUI co
 
 msgid "skipped (cloud-only)"
 msgstr "omitido (solo en la nube)"
+
+msgid "skipped (hidden)"
+msgstr "omitido (oculto)"
 
 msgid "skipped (legacy .ppt)"
 msgstr "omitido (.ppt antiguo)"

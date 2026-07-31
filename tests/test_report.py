@@ -1079,3 +1079,38 @@ def test_batch_report_propagates_merge_groups_and_lineage_candidates(
          "files": [str(root / "a.pptx"), str(root / "b.pptx")]},
     ]
     assert "Merge candidates:" in text
+
+
+# --- v2.2: hidden-file skip counter in scan reports ------------------------
+
+
+def test_scan_text_reports_skipped_hidden_count() -> None:
+    """A non-empty skipped_hidden bucket adds a "Skipped: {n} hidden
+    file(s)" summary line, the same way legacy/temp/oversize do."""
+    walk = WalkResult(skipped_hidden=[Path("root/.hidden.pptx")])
+    result = ScanResult(roots=[Path("root")], walk=walk)
+
+    text = render_scan_text(result, _TR, include_files=True)
+
+    assert "Skipped: 1 hidden file(s)" in text
+
+
+def test_scan_text_omits_skipped_hidden_line_when_empty() -> None:
+    """An empty skipped_hidden bucket adds no summary line at all."""
+    result = ScanResult(roots=[Path("root")], walk=WalkResult())
+
+    text = render_scan_text(result, _TR, include_files=True)
+
+    assert "hidden file(s)" not in text
+
+
+def test_scan_json_reports_skipped_hidden_count_and_paths() -> None:
+    """render_scan_json exposes the hidden count and the skipped paths."""
+    hidden_path = Path("root/.hidden.pptx")
+    walk = WalkResult(skipped_hidden=[hidden_path])
+    result = ScanResult(roots=[Path("root")], walk=walk)
+
+    payload = json.loads(render_scan_json(result))
+
+    assert payload["summary"]["skipped"]["hidden"] == 1
+    assert payload["skipped_hidden"] == [str(hidden_path)]

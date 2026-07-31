@@ -106,6 +106,9 @@ class RunOptionsPanel(QWidget):
          self._output_edit, self._browse_button,
          self._output_group) = self._build_output_controls()
         self._download_check = QCheckBox(tr("Download cloud-only files"))
+        self._hidden_check = QCheckBox(
+            tr("Ignore hidden files (names starting with '.')"))
+        self._hidden_check.setChecked(True)
         (self._size_spin, self._unit_combo,
          self._no_limit_check) = self._build_size_controls()
 
@@ -182,6 +185,7 @@ class RunOptionsPanel(QWidget):
         layout.addWidget(self._output_group, 1, 0, 1, 2)
 
         layout.addWidget(self._download_check, 2, 0, 1, 2)
+        layout.addWidget(self._hidden_check, 3, 0, 1, 2)
 
         size_row = QHBoxLayout()
         size_row.addWidget(QLabel(tr("Max file size:")))
@@ -189,7 +193,7 @@ class RunOptionsPanel(QWidget):
         size_row.addWidget(self._unit_combo)
         size_row.addWidget(self._no_limit_check)
         size_row.addStretch(1)
-        layout.addLayout(size_row, 3, 0, 1, 2)
+        layout.addLayout(size_row, 4, 0, 1, 2)
 
     def _connect_signals(self) -> None:
         """Wire the interactive controls to their dependent-state slots."""
@@ -250,6 +254,10 @@ class RunOptionsPanel(QWidget):
         """Return True when cloud-only files may be downloaded on read."""
         return self._download_check.isChecked()
 
+    def ignore_hidden(self) -> bool:
+        """Return True when hidden files (name starting with ``.``) are skipped."""
+        return self._hidden_check.isChecked()
+
     def max_file_bytes(self) -> int | None:
         """Return the per-file size ceiling in bytes, or ``None``.
 
@@ -287,6 +295,7 @@ class RunOptionsPanel(QWidget):
             self._into_folder_radio.setChecked(True)
 
         self._download_check.setChecked(settings.allow_download())
+        self._hidden_check.setChecked(settings.ignore_hidden())
 
         max_bytes = settings.max_file_bytes()
         self._no_limit_check.setChecked(max_bytes is None)
@@ -311,8 +320,8 @@ class RunOptionsPanel(QWidget):
         for widget in (self._mode_combo, self._in_place_radio,
                        self._into_folder_radio, self._output_edit,
                        self._browse_button, self._download_check,
-                       self._size_spin, self._unit_combo,
-                       self._no_limit_check):
+                       self._hidden_check, self._size_spin,
+                       self._unit_combo, self._no_limit_check):
             widget.setEnabled(not running)
         if not running:
             # Restore the conditional enable states the blanket toggle

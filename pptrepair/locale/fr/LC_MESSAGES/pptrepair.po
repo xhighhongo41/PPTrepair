@@ -36,6 +36,9 @@ msgstr "Astuce : utilisez --force pour écraser la sortie existante."
 msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
 msgstr "Astuce : relancez avec --report DIR pour enregistrer des empreintes de diagnostic partageables."
 
+msgid "Ignore hidden files (names starting with '.')"
+msgstr "Ignorer les fichiers cachés (noms commençant par '.')"
+
 msgid "Last Modified By"
 msgstr "Dernière modification par"
 
@@ -86,6 +89,9 @@ msgstr "Ignorés : {n} fichier(s) temporaire(s) Office"
 
 msgid "Skipped: {n} file(s) over the size limit"
 msgstr "Ignorés : {n} fichier(s) dépassant la limite de taille"
+
+msgid "Skipped: {n} hidden file(s)"
+msgstr "Ignorés : {n} fichier(s) caché(s)"
 
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "Ignorés : {n} fichier(s) .ppt hérité(s)"
@@ -683,6 +689,9 @@ msgstr "pptrepair : erreur : PySide6 n'est pas installé. Installez l'extra GUI 
 
 msgid "skipped (cloud-only)"
 msgstr "ignoré (cloud uniquement)"
+
+msgid "skipped (hidden)"
+msgstr "ignoré (masqué)"
 
 msgid "skipped (legacy .ppt)"
 msgstr "ignoré (.ppt hérité)"

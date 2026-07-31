@@ -36,6 +36,9 @@ msgstr "提示: 使用 --force 可覆盖已存在的输出。"
 msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
 msgstr "提示: 使用 --report DIR 重新运行,以保存可共享的诊断指纹。"
 
+msgid "Ignore hidden files (names starting with '.')"
+msgstr "忽略隐藏文件(名称以'.'开头)"
+
 msgid "Last Modified By"
 msgstr "最后修改者"
 
@@ -86,6 +89,9 @@ msgstr "已跳过: {n} 个 Office 临时文件"
 
 msgid "Skipped: {n} file(s) over the size limit"
 msgstr "已跳过: 超过大小上限的文件 {n} 个"
+
+msgid "Skipped: {n} hidden file(s)"
+msgstr "已跳过: 隐藏文件 {n} 个"
 
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "已跳过: {n} 个旧版 .ppt 文件"
@@ -683,6 +689,9 @@ msgstr "pptrepair: 错误: 未安装 PySide6。请使用以下命令安装 GUI �
 
 msgid "skipped (cloud-only)"
 msgstr "已跳过(仅云端)"
+
+msgid "skipped (hidden)"
+msgstr "已跳过(隐藏)"
 
 msgid "skipped (legacy .ppt)"
 msgstr "已跳过(旧版.ppt)"

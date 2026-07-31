@@ -36,6 +36,9 @@ msgstr "Hinweis: Verwenden Sie --force, um die vorhandene Ausgabe zu überschrei
 msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
 msgstr "Hinweis: Führen Sie den Scan erneut mit --report DIR aus, um teilbare Diagnose-Fingerabdrücke zu speichern."
 
+msgid "Ignore hidden files (names starting with '.')"
+msgstr "Versteckte Dateien ignorieren (Namen, die mit '.' beginnen)"
+
 msgid "Last Modified By"
 msgstr "Zuletzt geändert von"
 
@@ -86,6 +89,9 @@ msgstr "Übersprungen: {n} Office-Temporärdatei(en)"
 
 msgid "Skipped: {n} file(s) over the size limit"
 msgstr "Übersprungen: {n} Datei(en) über der Größenbegrenzung"
+
+msgid "Skipped: {n} hidden file(s)"
+msgstr "Übersprungen: {n} versteckte Datei(en)"
 
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "Übersprungen: {n} veraltete .ppt-Datei(en)"
@@ -683,6 +689,9 @@ msgstr "pptrepair: Fehler: PySide6 ist nicht installiert. Installieren Sie das G
 
 msgid "skipped (cloud-only)"
 msgstr "übersprungen (nur Cloud)"
+
+msgid "skipped (hidden)"
+msgstr "übersprungen (versteckt)"
 
 msgid "skipped (legacy .ppt)"
 msgstr "übersprungen (veraltetes .ppt)"
