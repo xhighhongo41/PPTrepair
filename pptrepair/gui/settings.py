@@ -72,6 +72,7 @@ _MAX_RECENT_FOLDERS = 10
 _KEY_LANGUAGE = "preferences/language"
 _KEY_MAX_FILE_BYTES = "preferences/max_file_bytes"
 _KEY_ALLOW_DOWNLOAD = "preferences/allow_download"
+_KEY_IGNORE_HIDDEN = "preferences/ignore_hidden"
 _KEY_FOLLOW_SYMLINKS = "preferences/follow_symlinks"
 _KEY_INCLUDE_FILENAMES = "preferences/include_filenames"
 _KEY_OUTPUT_IN_PLACE = "preferences/output_in_place"
@@ -177,6 +178,15 @@ class Settings:
     def set_allow_download(self, value: bool) -> None:
         """Store whether cloud-only files may be downloaded on read."""
         self._settings.setValue(_KEY_ALLOW_DOWNLOAD, value)
+
+    def ignore_hidden(self) -> bool:
+        """Return True when hidden files (name starting with ``.``) are skipped."""
+        return _as_bool(
+            self._settings.value(_KEY_IGNORE_HIDDEN, True), True)
+
+    def set_ignore_hidden(self, value: bool) -> None:
+        """Store whether hidden files (name starting with ``.``) are skipped."""
+        self._settings.setValue(_KEY_IGNORE_HIDDEN, value)
 
     def follow_symlinks(self) -> bool:
         """Return True when a scan should follow symbolic links."""
@@ -292,6 +302,8 @@ class SettingsDialog(QDialog):
         (self._size_spin, self._unit_combo,
          self._no_limit_check) = self._build_size_controls()
         self._download_check = QCheckBox(tr("Download cloud-only files"))
+        self._hidden_check = QCheckBox(
+            tr("Ignore hidden files (names starting with '.')"))
         self._symlinks_check = QCheckBox(
             tr("Follow symbolic links while walking"))
         self._filenames_check = QCheckBox(
@@ -381,6 +393,7 @@ class SettingsDialog(QDialog):
         layout.addLayout(size_row)
 
         layout.addWidget(self._download_check)
+        layout.addWidget(self._hidden_check)
         layout.addWidget(self._symlinks_check)
         layout.addWidget(self._filenames_check)
 
@@ -447,6 +460,7 @@ class SettingsDialog(QDialog):
             self._unit_combo.setCurrentText(unit)
 
         self._download_check.setChecked(settings.allow_download())
+        self._hidden_check.setChecked(settings.ignore_hidden())
         self._symlinks_check.setChecked(settings.follow_symlinks())
         self._filenames_check.setChecked(settings.include_filenames())
 
@@ -478,6 +492,7 @@ class SettingsDialog(QDialog):
             settings.set_max_file_bytes(self._size_spin.value() * factor)
 
         settings.set_allow_download(self._download_check.isChecked())
+        settings.set_ignore_hidden(self._hidden_check.isChecked())
         settings.set_follow_symlinks(self._symlinks_check.isChecked())
         settings.set_include_filenames(self._filenames_check.isChecked())
 

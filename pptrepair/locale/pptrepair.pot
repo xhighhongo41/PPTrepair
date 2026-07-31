@@ -161,6 +161,9 @@ msgstr ""
 msgid "Default repair mode:"
 msgstr ""
 
+msgid "Deselect all"
+msgstr ""
+
 msgid "Detail"
 msgstr ""
 
@@ -249,6 +252,9 @@ msgid "Hint: pass --force to overwrite the existing output."
 msgstr ""
 
 msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
+msgstr ""
+
+msgid "Ignore hidden files (names starting with '.')"
 msgstr ""
 
 msgid "Images carved: {n}"
@@ -434,6 +440,12 @@ msgstr ""
 msgid "Re-check verdict: {verdict}"
 msgstr ""
 
+msgid "Reading archive {name}…"
+msgstr ""
+
+msgid "Reading archive {name}… {percent}%"
+msgstr ""
+
 msgid "Ready"
 msgstr ""
 
@@ -444,6 +456,9 @@ msgid "Recent Folders"
 msgstr ""
 
 msgid "Reference integrity: {n} unresolved reference(s) in {m} part(s)"
+msgstr ""
+
+msgid "Rejected sources"
 msgstr ""
 
 msgid "Remove Selected"
@@ -509,6 +524,9 @@ msgstr ""
 msgid "Report Unknown Corruption…"
 msgstr ""
 
+msgid "Reset to default"
+msgstr ""
+
 msgid "Result"
 msgstr ""
 
@@ -542,6 +560,9 @@ msgstr ""
 msgid "Scanned: {n} file(s)"
 msgstr ""
 
+msgid "Scanning {path}…"
+msgstr ""
+
 msgid "Scanning…"
 msgstr ""
 
@@ -549,6 +570,9 @@ msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
 msgstr ""
 
 msgid "See the LICENSE file in the GitHub repository for details."
+msgstr ""
+
+msgid "Select all"
 msgstr ""
 
 msgid "Series"
@@ -576,6 +600,9 @@ msgid "Skipped: {n} Office temp file(s)"
 msgstr ""
 
 msgid "Skipped: {n} file(s) over the size limit"
+msgstr ""
+
+msgid "Skipped: {n} hidden file(s)"
 msgstr ""
 
 msgid "Skipped: {n} legacy .ppt file(s)"
@@ -722,6 +749,9 @@ msgstr ""
 msgid "corrupted: unrecognized damage pattern"
 msgstr ""
 
+msgid "could not be accessed ({detail})"
+msgstr ""
+
 msgid "dry run: nothing was written."
 msgstr ""
 
@@ -755,6 +785,9 @@ msgstr ""
 msgid "not a ZIP-based file"
 msgstr ""
 
+msgid "not found"
+msgstr ""
+
 msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
 msgstr ""
 
@@ -770,6 +803,9 @@ msgstr ""
 msgid "skipped (cloud-only)"
 msgstr ""
 
+msgid "skipped (hidden)"
+msgstr ""
+
 msgid "skipped (legacy .ppt)"
 msgstr ""
 
@@ -777,6 +813,9 @@ msgid "skipped (size limit)"
 msgstr ""
 
 msgid "skipped (temp file)"
+msgstr ""
+
+msgid "unsupported file type"
 msgstr ""
 
 msgid "{n} archive material(s)"

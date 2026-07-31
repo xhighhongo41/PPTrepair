@@ -36,6 +36,9 @@ msgstr "Sugerencia: use --force para sobrescribir la salida existente."
 msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
 msgstr "Sugerencia: vuelva a ejecutar con --report DIR para guardar huellas de diagnóstico compartibles."
 
+msgid "Ignore hidden files (names starting with '.')"
+msgstr "Ignorar archivos ocultos (nombres que empiezan por '.')"
+
 msgid "Last Modified By"
 msgstr "Última modificación por"
 
@@ -86,6 +89,9 @@ msgstr "Omitidos: {n} archivo(s) temporal(es) de Office"
 
 msgid "Skipped: {n} file(s) over the size limit"
 msgstr "Omitidos: {n} archivo(s) por encima del límite de tamaño"
+
+msgid "Skipped: {n} hidden file(s)"
+msgstr "Omitidos: {n} archivo(s) oculto(s)"
 
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "Omitidos: {n} archivo(s) .ppt antiguos"
@@ -429,6 +435,9 @@ msgstr "Carpeta de salida predeterminada"
 msgid "Default repair mode:"
 msgstr "Modo de reparación predeterminado:"
 
+msgid "Deselect all"
+msgstr "Deseleccionar todo"
+
 msgid "Detail"
 msgstr "Detalle"
 
@@ -528,11 +537,20 @@ msgstr "Preferencias…"
 msgid "Quit"
 msgstr "Salir"
 
+msgid "Reading archive {name}…"
+msgstr "Leyendo archivo comprimido {name}…"
+
+msgid "Reading archive {name}… {percent}%"
+msgstr "Leyendo archivo comprimido {name}… {percent}%"
+
 msgid "Ready"
 msgstr "Listo"
 
 msgid "Recent Folders"
 msgstr "Carpetas recientes"
+
+msgid "Rejected sources"
+msgstr "Fuentes rechazadas"
 
 msgid "Remove Selected"
 msgstr "Eliminar seleccionados"
@@ -576,6 +594,9 @@ msgstr "Reparando… {done} de {total}"
 msgid "Repairing… {n} file(s) processed"
 msgstr "Reparando… {n} archivo(s) procesado(s)"
 
+msgid "Reset to default"
+msgstr "Restablecer valores predeterminados"
+
 msgid "Review the donors for each corrupted file, then click Repair."
 msgstr "Revise las fuentes de cada archivo dañado y luego haga clic en \"Reparar\"."
 
@@ -597,11 +618,17 @@ msgstr "Fallo en el análisis: {message}"
 msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
 msgstr "Analizados {n} archivo(s): {corrupted} dañado(s), {intact} intacto(s)"
 
+msgid "Scanning {path}…"
+msgstr "Explorando {path}…"
+
 msgid "Scanning…"
 msgstr "Analizando…"
 
 msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
 msgstr "Analizando… {files} archivo(s) diagnosticado(s), {materials} material(es) extraído(s)"
+
+msgid "Select all"
+msgstr "Seleccionar todo"
 
 msgid "Settings"
 msgstr "Configuración"
@@ -630,6 +657,9 @@ msgstr "El análisis se detuvo inesperadamente:\n{message}"
 msgid "Twin candidates"
 msgstr "Candidatos de restauración"
 
+msgid "could not be accessed ({detail})"
+msgstr "no se pudo acceder ({detail})"
+
 msgid "error"
 msgstr "Error"
 
@@ -651,11 +681,17 @@ msgstr "fusión fallida {n}"
 msgid "merge failed: no output could be reconstructed"
 msgstr "fusión fallida: no se pudo reconstruir la salida"
 
+msgid "not found"
+msgstr "no encontrado"
+
 msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
 msgstr "pptrepair: error: PySide6 no está instalado. Instale el extra de GUI con: pip install 'pptrepair[gui]'"
 
 msgid "skipped (cloud-only)"
 msgstr "omitido (solo en la nube)"
+
+msgid "skipped (hidden)"
+msgstr "omitido (oculto)"
 
 msgid "skipped (legacy .ppt)"
 msgstr "omitido (.ppt antiguo)"
@@ -665,6 +701,9 @@ msgstr "omitido (límite de tamaño)"
 
 msgid "skipped (temp file)"
 msgstr "omitido (archivo temporal)"
+
+msgid "unsupported file type"
+msgstr "tipo de archivo no compatible"
 
 msgid "{n} archive material(s)"
 msgstr "{n} material(es) de archivo comprimido"

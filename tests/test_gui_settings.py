@@ -76,6 +76,7 @@ def test_settings_defaults(tmp_path: Path) -> None:
     assert settings.language() == "en"
     assert settings.max_file_bytes() == 2_147_483_648
     assert settings.allow_download() is False
+    assert settings.ignore_hidden() is True
     assert settings.follow_symlinks() is False
     assert settings.include_filenames() is False
     assert settings.output_in_place() is True
@@ -122,6 +123,7 @@ def test_settings_max_file_bytes_none_roundtrips_as_none(
     ("setter", "getter"),
     [
         ("set_allow_download", "allow_download"),
+        ("set_ignore_hidden", "ignore_hidden"),
         ("set_follow_symlinks", "follow_symlinks"),
         ("set_include_filenames", "include_filenames"),
         ("set_output_in_place", "output_in_place"),

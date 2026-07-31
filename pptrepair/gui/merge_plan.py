@@ -12,8 +12,8 @@ This module is deliberately free of any Qt dependency: it turns a
 :class:`~pptrepair.gui.worker.GuiScanResult` into plain
 :class:`TargetPlan` records (:func:`build_target_plans`), which the
 :class:`~pptrepair.gui.donor_dialog.DonorApprovalDialog` renders and the
-:class:`~pptrepair.gui.worker.MultiRepairWorker` executes. Diagnosis is
-never repeated here -- every score is computed from the
+:class:`~pptrepair.gui.repair_workers.MultiRepairWorker` executes.
+Diagnosis is never repeated here -- every score is computed from the
 :class:`~pptrepair.classify.Diagnosis` the scan already produced.
 """
 
@@ -85,7 +85,7 @@ class ApprovedMerge:
     """One target's user-approved donor selection.
 
     Produced by :meth:`~pptrepair.gui.donor_dialog.DonorApprovalDialog.approved_plans`
-    and consumed by :class:`~pptrepair.gui.worker.MultiRepairWorker`.
+    and consumed by :class:`~pptrepair.gui.repair_workers.MultiRepairWorker`.
 
     :ivar target: the corrupted file to reconstruct.
     :ivar donors: the donors the user checked (may be empty, meaning the

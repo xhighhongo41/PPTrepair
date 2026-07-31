@@ -9,7 +9,10 @@ PySide6 is not installed (the optional ``[gui]`` extra); see
 
 from __future__ import annotations
 
+import io
 import os
+import tarfile
+import threading
 import zipfile
 from pathlib import Path
 
@@ -25,6 +28,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
+from pptrepair.gui import scan_parallel
+from pptrepair.gui import worker as worker_module
 from pptrepair.gui.main_window import MainWindow
 from pptrepair.gui.results import ScanResultsModel
 from pptrepair.gui.run_options import RepairMode, RunOptionsPanel
@@ -34,9 +39,11 @@ from pptrepair.gui.worker import (
     ScanWorker,
 )
 from pptrepair.scan import (
+    ArchiveMaterialCache,
     diagnose_archive_materials,
     scan_paths,
 )
+from pptrepair.walker import WalkResult
 
 #: Media payload large enough that a 256 KiB head zero-fill still leaves
 #: surviving tail bytes (classified head_zero_fill, not empty).
@@ -74,11 +81,51 @@ def _write_zip_with_pptx(path: Path, member: str = "backup/deck.pptx") -> Path:
     return path
 
 
+def _write_targz_with_pptx(path: Path, *members: str) -> Path:
+    """Write a tar.gz archive holding one intact .pptx per *members* name."""
+    with tarfile.open(path, mode="w:gz") as tf:
+        for index, name in enumerate(members):
+            data = build_minimal_pptx(num_slides=1, media_bytes=20_000,
+                                      seed=index)
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    return path
+
+
+def _count_tar_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Patch tarfile.open to record the mode of every *read* open.
+
+    Mirrors :func:`test_scan_archive._count_tar_reads`: returns the
+    (initially empty) list the modes land in, ignoring write opens so a
+    test may keep writing fixture archives after the patch is installed.
+    """
+    modes: list[str] = []
+    real_open = tarfile.open
+
+    def _counting_open(*args: object, **kwargs: object) -> tarfile.TarFile:
+        mode = kwargs.get("mode", args[1] if len(args) > 1 else "r")
+        if isinstance(mode, str) and mode.startswith("r"):
+            modes.append(mode)
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(tarfile, "open", _counting_open)
+    return modes
+
+
 def _mkroot(tmp_path: Path, name: str = "root") -> Path:
     """Create and return an empty scan-root directory under *tmp_path*."""
     root = tmp_path / name
     root.mkdir()
     return root
+
+
+def _run_worker(qtbot: QtBot, worker: ScanWorker) -> GuiScanResult:
+    """Run *worker* to completion and return its :class:`GuiScanResult`."""
+    with qtbot.waitSignal(worker.finished_ok, timeout=15000) as blocker:
+        worker.start()
+    assert worker.wait(5000)
+    return blocker.args[0]
 
 
 # --------------------------------------------------------------------------
@@ -131,6 +178,28 @@ def test_scan_worker_mines_archive_without_roots(
     assert worker.wait(5000)
 
 
+def test_scan_worker_ignore_hidden_filters_dropped_archive_members(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """The request's ignore_hidden reaches the dropped-archive mining
+    path -- a direct diagnose_archive_materials call, not scan_paths --
+    so a hidden AppleDouble member is dropped by default and restored
+    with ignore_hidden=False."""
+    archive = _write_targz_with_pptx(
+        tmp_path / "backup.tar.gz", "backup/deck.pptx", "backup/._deck.pptx")
+
+    default_result = _run_worker(
+        qtbot, ScanWorker(ScanRequest(roots=(), archives=(archive,))))
+    assert [m.member.member_name for m in default_result.materials] == [
+        "backup/deck.pptx"]
+
+    unfiltered_result = _run_worker(
+        qtbot, ScanWorker(ScanRequest(roots=(), archives=(archive,),
+                                      ignore_hidden=False)))
+    assert {m.member.member_name for m in unfiltered_result.materials} == {
+        "backup/deck.pptx", "backup/._deck.pptx"}
+
+
 def test_scan_worker_cancellation_stops_early(
     qtbot: QtBot, tmp_path: Path
 ) -> None:
@@ -179,6 +248,710 @@ def test_scan_worker_respects_max_file_bytes(
     assert big not in diagnosed
     assert big in result.scan.walk.skipped_oversize
     assert worker.wait(5000)
+
+
+def test_scan_worker_emits_walk_progress_when_interval_is_zero(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the throttle interval at 0, every visited directory (root and
+    each subdirectory) emits walk_progress."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 0)
+    root = _mkroot(tmp_path)
+    for name in ("a", "b"):
+        sub_dir = root / name
+        sub_dir.mkdir()
+        _write_normal(sub_dir / "deck.pptx", seed=hash(name) % 1000)
+
+    worker = ScanWorker(ScanRequest(roots=(root,), archives=()))
+    emitted: list[str] = []
+    worker.walk_progress.connect(emitted.append)
+
+    with qtbot.waitSignal(worker.finished_ok, timeout=15000):
+        worker.start()
+
+    assert len(emitted) >= 3  # root + "a" + "b"
+    assert str(root) in emitted
+    assert worker.wait(5000)
+
+
+def test_scan_worker_walk_progress_throttled_with_large_interval(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a very large throttle interval, only the first directory
+    visited (the root) ever emits walk_progress."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 9999)
+    root = _mkroot(tmp_path)
+    for name in ("a", "b", "c"):
+        sub_dir = root / name
+        sub_dir.mkdir()
+        _write_normal(sub_dir / "deck.pptx", seed=hash(name) % 1000)
+
+    worker = ScanWorker(ScanRequest(roots=(root,), archives=()))
+    emitted: list[str] = []
+    worker.walk_progress.connect(emitted.append)
+
+    with qtbot.waitSignal(worker.finished_ok, timeout=15000):
+        worker.start()
+
+    assert emitted == [str(root)]
+    assert worker.wait(5000)
+
+
+def test_scan_worker_cancellation_during_walk_stops_early(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Cancelling from a walk_progress handler stops the scan before any
+    file is diagnosed, emitting cancelled rather than finished_ok."""
+    root = _mkroot(tmp_path)
+    for name in ("a", "b"):
+        sub_dir = root / name
+        sub_dir.mkdir()
+        _write_normal(sub_dir / "deck.pptx", seed=hash(name) % 1000)
+
+    worker = ScanWorker(ScanRequest(roots=(root,), archives=()))
+    scanned: list[object] = []
+    worker.file_scanned.connect(lambda outcome: scanned.append(outcome))
+
+    # A blocking-queued connection makes the stop deterministic: the
+    # worker thread parks at the first walk_progress emit (the root
+    # itself, always emitted) until this UI-thread slot has set the
+    # cancel flag, so the *next* on_directory call is guaranteed to raise.
+    worker.walk_progress.connect(
+        lambda _path: worker.cancel(),
+        Qt.ConnectionType.BlockingQueuedConnection,
+    )
+
+    with qtbot.waitSignal(worker.cancelled, timeout=15000):
+        worker.start()
+
+    assert scanned == []
+    assert worker.wait(5000)
+
+
+def test_scan_worker_cache_serves_a_rescan_without_reopening_the_archive(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scanning the same archive twice with one session cache reads it
+    once: the second run is replayed from the cache, materials and all."""
+    archive = _write_targz_with_pptx(
+        tmp_path / "backup.tar.gz", "backup/one.pptx", "backup/two.pptx")
+    cache = ArchiveMaterialCache(tmp_path / "cache")
+    modes = _count_tar_reads(monkeypatch)
+    request = ScanRequest(roots=(), archives=(archive,))
+
+    first = _run_worker(qtbot, ScanWorker(request, cache=cache))
+    second = _run_worker(qtbot, ScanWorker(request, cache=cache))
+
+    assert modes == ["r|*"]
+    assert len(first.materials) == 2
+    assert second.materials == first.materials
+    assert second.material_notes == first.material_notes == []
+
+
+def test_scan_worker_without_cache_reads_the_archive_every_time(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Left without a cache the worker keeps its pre-cache behaviour: one
+    full read of the archive per run."""
+    archive = _write_targz_with_pptx(tmp_path / "backup.tar.gz",
+                                     "backup/one.pptx")
+    modes = _count_tar_reads(monkeypatch)
+    request = ScanRequest(roots=(), archives=(archive,))
+
+    first = _run_worker(qtbot, ScanWorker(request))
+    second = _run_worker(qtbot, ScanWorker(request))
+
+    assert modes == ["r|*", "r|*"]
+    assert len(first.materials) == len(second.materials) == 1
+
+
+def test_scan_worker_cache_keeps_the_donor_bytes_for_the_repair_phase(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Every member mined through the cache is still on disk afterwards,
+    which is what lets the repair phase splice it without a second read."""
+    archive = _write_targz_with_pptx(tmp_path / "backup.tar.gz",
+                                     "backup/one.pptx")
+    cache_root = tmp_path / "cache"
+    cache = ArchiveMaterialCache(cache_root)
+
+    result = _run_worker(qtbot, ScanWorker(
+        ScanRequest(roots=(), archives=(archive,)), cache=cache))
+
+    [material] = result.materials
+    donor_path = cache.member_path(archive, material.member)
+    assert donor_path is not None
+    assert donor_path.is_file()
+    assert cache_root in donor_path.parents
+
+
+def test_scan_worker_emits_archive_progress_when_interval_is_zero(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the throttle interval at 0 every byte-position report reaches
+    the UI, tagged with the archive and ending on its full size."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 0)
+    archive = _write_targz_with_pptx(
+        tmp_path / "backup.tar.gz", "backup/one.pptx", "backup/two.pptx")
+
+    worker = ScanWorker(ScanRequest(roots=(), archives=(archive,)))
+    emitted: list[tuple[str, int, int]] = []
+    worker.archive_progress.connect(
+        lambda path, done, total: emitted.append((path, done, total)))
+
+    _run_worker(qtbot, worker)
+
+    total_bytes = archive.stat().st_size
+    assert len(emitted) > 1
+    assert {path for path, _done, _total in emitted} == {str(archive)}
+    assert {total for _path, _done, total in emitted} == {total_bytes}
+    done_values = [done for _path, done, _total in emitted]
+    assert done_values == sorted(done_values)
+    assert done_values[-1] == total_bytes
+
+
+def test_scan_worker_archive_progress_throttled_with_large_interval(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a very large throttle interval a single archive reports its
+    position exactly once, however many times the core calls back."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 9999)
+    archive = _write_targz_with_pptx(
+        tmp_path / "backup.tar.gz", "backup/one.pptx", "backup/two.pptx")
+
+    worker = ScanWorker(ScanRequest(roots=(), archives=(archive,)))
+    emitted: list[tuple[str, int, int]] = []
+    worker.archive_progress.connect(
+        lambda path, done, total: emitted.append((path, done, total)))
+
+    _run_worker(qtbot, worker)
+
+    assert [path for path, _done, _total in emitted] == [str(archive)]
+
+
+def test_scan_worker_archive_progress_always_emits_on_a_new_archive(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Moving on to the next archive emits immediately even under a
+    throttle interval that suppresses everything else: that transition is
+    what renames the file the user is told is being read."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 9999)
+    first = _write_targz_with_pptx(tmp_path / "first.tar.gz",
+                                   "backup/one.pptx", "backup/two.pptx")
+    second = _write_targz_with_pptx(tmp_path / "second.tar.gz",
+                                    "backup/three.pptx", "backup/four.pptx")
+
+    worker = ScanWorker(ScanRequest(roots=(), archives=(first, second)))
+    emitted: list[str] = []
+    worker.archive_progress.connect(
+        lambda path, _done, _total: emitted.append(path))
+
+    _run_worker(qtbot, worker)
+
+    assert emitted == [str(first), str(second)]
+
+
+def test_scan_worker_cancellation_during_archive_read_stops_early(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancelling from an archive_progress handler stops the mining pass
+    before the archive has been read out, emitting cancelled rather than
+    finished_ok -- the point of polling that callback at all."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 0)
+    archive = _write_targz_with_pptx(
+        tmp_path / "backup.tar.gz", "backup/one.pptx", "backup/two.pptx")
+
+    worker = ScanWorker(ScanRequest(roots=(), archives=(archive,)))
+    mined: list[object] = []
+    worker.material_scanned.connect(lambda material: mined.append(material))
+    finished: list[object] = []
+    worker.finished_ok.connect(lambda result: finished.append(result))
+    # A blocking-queued connection makes the stop deterministic: the
+    # worker thread parks at the first emit (the first member's tar
+    # header, always emitted) until this UI-thread slot has set the
+    # cancel flag, so the next callback is guaranteed to raise.
+    worker.archive_progress.connect(
+        lambda *_args: worker.cancel(),
+        Qt.ConnectionType.BlockingQueuedConnection,
+    )
+
+    with qtbot.waitSignal(worker.cancelled, timeout=15000):
+        worker.start()
+
+    assert finished == []
+    assert mined == []
+    assert worker.wait(5000)
+
+
+def test_archive_progress_signal_carries_64bit_byte_counts() -> None:
+    """archive_progress's byte counters survive values well past the
+    2**31 an ``int`` Qt signal argument would wrap: the qulonglong
+    declaration is what keeps a huge archive's position from turning
+    negative on its way to the UI thread."""
+    worker = ScanWorker(ScanRequest(roots=(), archives=()))
+    recorded: list[tuple[str, int, int]] = []
+    worker.archive_progress.connect(
+        lambda path, done, total: recorded.append((path, done, total)))
+
+    # The first call is never throttled, so this reaches the slot
+    # synchronously without needing to run the worker at all.
+    worker._relay_archive_progress(
+        Path("/backup/huge.tar.gz"), 3_000_000_000, 677_910_962_489)
+
+    assert recorded == [
+        ("/backup/huge.tar.gz", 3_000_000_000, 677_910_962_489)]
+
+
+def test_scan_worker_failure_prints_traceback_to_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unexpected exception from _execute prints its full traceback to
+    stderr, while the failed signal still carries only the short summary
+    the UI shows."""
+    worker = ScanWorker(ScanRequest(roots=(), archives=()))
+
+    def _boom() -> GuiScanResult:
+        raise ValueError("boom")
+
+    monkeypatch.setattr(worker, "_execute", _boom)
+    messages: list[str] = []
+    worker.failed.connect(messages.append)
+
+    # Called directly on this thread (not started as a QThread), so the
+    # run is synchronous and capsys can capture stderr from it.
+    worker.run()
+
+    captured = capsys.readouterr()
+    assert "Traceback" in captured.err
+    assert "ValueError: boom" in captured.err
+    assert messages == ["ValueError: boom"]
+
+
+# --------------------------------------------------------------------------
+# ScanWorker: per-device parallel scanning
+# --------------------------------------------------------------------------
+
+
+def _patch_devices(monkeypatch: pytest.MonkeyPatch,
+                   devices: dict[Path, int | None]) -> list[Path]:
+    """Make ``device_of`` report a synthetic device for each path.
+
+    Every real path in a test lives on the one volume ``tmp_path`` is
+    on, so the multi-device layouts the parallel path exists for can
+    only be synthesised. A path absent from *devices* reports device 0.
+
+    :return: the list every queried path is appended to, so a test can
+        assert that a fallback never even asked.
+    """
+    asked: list[Path] = []
+
+    def _fake_device_of(path: Path) -> int | None:
+        asked.append(Path(path))
+        return devices.get(Path(path), 0)
+
+    monkeypatch.setattr(scan_parallel, "device_of", _fake_device_of)
+    return asked
+
+
+def _device_threads() -> list[threading.Thread]:
+    """Return every still-running :class:`ScanWorker` device thread.
+
+    They carry a ``pptrepair-scan-deviceN`` name, so this sees exactly
+    the threads the parallel path started -- unlike
+    ``threading.active_count()``, which also counts pytest's, Qt's and
+    the interpreter's own.
+    """
+    return [thread for thread in threading.enumerate()
+            if thread.name.startswith("pptrepair-scan-device")]
+
+
+def _result_shape(result: GuiScanResult) -> dict[str, object]:
+    """Reduce a :class:`GuiScanResult` to what scheduling must not change.
+
+    Every list bucket is flattened to plain strings/values *in order*,
+    so an assertion over two runs compares contents and ordering alike.
+    Materials are named by archive and member rather than by their
+    ``diagnosis.path``: that one is the temporary file the member was
+    extracted to, which legitimately differs between two runs.
+    """
+    shape: dict[str, object] = {
+        "materials": [
+            (str(material.archive_path), material.member.member_name,
+             material.member.size,
+             None if material.diagnosis is None
+             else material.diagnosis.verdict.value,
+             material.error)
+            for material in result.materials
+        ],
+        "material_notes": list(result.material_notes),
+    }
+    scan = result.scan
+    if scan is None:
+        shape["scan"] = None
+        return shape
+    walk = scan.walk
+    shape["scan"] = {
+        "roots": [str(path) for path in scan.roots],
+        "report_dir": scan.report_dir,
+        "fingerprints_skipped": scan.fingerprints_skipped,
+        "search_archives": scan.search_archives,
+        "materials": len(scan.materials),
+        "material_notes": list(scan.material_notes),
+        "outcomes": [
+            (str(outcome.path),
+             None if outcome.diagnosis is None
+             else outcome.diagnosis.verdict.value,
+             outcome.error)
+            for outcome in scan.outcomes
+        ],
+        "targets": [str(path) for path in walk.targets],
+        "skipped_legacy": [str(path) for path in walk.skipped_legacy],
+        "skipped_temp": [str(path) for path in walk.skipped_temp],
+        "skipped_cloud": [str(path) for path in walk.skipped_cloud],
+        "download_targets": [str(path) for path in walk.download_targets],
+        "archives": [str(path) for path in walk.archives],
+        "errors": [(str(path), message) for path, message in walk.errors],
+        "skipped_oversize": [str(path) for path in walk.skipped_oversize],
+    }
+    return shape
+
+
+def _two_device_request(tmp_path: Path) -> tuple[ScanRequest,
+                                                 dict[Path, int | None]]:
+    """Build a two-root/two-archive request spread over two devices.
+
+    The roots hold files that land in several discovery buckets (a
+    normal and a corrupted target, a legacy ``.ppt``, an Office ``~$``
+    temp file), and one of them does not exist at all so the ``errors``
+    bucket is populated too: a merge that dropped or reordered any
+    bucket then shows up immediately.
+
+    :return: ``(request, devices)`` -- the request and the ``_device_of``
+        map that puts the first root/archive on device 1 and the second
+        root, the missing root and the second archive on device 2.
+    """
+    first = _mkroot(tmp_path, "alpha")
+    _write_normal(first / "a1.pptx", seed=1)
+    _write_corrupted(first / "a2.pptx", seed=2)
+    (first / "a3.ppt").write_bytes(b"legacy binary powerpoint")
+    (first / "~$a1.pptx").write_bytes(b"owner lock")
+    nested = first / "nested"
+    nested.mkdir()
+    _write_normal(nested / "a4.pptx", seed=3)
+
+    second = _mkroot(tmp_path, "beta")
+    _write_normal(second / "b1.pptx", seed=4)
+    _write_corrupted(second / "b2.pptx", seed=5)
+    missing = tmp_path / "gamma"
+
+    first_archive = _write_targz_with_pptx(
+        tmp_path / "alpha.tar.gz", "backup/one.pptx", "backup/two.pptx")
+    second_archive = _write_zip_with_pptx(tmp_path / "beta.zip")
+
+    request = ScanRequest(roots=(first, second, missing),
+                          archives=(first_archive, second_archive))
+    devices: dict[Path, int | None] = {
+        first: 1, first_archive: 1,
+        second: 2, missing: 2, second_archive: 2,
+    }
+    return request, devices
+
+
+def test_parallel_scan_result_matches_the_sequential_one(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Spreading the same sources over two devices changes only the
+    scheduling: every bucket of the GuiScanResult -- contents and order
+    alike -- is what the sequential run produced."""
+    request, devices = _two_device_request(tmp_path)
+
+    # One device for every source: the sequential path, unchanged.
+    _patch_devices(monkeypatch, {})
+    assert ScanWorker(request)._plan_device_groups() is None
+    sequential = _run_worker(qtbot, ScanWorker(request))
+
+    # The very same sources, now on two devices: the parallel path.
+    _patch_devices(monkeypatch, devices)
+    assert ScanWorker(request)._plan_device_groups() is not None
+    parallel = _run_worker(qtbot, ScanWorker(request))
+
+    assert _result_shape(parallel) == _result_shape(sequential)
+    assert parallel.scan is not None
+    assert len(parallel.scan.outcomes) == 5
+    assert len(parallel.materials) == 3
+    # The non-trivial buckets really were populated (an all-empty
+    # comparison would prove nothing).
+    assert len(parallel.scan.walk.skipped_legacy) == 1
+    assert len(parallel.scan.walk.skipped_temp) == 1
+    assert len(parallel.scan.walk.errors) == 1
+    assert _device_threads() == []
+
+
+def test_merge_walk_results_merges_skipped_hidden(tmp_path: Path) -> None:
+    """merge_walk_results concatenates skipped_hidden in input order too,
+    exactly like every other discovery bucket."""
+    first = WalkResult(skipped_hidden=[tmp_path / "a" / ".one.pptx"])
+    second = WalkResult(skipped_hidden=[tmp_path / "b" / ".two.pptx"])
+
+    merged = scan_parallel.merge_walk_results([first, second])
+
+    assert merged.skipped_hidden == [
+        tmp_path / "a" / ".one.pptx", tmp_path / "b" / ".two.pptx"]
+
+
+def test_parallel_archives_only_request_keeps_scan_none(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Archives on two devices and no root at all: the materials come
+    back in request order and ``scan`` stays None, exactly as it does on
+    the sequential path (an empty ScanResult would claim a walk that
+    never happened)."""
+    first = _write_targz_with_pptx(tmp_path / "first.tar.gz",
+                                   "backup/one.pptx", "backup/two.pptx")
+    second = _write_zip_with_pptx(tmp_path / "second.zip")
+    _patch_devices(monkeypatch, {first: 1, second: 2})
+
+    result = _run_worker(qtbot, ScanWorker(
+        ScanRequest(roots=(), archives=(first, second))))
+
+    assert result.scan is None
+    assert [material.member.member_name for material in result.materials] == [
+        "backup/one.pptx", "backup/two.pptx", "backup/deck.pptx"]
+    assert result.material_notes == []
+    assert _device_threads() == []
+
+
+def test_two_devices_are_scanned_at_the_same_time(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two device groups really do overlap: each root's scan waits
+    for the other one to have started, which only concurrent threads can
+    satisfy -- a sequential run would break the barrier and fail."""
+    first = _mkroot(tmp_path, "first")
+    _write_normal(first / "a.pptx", seed=1)
+    second = _mkroot(tmp_path, "second")
+    _write_normal(second / "b.pptx", seed=2)
+    _patch_devices(monkeypatch, {first: 1, second: 2})
+
+    both_started = threading.Barrier(2)
+    idents: set[int] = set()
+    real_scan_paths = worker_module.scan_paths
+
+    def _rendezvous(paths: list[Path], **kwargs: object):
+        """Refuse to scan either root until both are under way."""
+        idents.add(threading.get_ident())
+        both_started.wait(timeout=10)
+        return real_scan_paths(paths, **kwargs)
+
+    monkeypatch.setattr(worker_module, "scan_paths", _rendezvous)
+
+    result = _run_worker(qtbot, ScanWorker(
+        ScanRequest(roots=(first, second), archives=())))
+
+    assert len(idents) == 2
+    assert result.scan is not None
+    assert [outcome.path for outcome in result.scan.outcomes] == [
+        first / "a.pptx", second / "b.pptx"]
+    assert _device_threads() == []
+
+
+def test_follow_symlinks_falls_back_to_the_sequential_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With follow_symlinks the walk shares one visited-directory set
+    across roots, so the run stays sequential -- decided before any path
+    is even stat'ed for its device."""
+    request, devices = _two_device_request(tmp_path)
+    asked = _patch_devices(monkeypatch, devices)
+
+    worker = ScanWorker(ScanRequest(roots=request.roots,
+                                    archives=request.archives,
+                                    follow_symlinks=True))
+
+    assert worker._plan_device_groups() is None
+    assert asked == []
+
+
+def test_one_device_falls_back_to_the_sequential_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sources sharing a device -- or all failing to stat, which is the
+    same "cannot tell them apart" group -- have nothing to overlap."""
+    request, _devices = _two_device_request(tmp_path)
+    asked = _patch_devices(monkeypatch, {})
+
+    assert ScanWorker(request)._plan_device_groups() is None
+    assert asked == [*request.roots, *request.archives]
+
+    _patch_devices(monkeypatch,
+                   dict.fromkeys([*request.roots, *request.archives], None))
+    assert ScanWorker(request)._plan_device_groups() is None
+
+
+def test_an_empty_request_falls_back_to_the_sequential_path(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A request with no source at all yields no group, hence no thread."""
+    _patch_devices(monkeypatch, {})
+
+    assert ScanWorker(ScanRequest(roots=(), archives=()))._plan_device_groups() \
+        is None
+
+
+def test_device_groups_keep_input_order_with_roots_before_archives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Within one device the units run in request order, every root
+    before every archive -- the sequential path's own phase order."""
+    request, devices = _two_device_request(tmp_path)
+    _patch_devices(monkeypatch, devices)
+
+    buckets = ScanWorker(request)._plan_device_groups()
+
+    assert buckets is not None
+    assert [[(unit.path, unit.is_archive) for unit in bucket]
+            for bucket in buckets] == [
+        [(request.roots[0], False), (request.archives[0], True)],
+        [(request.roots[1], False), (request.roots[2], False),
+         (request.archives[1], True)],
+    ]
+
+
+def test_device_groups_are_capped_at_the_thread_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """More devices than threads share the threads out: no unit is lost,
+    none is scheduled twice, and no extra thread is created."""
+    limit = scan_parallel.MAX_PARALLEL_DEVICE_SCANS
+    roots = tuple(_mkroot(tmp_path, f"disk{index}")
+                  for index in range(limit * 2 + 1))
+    _patch_devices(monkeypatch,
+                   {root: index for index, root in enumerate(roots)})
+
+    buckets = ScanWorker(ScanRequest(roots=roots,
+                                     archives=()))._plan_device_groups()
+
+    assert buckets is not None
+    assert len(buckets) == limit
+    scheduled = [unit.path for bucket in buckets for unit in bucket]
+    assert sorted(scheduled) == sorted(roots)
+
+
+def test_parallel_scan_still_emits_every_progress_signal(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The queued events reach the UI as the same four signals the
+    sequential path emits, throttling included (interval 0 here)."""
+    monkeypatch.setattr(worker_module, "_WALK_PROGRESS_INTERVAL_S", 0)
+    request, devices = _two_device_request(tmp_path)
+    _patch_devices(monkeypatch, devices)
+
+    worker = ScanWorker(request)
+    files: list[object] = []
+    materials: list[object] = []
+    directories: list[str] = []
+    positions: list[tuple[str, int, int]] = []
+    worker.file_scanned.connect(files.append)
+    worker.material_scanned.connect(materials.append)
+    worker.walk_progress.connect(directories.append)
+    worker.archive_progress.connect(
+        lambda path, done, total: positions.append((path, done, total)))
+
+    result = _run_worker(qtbot, worker)
+
+    assert result.scan is not None
+    assert len(files) == len(result.scan.outcomes) == 5
+    assert len(materials) == len(result.materials) == 3
+    # Both existing roots are announced (the third one does not exist,
+    # so it is walked -- and reported -- by nobody).
+    assert set(directories) >= {str(path) for path in request.roots[:2]}
+    assert {path for path, _done, _total in positions} == {
+        str(path) for path in request.archives}
+
+
+def test_cancelling_a_parallel_scan_ends_every_device_thread(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cancel during a parallel run reaches every device thread: the
+    run ends on cancelled, never finished_ok, and leaves no thread."""
+    fast = _mkroot(tmp_path, "fast")
+    _write_normal(fast / "a.pptx", seed=1)
+    held = _mkroot(tmp_path, "held")
+    _write_normal(held / "b.pptx", seed=2)
+    _patch_devices(monkeypatch, {fast: 1, held: 2})
+
+    released = threading.Event()
+    real_scan_paths = worker_module.scan_paths
+
+    def _hold_the_second_device(paths: list[Path], **kwargs: object):
+        """Keep the second device busy until the cancel has landed.
+
+        Without it the whole (tiny) fixture could be scanned before the
+        first signal is even delivered, and there would be nothing left
+        to cancel.
+        """
+        if Path(paths[0]) == held:
+            assert released.wait(timeout=10)
+        return real_scan_paths(paths, **kwargs)
+
+    monkeypatch.setattr(worker_module, "scan_paths", _hold_the_second_device)
+
+    worker = ScanWorker(ScanRequest(roots=(fast, held), archives=()))
+    finished: list[object] = []
+    worker.finished_ok.connect(finished.append)
+
+    def _cancel_then_release(_outcome: object) -> None:
+        """Cancel from the UI thread, then let the held device resume."""
+        worker.cancel()
+        released.set()
+
+    # Blocking-queued, so the cancel is guaranteed to be in effect
+    # before the held device thread is released.
+    worker.file_scanned.connect(_cancel_then_release,
+                                Qt.ConnectionType.BlockingQueuedConnection)
+
+    with qtbot.waitSignal(worker.cancelled, timeout=15000):
+        worker.start()
+
+    assert finished == []
+    assert worker.wait(5000)
+    assert _device_threads() == []
+
+
+def test_a_failing_device_group_fails_the_whole_parallel_run(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exception on one device stops the others and surfaces as
+    failed, with no device thread left behind."""
+    good = _mkroot(tmp_path, "good")
+    for index in range(5):
+        _write_normal(good / f"deck{index}.pptx", seed=index)
+    bad = _mkroot(tmp_path, "bad")
+    _write_normal(bad / "deck.pptx", seed=9)
+    _patch_devices(monkeypatch, {good: 1, bad: 2})
+
+    real_scan_paths = worker_module.scan_paths
+
+    def _explode_on_the_second_device(paths: list[Path], **kwargs: object):
+        """Fail the "bad" device the way an unplugged volume would."""
+        if Path(paths[0]) == bad:
+            raise RuntimeError("device offline")
+        return real_scan_paths(paths, **kwargs)
+
+    monkeypatch.setattr(worker_module, "scan_paths",
+                        _explode_on_the_second_device)
+
+    worker = ScanWorker(ScanRequest(roots=(good, bad), archives=()))
+    finished: list[object] = []
+    worker.finished_ok.connect(finished.append)
+
+    with qtbot.waitSignal(worker.failed, timeout=15000) as blocker:
+        worker.start()
+
+    assert blocker.args[0] == "RuntimeError: device offline"
+    assert finished == []
+    assert worker.wait(5000)
+    assert _device_threads() == []
 
 
 # --------------------------------------------------------------------------
@@ -257,6 +1030,17 @@ def test_run_options_disabled_while_running(
     assert run_options._size_spin.isEnabled()
 
 
+def test_run_options_ignore_hidden_defaults_true(
+    run_options: RunOptionsPanel,
+) -> None:
+    """The "Ignore hidden files" checkbox starts checked, and unchecking
+    it is reflected by the accessor."""
+    assert run_options.ignore_hidden() is True
+
+    run_options._hidden_check.setChecked(False)
+    assert run_options.ignore_hidden() is False
+
+
 # --------------------------------------------------------------------------
 # ScanResultsModel
 # --------------------------------------------------------------------------
@@ -307,6 +1091,23 @@ def test_results_model_empty_result_has_no_rows() -> None:
     assert model.rowCount() == 0
 
 
+def test_results_model_shows_a_hidden_skip_row(tmp_path: Path) -> None:
+    """A hidden .pptx -- skipped by default -- renders as a grey "skipped
+    (hidden)" row, not among the diagnosed outcomes."""
+    root = _mkroot(tmp_path)
+    _write_normal(root / ".hidden.pptx", seed=1)
+
+    scan_result = scan_paths([root])
+    gui_result = GuiScanResult(scan=scan_result)
+
+    model = ScanResultsModel()
+    model.set_result(gui_result)
+
+    assert scan_result.outcomes == []
+    assert model.rowCount() == 1
+    assert _display(model, 0, 1) == "skipped (hidden)"
+
+
 # --------------------------------------------------------------------------
 # MainWindow integration
 # --------------------------------------------------------------------------
@@ -332,6 +1133,52 @@ def test_scan_button_enables_when_sources_added(
     assert main_window._scan_button.isEnabled()
 
 
+def test_on_walk_progress_shows_path_on_status_bar(
+    main_window: MainWindow,
+) -> None:
+    """_on_walk_progress puts the visited directory on the status bar."""
+    main_window._on_walk_progress("X")
+
+    assert "X" in main_window.statusBar().currentMessage()
+
+
+def test_on_archive_progress_shows_a_percentage_when_the_total_is_known(
+    main_window: MainWindow,
+) -> None:
+    """_on_archive_progress names the archive and its completion percent."""
+    main_window._on_archive_progress("/backups/big.tar.gz", 25, 200)
+
+    message = main_window.statusBar().currentMessage()
+    assert "big.tar.gz" in message
+    assert "12%" in message
+    # The archive is named by its file name alone, never its full path.
+    assert "/backups/" not in message
+
+
+def test_on_archive_progress_omits_the_percentage_without_a_total(
+    main_window: MainWindow,
+) -> None:
+    """An unknown archive size (total 0) drops the percentage rather than
+    faking one, and never divides by zero."""
+    main_window._on_archive_progress("/backups/big.tar.gz", 0, 0)
+
+    message = main_window.statusBar().currentMessage()
+    assert "big.tar.gz" in message
+    assert "%" not in message
+
+
+def test_close_event_removes_the_session_cache_directory(
+    main_window: MainWindow,
+) -> None:
+    """Closing the window deletes the archive material cache it owns."""
+    cache_root = Path(main_window._cache_dir.name)
+    assert cache_root.is_dir()
+
+    main_window.close()
+
+    assert not cache_root.exists()
+
+
 def test_scan_populates_results_panel(
     main_window: MainWindow, qtbot: QtBot, tmp_path: Path
 ) -> None:
@@ -349,3 +1196,21 @@ def test_scan_populates_results_panel(
     assert not main_window._results_panel.isHidden()
     assert main_window._results_panel._model.rowCount() > 0
     assert main_window._scan_button.isEnabled()
+
+
+def test_scan_request_forwards_ignore_hidden_from_run_options(
+    main_window: MainWindow, qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Unchecking "Ignore hidden files" on the run-options panel reaches
+    the built ScanRequest, so a hidden .pptx is diagnosed rather than
+    silently skipped."""
+    root = _mkroot(tmp_path)
+    _write_normal(root / ".hidden.pptx", seed=1)
+    main_window._sources.add_paths([root])
+    main_window._run_options._hidden_check.setChecked(False)
+
+    main_window._start_scan()
+
+    qtbot.waitUntil(lambda: main_window._scan_worker is None, timeout=15000)
+
+    assert main_window._results_panel._model.rowCount() == 1

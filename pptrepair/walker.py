@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import os
 import stat
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -40,6 +40,11 @@ LEGACY_SUFFIXES = frozenset({".ppt"})
 
 #: Prefix of Office owner/lock temp files (``~$presentation.pptx``).
 TEMP_PREFIX = "~$"
+
+#: Prefix of hidden files (``.foo.pptx``, macOS AppleDouble
+#: ``._foo.pptx``). Such names are metadata or importer debris rather
+#: than presentations, so they are skipped by default (``ignore_hidden``).
+HIDDEN_PREFIX = "."
 
 #: macOS ``st_flags`` bit: the file is a dataless (cloud-only) object.
 #: ``stat.SF_DATALESS`` exists only on Python 3.13+, hence the literal.
@@ -88,6 +93,12 @@ class WalkResult:
     ``download_target`` but exceed ``max_file_bytes`` (populated only
     when that limit is given); left in ``skipped_oversize`` and never
     added to ``targets`` or ``download_targets``."""
+    skipped_hidden: list[Path] = field(default_factory=list)
+    """Hidden files (name starting with :data:`HIDDEN_PREFIX`) that
+    would otherwise have been classified -- PowerPoint suffixes and,
+    with ``collect_archives``, backup archives -- skipped under
+    ``ignore_hidden``. Hidden files with unrelated suffixes are ignored
+    silently, exactly as their non-hidden counterparts are."""
 
 
 def is_cloud_placeholder(st: os.stat_result) -> bool:
@@ -144,7 +155,8 @@ def _resolve_stat(path: Path, lst: os.stat_result, *,
 
 def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
                     allow_download: bool, collect_archives: bool,
-                    max_file_bytes: int | None = None) -> None:
+                    max_file_bytes: int | None = None,
+                    ignore_hidden: bool = True) -> None:
     """Sort *path* into the appropriate bucket of *result*.
 
     The name-based filters run first: placeholder metadata already
@@ -152,6 +164,15 @@ def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
     ruled out without ever considering a download. Only ``.pptx`` /
     ``.pptm`` candidates are subject to the cloud-placeholder skip and
     download accounting.
+
+    With *ignore_hidden* (the default), a file whose name starts with
+    :data:`HIDDEN_PREFIX` never proceeds past the name filters: when it
+    would otherwise have been classified (PowerPoint suffixes,
+    including legacy ``.ppt``, and -- with *collect_archives* -- backup
+    archives) it is recorded in ``result.skipped_hidden``; any other
+    hidden file is dropped silently, exactly like an unrelated suffix.
+    Because this is a pure name check running before the placeholder
+    logic, a hidden cloud-only file is never downloaded.
 
     With *max_file_bytes* given, a ``.pptx``/``.pptm`` candidate that
     would otherwise become a ``target`` (or ``download_target``) is
@@ -181,6 +202,16 @@ def _classify_file(result: WalkResult, path: Path, st: os.stat_result, *,
         result.skipped_temp.append(path)
         return
     suffix = path.suffix.lower()
+    if ignore_hidden and path.name.startswith(HIDDEN_PREFIX):
+        relevant = suffix in TARGET_SUFFIXES or suffix in LEGACY_SUFFIXES
+        if not relevant and collect_archives:
+            # Local import: pptrepair.archive imports names from this
+            # module, so a top-level import here would be a cycle.
+            from pptrepair.archive import is_archive
+            relevant = is_archive(path)
+        if relevant:
+            result.skipped_hidden.append(path)
+        return
     if suffix in LEGACY_SUFFIXES:
         result.skipped_legacy.append(path)
         return
@@ -243,7 +274,9 @@ def _enter_directory(result: WalkResult, path: Path, st: os.stat_result, *,
 def _walk_directory(root: Path, result: WalkResult, *, follow_symlinks: bool,
                      allow_download: bool, collect_archives: bool,
                      visited: set[tuple[int, int]],
-                     max_file_bytes: int | None = None) -> None:
+                     max_file_bytes: int | None = None,
+                     on_directory: Callable[[Path], None] | None = None,
+                     ignore_hidden: bool = True) -> None:
     """Recursively walk *root* (already confirmed to be a directory).
 
     Uses ``os.walk`` for the traversal itself but takes over both the
@@ -258,6 +291,12 @@ def _walk_directory(root: Path, result: WalkResult, *, follow_symlinks: bool,
     for top, dirs, files in os.walk(root, followlinks=follow_symlinks,
                                      onerror=_onerror):
         top_path = Path(top)
+        if on_directory is not None:
+            # *root* itself is always the first `top`, so the root is
+            # covered without any special-casing here; an exception
+            # raised by the callback is left to propagate (see the
+            # coordinated cancellation contract on discover_targets).
+            on_directory(top_path)
         # Sort in place: os.walk uses `dirs` to decide what to recurse
         # into next, and both lists must be in deterministic order.
         dirs.sort()
@@ -293,14 +332,17 @@ def _walk_directory(root: Path, result: WalkResult, *, follow_symlinks: bool,
             _classify_file(result, file_path, file_st,
                             allow_download=allow_download,
                             collect_archives=collect_archives,
-                            max_file_bytes=max_file_bytes)
+                            max_file_bytes=max_file_bytes,
+                            ignore_hidden=ignore_hidden)
 
 
 def discover_targets(roots: Sequence[Path], *,
                      follow_symlinks: bool = False,
                      allow_download: bool = False,
                      collect_archives: bool = False,
-                     max_file_bytes: int | None = None) -> WalkResult:
+                     max_file_bytes: int | None = None,
+                     on_directory: Callable[[Path], None] | None = None,
+                     ignore_hidden: bool = True) -> WalkResult:
     """Discover PowerPoint files under *roots* without opening any file.
 
     Implementation requirements:
@@ -330,6 +372,17 @@ def discover_targets(roots: Sequence[Path], *,
       without ``allow_download``, else ``archives`` + ``download_targets``).
       Every other bucket, and the default ``collect_archives=False``
       behaviour, is unchanged.
+    * With *ignore_hidden* (the default), a hidden file -- name starting
+      with :data:`HIDDEN_PREFIX`, e.g. macOS AppleDouble ``._foo.pptx``
+      -- that would otherwise have been classified (PowerPoint suffixes
+      and, with *collect_archives*, backup archives) is recorded in
+      ``skipped_hidden`` instead; other hidden files stay silently
+      ignored. The check is name-only and precedes the placeholder
+      logic, so a hidden cloud-only file is never downloaded. Hidden
+      *directories* are still descended into: only file names are
+      filtered. An explicitly named root that is a hidden file is
+      subject to the same rule. With ``ignore_hidden=False`` behaviour
+      is byte-for-byte the pre-option one.
     * With *max_file_bytes* given, a ``.pptx``/``.pptm`` candidate whose
       size (``st_size``) is strictly greater than the limit is recorded
       in ``skipped_oversize`` instead of ``targets``/``download_targets``
@@ -352,6 +405,15 @@ def discover_targets(roots: Sequence[Path], *,
     * Unreadable directories or files (``PermissionError``,
       ``FileNotFoundError`` from a race, ``OSError``) append
       ``(path, str(exc))`` to ``errors`` and never abort the walk.
+    * *on_directory* (when given) is invoked once per directory visited
+      while descending a directory root, with that directory's path --
+      including the root directory itself, since ``os.walk``'s first
+      ``top`` is always the root. Not invoked for a root that is a
+      file. Its exception is not caught here and propagates to the
+      caller uncaught, exactly like *progress*/*on_download* in
+      :func:`pptrepair.scan.scan_paths`; see
+      :class:`pptrepair.cancel.OperationCancelled` for the coordinated
+      cancellation contract this enables (walk-time cancellation).
     """
     result = WalkResult()
     visited: set[tuple[int, int]] = set()
@@ -378,12 +440,15 @@ def discover_targets(roots: Sequence[Path], *,
                                  allow_download=allow_download,
                                  collect_archives=collect_archives,
                                  visited=visited,
-                                 max_file_bytes=max_file_bytes)
+                                 max_file_bytes=max_file_bytes,
+                                 on_directory=on_directory,
+                                 ignore_hidden=ignore_hidden)
         elif stat.S_ISREG(root_st.st_mode):
             _classify_file(result, root, root_st,
                             allow_download=allow_download,
                             collect_archives=collect_archives,
-                            max_file_bytes=max_file_bytes)
+                            max_file_bytes=max_file_bytes,
+                            ignore_hidden=ignore_hidden)
         # Other entry types (sockets, devices, FIFOs) are neither files
         # nor directories we can classify; silently ignored.
 

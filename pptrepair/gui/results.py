@@ -36,11 +36,8 @@ from PySide6.QtWidgets import (
 from pptrepair.batch import BatchItem, BatchResult
 from pptrepair.classify import Verdict
 from pptrepair.gui.i18n import tr
-from pptrepair.gui.worker import (
-    GuiScanResult,
-    MergeItemOutcome,
-    MultiRepairResult,
-)
+from pptrepair.gui.repair_workers import MergeItemOutcome, MultiRepairResult
+from pptrepair.gui.worker import GuiScanResult
 from pptrepair.repair import RepairOutcome
 
 # The three candidate-computation functions below are report.py's own
@@ -115,6 +112,7 @@ def _skip_rows(walk: WalkResult) -> list[_ResultRow]:
     rows: list[_ResultRow] = []
     skip_labels = (
         (walk.skipped_oversize, tr("skipped (size limit)")),
+        (walk.skipped_hidden, tr("skipped (hidden)")),
         (walk.skipped_cloud, tr("skipped (cloud-only)")),
         (walk.skipped_legacy, tr("skipped (legacy .ppt)")),
         (walk.skipped_temp, tr("skipped (temp file)")),
@@ -616,9 +614,9 @@ def _summary_text(result: GuiScanResult) -> str:
     skipped = 0
     if scan is not None:
         walk = scan.walk
-        skipped = (len(walk.skipped_oversize) + len(walk.skipped_cloud)
-                   + len(walk.skipped_legacy) + len(walk.skipped_temp)
-                   + len(walk.errors))
+        skipped = (len(walk.skipped_oversize) + len(walk.skipped_hidden)
+                   + len(walk.skipped_cloud) + len(walk.skipped_legacy)
+                   + len(walk.skipped_temp) + len(walk.errors))
     materials = len(result.materials)
 
     head = tr("Scanned {n} file(s): {corrupted} corrupted, "

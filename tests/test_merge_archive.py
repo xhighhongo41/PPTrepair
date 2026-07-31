@@ -54,6 +54,26 @@ def _write_targz(path: Path, entries: dict[str, bytes]) -> None:
             tf.addfile(info, io.BytesIO(data))
 
 
+def _count_tar_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Patch tarfile.open to record the mode of every *read* open.
+
+    Mirrors :func:`test_scan_archive._count_tar_reads`: returns the
+    (initially empty) list the modes land in, ignoring write opens so a
+    test may keep writing fixture archives after the patch is installed.
+    """
+    modes: list[str] = []
+    real_open = tarfile.open
+
+    def _counting_open(*args: object, **kwargs: object) -> tarfile.TarFile:
+        mode = kwargs.get("mode", args[1] if len(args) > 1 else "r")
+        if isinstance(mode, str) and mode.startswith("r"):
+            modes.append(mode)
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(tarfile, "open", _counting_open)
+    return modes
+
+
 def _entry_interval(data: bytes, name: str) -> tuple[int, int]:
     """Return the ``[offset, next_offset)`` byte range of member *name*.
 
@@ -143,6 +163,39 @@ def test_targz_archive_twin_auto_tier_splices_full(
 
     out_text = capsys.readouterr().out
     assert exit_code == EXIT_OK
+    assert out_path.read_bytes() == data
+    assert "Guarantee: full" in out_text
+
+
+def test_targz_source_is_read_in_a_single_pass(
+    tmp_path: Path, capsys: CaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``.tar.gz`` SRC is swept exactly once however many members it
+    holds: enumerating and extracting are fused into one pass, so the
+    work no longer grows with the member count (a compressed tar has to
+    be decompressed from its first byte for every separate read)."""
+    data = build_minimal_pptx(num_slides=3, media_bytes=200_000)
+    media_start, media_end = _entry_interval(data, "ppt/media/image1.png")
+    (corrupted,) = make_corrupted_copies(
+        data, [[("zero_range", media_start, media_end)]])
+    path_a = _write(tmp_path, "a.pptx", corrupted)
+    archive_path = tmp_path / "backup.tar.gz"
+    _write_targz(archive_path, {
+        "backups/other1.pptx": build_minimal_pptx(num_slides=1,
+                                                  media_bytes=20_000, seed=11),
+        "backups/deck.pptx": data,
+        "backups/other2.pptx": build_minimal_pptx(num_slides=1,
+                                                  media_bytes=20_000, seed=12),
+    })
+    out_path = tmp_path / "out.pptx"
+    modes = _count_tar_reads(monkeypatch)
+
+    exit_code = main(
+        ["merge", str(path_a), str(archive_path), "-o", str(out_path)])
+
+    out_text = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert modes == ["r|*"]
     assert out_path.read_bytes() == data
     assert "Guarantee: full" in out_text
 
@@ -279,6 +332,52 @@ def test_empty_archive_source_is_noted_and_ignored(
     assert out_path.read_bytes() == data
     assert "has no usable" in out_text
     assert str(empty_archive) in out_text
+
+
+def test_empty_targz_source_is_noted_and_ignored(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """The same degenerate note covers a tar-family backup, whose members
+    are only ever discovered while the single extraction pass runs."""
+    data = build_minimal_pptx(num_slides=2, media_bytes=20_000)
+    path_a = _write(tmp_path, "a.pptx", data)
+    path_b = _write(tmp_path, "b.pptx", data)
+    empty_archive = tmp_path / "empty.tar.gz"
+    _write_targz(empty_archive, {"notes.txt": b"no pptx in here"})
+    out_path = tmp_path / "out.pptx"
+
+    exit_code = main(
+        ["merge", str(path_a), str(path_b), str(empty_archive),
+         "-o", str(out_path)])
+
+    out_text = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert out_path.read_bytes() == data
+    assert "has no usable" in out_text
+    assert str(empty_archive) in out_text
+
+
+def test_unreadable_archive_keeps_its_own_note_instead_of_the_empty_one(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """An archive that cannot be read at all says so in its own words: the
+    "no usable member" note is reserved for a readable archive that simply
+    holds no presentation, and must not double up on this one."""
+    data = build_minimal_pptx(num_slides=2, media_bytes=20_000)
+    path_a = _write(tmp_path, "a.pptx", data)
+    path_b = _write(tmp_path, "b.pptx", data)
+    broken_archive = _write(tmp_path, "broken.zip", b"not a zip at all")
+    out_path = tmp_path / "out.pptx"
+
+    exit_code = main(
+        ["merge", str(path_a), str(path_b), str(broken_archive),
+         "-o", str(out_path)])
+
+    out_text = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert "cannot read archive" in out_text
+    assert str(broken_archive) in out_text
+    assert "has no usable" not in out_text
 
 
 def test_empty_archive_only_other_source_falls_back_to_shortage_error(

@@ -36,6 +36,9 @@ msgstr "Hinweis: Verwenden Sie --force, um die vorhandene Ausgabe zu überschrei
 msgid "Hint: re-run with --report DIR to save shareable diagnostic fingerprints for these files."
 msgstr "Hinweis: Führen Sie den Scan erneut mit --report DIR aus, um teilbare Diagnose-Fingerabdrücke zu speichern."
 
+msgid "Ignore hidden files (names starting with '.')"
+msgstr "Versteckte Dateien ignorieren (Namen, die mit '.' beginnen)"
+
 msgid "Last Modified By"
 msgstr "Zuletzt geändert von"
 
@@ -86,6 +89,9 @@ msgstr "Übersprungen: {n} Office-Temporärdatei(en)"
 
 msgid "Skipped: {n} file(s) over the size limit"
 msgstr "Übersprungen: {n} Datei(en) über der Größenbegrenzung"
+
+msgid "Skipped: {n} hidden file(s)"
+msgstr "Übersprungen: {n} versteckte Datei(en)"
 
 msgid "Skipped: {n} legacy .ppt file(s)"
 msgstr "Übersprungen: {n} veraltete .ppt-Datei(en)"
@@ -429,6 +435,9 @@ msgstr "Standard-Ausgabeordner"
 msgid "Default repair mode:"
 msgstr "Standard-Reparaturmodus:"
 
+msgid "Deselect all"
+msgstr "Alle abwählen"
+
 msgid "Detail"
 msgstr "Detail"
 
@@ -528,11 +537,20 @@ msgstr "Einstellungen…"
 msgid "Quit"
 msgstr "Beenden"
 
+msgid "Reading archive {name}…"
+msgstr "Lese Archiv {name}…"
+
+msgid "Reading archive {name}… {percent}%"
+msgstr "Lese Archiv {name}… {percent}%"
+
 msgid "Ready"
 msgstr "Bereit"
 
 msgid "Recent Folders"
 msgstr "Zuletzt verwendete Ordner"
+
+msgid "Rejected sources"
+msgstr "Abgewiesene Quellen"
 
 msgid "Remove Selected"
 msgstr "Auswahl entfernen"
@@ -576,6 +594,9 @@ msgstr "Wird repariert… {done} von {total}"
 msgid "Repairing… {n} file(s) processed"
 msgstr "Wird repariert… {n} Datei(en) verarbeitet"
 
+msgid "Reset to default"
+msgstr "Auf Standard zurücksetzen"
+
 msgid "Review the donors for each corrupted file, then click Repair."
 msgstr "Überprüfen Sie die Quellen für jede beschädigte Datei und klicken Sie dann auf „Reparieren“."
 
@@ -597,11 +618,17 @@ msgstr "Scan fehlgeschlagen: {message}"
 msgid "Scanned {n} file(s): {corrupted} corrupted, {intact} intact"
 msgstr "Gescannt {n} Datei(en): {corrupted} beschädigt, {intact} intakt"
 
+msgid "Scanning {path}…"
+msgstr "Durchsuche {path}…"
+
 msgid "Scanning…"
 msgstr "Wird gescannt…"
 
 msgid "Scanning… {files} file(s) diagnosed, {materials} material(s) mined"
 msgstr "Wird gescannt… {files} Datei(en) diagnostiziert, {materials} Material(ien) extrahiert"
+
+msgid "Select all"
+msgstr "Alle auswählen"
 
 msgid "Settings"
 msgstr "Einstellungen"
@@ -630,6 +657,9 @@ msgstr "Der Scan wurde unerwartet gestoppt:\n{message}"
 msgid "Twin candidates"
 msgstr "Wiederherstellungskandidaten"
 
+msgid "could not be accessed ({detail})"
+msgstr "Zugriff nicht möglich ({detail})"
+
 msgid "error"
 msgstr "Fehler"
 
@@ -651,11 +681,17 @@ msgstr "Zusammenführung fehlgeschlagen {n}"
 msgid "merge failed: no output could be reconstructed"
 msgstr "Zusammenführung fehlgeschlagen: Es konnte keine Ausgabe rekonstruiert werden"
 
+msgid "not found"
+msgstr "nicht gefunden"
+
 msgid "pptrepair: error: PySide6 is not installed. Install the GUI extra with: pip install 'pptrepair[gui]'"
 msgstr "pptrepair: Fehler: PySide6 ist nicht installiert. Installieren Sie das GUI-Extra mit: pip install 'pptrepair[gui]'"
 
 msgid "skipped (cloud-only)"
 msgstr "übersprungen (nur Cloud)"
+
+msgid "skipped (hidden)"
+msgstr "übersprungen (versteckt)"
 
 msgid "skipped (legacy .ppt)"
 msgstr "übersprungen (veraltetes .ppt)"
@@ -665,6 +701,9 @@ msgstr "übersprungen (Größenbegrenzung)"
 
 msgid "skipped (temp file)"
 msgstr "übersprungen (Temporärdatei)"
+
+msgid "unsupported file type"
+msgstr "nicht unterstützter Dateityp"
 
 msgid "{n} archive material(s)"
 msgstr "{n} Archivmaterial(ien)"

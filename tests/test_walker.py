@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from pptrepair import walker
 from pptrepair.walker import discover_targets, is_cloud_placeholder
 
@@ -406,6 +408,131 @@ def test_discover_targets_max_file_bytes_skips_oversize_placeholder(
     assert cloud_file not in result.download_targets
 
 
+# --- discover_targets: ignore_hidden ----------------------------------------
+
+
+def test_discover_targets_skips_hidden_pptx_by_default(tmp_path: Path) -> None:
+    """A hidden .pptx -- both a leading-dot name and a macOS AppleDouble
+    ``._`` name -- lands in skipped_hidden, not targets, under the
+    default ignore_hidden=True."""
+    root = tmp_path / "root"
+    root.mkdir()
+    apple_double = root / "._deck.pptx"
+    dotted = root / ".deck.pptx"
+    normal = root / "deck.pptx"
+    for path in (apple_double, dotted, normal):
+        path.write_bytes(b"data")
+
+    result = discover_targets([root])
+
+    assert set(result.skipped_hidden) == {apple_double, dotted}
+    assert result.targets == [normal]
+
+
+def test_discover_targets_skips_hidden_legacy_ppt_by_default(
+        tmp_path: Path) -> None:
+    """A hidden legacy .ppt is bucketed as skipped_hidden, not
+    skipped_legacy."""
+    root = tmp_path / "root"
+    root.mkdir()
+    hidden_legacy = root / ".old.ppt"
+    hidden_legacy.write_bytes(b"data")
+
+    result = discover_targets([root])
+
+    assert result.skipped_hidden == [hidden_legacy]
+    assert result.skipped_legacy == []
+
+
+def test_discover_targets_skips_hidden_archive_when_collecting(
+        tmp_path: Path) -> None:
+    """With collect_archives=True, a hidden backup archive is bucketed as
+    skipped_hidden, not archives."""
+    root = tmp_path / "root"
+    root.mkdir()
+    hidden_archive = root / ".backup.zip"
+    hidden_archive.write_bytes(b"data")
+    normal_archive = root / "backup.zip"
+    normal_archive.write_bytes(b"data")
+
+    result = discover_targets([root], collect_archives=True)
+
+    assert result.skipped_hidden == [hidden_archive]
+    assert result.archives == [normal_archive]
+
+
+def test_discover_targets_ignore_hidden_false_restores_legacy_behaviour(
+        tmp_path: Path) -> None:
+    """With ignore_hidden=False, hidden PowerPoint files, a hidden legacy
+    .ppt and (with collect_archives) a hidden archive land in their
+    ordinary buckets exactly as their non-hidden counterparts do."""
+    root = tmp_path / "root"
+    root.mkdir()
+    apple_double = root / "._deck.pptx"
+    dotted = root / ".deck.pptx"
+    hidden_legacy = root / ".old.ppt"
+    hidden_archive = root / ".backup.zip"
+    for path in (apple_double, dotted, hidden_legacy, hidden_archive):
+        path.write_bytes(b"data")
+
+    result = discover_targets([root], collect_archives=True,
+                              ignore_hidden=False)
+
+    assert set(result.targets) == {apple_double, dotted}
+    assert result.skipped_legacy == [hidden_legacy]
+    assert result.archives == [hidden_archive]
+    assert result.skipped_hidden == []
+
+
+def test_discover_targets_ignores_unrelated_hidden_file_silently(
+        tmp_path: Path) -> None:
+    """A hidden file with an unrelated suffix (e.g. .DS_Store) is dropped
+    silently: it appears in no bucket, and no error is recorded."""
+    root = tmp_path / "root"
+    root.mkdir()
+    ds_store = root / ".DS_Store"
+    ds_store.write_bytes(b"data")
+
+    result = discover_targets([root])
+
+    assert result.targets == []
+    assert result.skipped_hidden == []
+    assert result.skipped_legacy == []
+    assert result.errors == []
+
+
+def test_discover_targets_descends_into_hidden_directory(
+        tmp_path: Path) -> None:
+    """A hidden directory is still descended into; an ordinarily named
+    .pptx inside it is discovered as a normal target."""
+    root = tmp_path / "root"
+    hidden_dir = root / ".backup"
+    hidden_dir.mkdir(parents=True)
+    inner = hidden_dir / "deck.pptx"
+    inner.write_bytes(b"data")
+
+    result = discover_targets([root])
+
+    assert result.targets == [inner]
+    assert result.skipped_hidden == []
+
+
+def test_discover_targets_hidden_file_as_explicit_root(
+        tmp_path: Path) -> None:
+    """A hidden file named directly as a root is subject to the same
+    ignore_hidden rule as one found while walking a directory."""
+    hidden_file = tmp_path / ".deck.pptx"
+    hidden_file.write_bytes(b"data")
+
+    default_result = discover_targets([hidden_file])
+    assert default_result.skipped_hidden == [hidden_file]
+    assert default_result.targets == []
+
+    unfiltered_result = discover_targets([hidden_file], ignore_hidden=False)
+    assert unfiltered_result.targets == [hidden_file]
+    assert unfiltered_result.skipped_hidden == []
+
+
 # --- discover_targets: error handling ---------------------------------------
 
 
@@ -431,3 +558,85 @@ def test_discover_targets_permission_error_recorded_and_continues(
     assert result.targets == [ok_file]
     assert len(result.errors) == 1
     assert result.errors[0][0] == blocked
+
+
+# --- discover_targets: on_directory callback --------------------------------
+
+
+def test_discover_targets_on_directory_visits_in_sorted_order(
+        tmp_path: Path) -> None:
+    """on_directory receives every visited directory, root included, in
+    the same deterministic (sorted, top-down) order os.walk produces."""
+    root = tmp_path / "root"
+    (root / "b_dir").mkdir(parents=True)
+    (root / "a_dir").mkdir()
+    (root / "a_dir" / "inner.pptx").write_bytes(b"data")
+    (root / "b_dir" / "inner.pptx").write_bytes(b"data")
+    (root / "loose.pptx").write_bytes(b"data")
+
+    visited: list[Path] = []
+    result = discover_targets([root], on_directory=visited.append)
+
+    assert visited == [root, root / "a_dir", root / "b_dir"]
+    # The callback is purely observational: targets are unaffected.
+    assert result.targets == [
+        root / "loose.pptx",
+        root / "a_dir" / "inner.pptx",
+        root / "b_dir" / "inner.pptx",
+    ]
+
+
+def test_discover_targets_on_directory_not_called_for_file_root(
+        tmp_path: Path) -> None:
+    """A root that is itself a file never triggers on_directory: there is
+    no walk to report progress for."""
+    file_root = tmp_path / "solo.pptx"
+    file_root.write_bytes(b"data")
+
+    visited: list[Path] = []
+    result = discover_targets([file_root], on_directory=visited.append)
+
+    assert visited == []
+    assert result.targets == [file_root]
+
+
+def test_discover_targets_on_directory_exception_propagates(
+        tmp_path: Path) -> None:
+    """An exception raised by on_directory is not caught by the walk: it
+    propagates to the caller, the documented cooperative-cancellation
+    contract shared with progress/on_download."""
+    root = tmp_path / "root"
+    (root / "child").mkdir(parents=True)
+    (root / "child" / "inner.pptx").write_bytes(b"data")
+
+    calls: list[Path] = []
+
+    class _Stop(Exception):
+        pass
+
+    def _raise_on_first(path: Path) -> None:
+        calls.append(path)
+        raise _Stop("cancelled")
+
+    with pytest.raises(_Stop):
+        discover_targets([root], on_directory=_raise_on_first)
+
+    assert calls == [root]
+
+
+def test_discover_targets_on_directory_none_is_unchanged(
+        tmp_path: Path) -> None:
+    """Omitting on_directory (the default None) leaves the result exactly
+    as before this parameter existed."""
+    root = tmp_path / "root"
+    (root / "a").mkdir(parents=True)
+    (root / "a" / "c.pptx").write_bytes(b"data")
+    (root / "b.pptx").write_bytes(b"data")
+
+    without_callback = discover_targets([root])
+    with_none = discover_targets([root], on_directory=None)
+
+    assert without_callback.targets == with_none.targets == [
+        root / "b.pptx",
+        root / "a" / "c.pptx",
+    ]

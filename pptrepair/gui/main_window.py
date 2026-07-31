@@ -2,17 +2,21 @@
 
 Owns the whole scan and single-file-repair lifecycle on the UI thread:
 it builds a :class:`~pptrepair.gui.worker.ScanRequest` /
-:class:`~pptrepair.gui.worker.RepairRequest` from the accumulated
-sources, starts a :class:`~pptrepair.gui.worker.ScanWorker` /
-:class:`~pptrepair.gui.worker.RepairWorker` on a background thread, and
-reacts to that worker's signals (all delivered here on the UI thread
-via Qt's queued connections) to stream progress, show results, and
-re-enable the UI. Cancellation and window-close are handled
-cooperatively so a running worker never leaves a dangling thread.
+:class:`~pptrepair.gui.repair_workers.RepairRequest` from the
+accumulated sources, starts a :class:`~pptrepair.gui.worker.ScanWorker`
+/ :class:`~pptrepair.gui.repair_workers.RepairWorker` on a background
+thread, and reacts to that worker's signals (all delivered here on the
+UI thread via Qt's queued connections) to stream progress, show
+results, and re-enable the UI. Cancellation and window-close are
+handled cooperatively so a running worker never leaves a dangling
+thread.
 """
 
 from __future__ import annotations
 
+import contextlib
+import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QUrl
@@ -41,22 +45,27 @@ from pptrepair.batch import BatchResult
 from pptrepair.gui.donor_dialog import DonorApprovalDialog
 from pptrepair.gui.i18n import tr
 from pptrepair.gui.merge_plan import build_target_plans
-from pptrepair.gui.results import ResultsPanel
-from pptrepair.gui.run_options import RepairMode, RunOptionsPanel
-from pptrepair.gui.settings import Settings, SettingsDialog
-from pptrepair.gui.source_panel import SourcePanel
-from pptrepair.gui.sources import AddResult, SourceKind, SourceListModel
-from pptrepair.gui.worker import (
-    GuiScanResult,
+from pptrepair.gui.repair_workers import (
     MultiRepairRequest,
     MultiRepairResult,
     MultiRepairWorker,
     RepairRequest,
     RepairWorker,
-    ScanRequest,
-    ScanWorker,
 )
+from pptrepair.gui.results import ResultsPanel
+from pptrepair.gui.run_options import RepairMode, RunOptionsPanel
+from pptrepair.gui.settings import Settings, SettingsDialog
+from pptrepair.gui.source_panel import SourcePanel
+from pptrepair.gui.sources import (
+    AddResult,
+    RejectedSource,
+    RejectReason,
+    SourceKind,
+    SourceListModel,
+)
+from pptrepair.gui.worker import GuiScanResult, ScanRequest, ScanWorker
 from pptrepair.report import ISSUE_URL
+from pptrepair.scan import ArchiveMaterialCache
 
 #: How long (ms) window-close waits for a running worker to stop.
 _CLOSE_WAIT_MS = 5000
@@ -77,7 +86,12 @@ class MainWindow(QMainWindow):
     """
 
     def __init__(self) -> None:
-        """Build the window's central widget, menu bar and status bar."""
+        """Build the window's central widget, menu bar and status bar.
+
+        Also opens the session-lifetime archive material cache the scan
+        and repair workers share (see :attr:`_material_cache`), which
+        lives exactly as long as this window does.
+        """
         super().__init__()
         self.setWindowTitle("PPTrepair")
         self.resize(900, 600)
@@ -108,6 +122,18 @@ class MainWindow(QMainWindow):
         #: before starting a repair (see :meth:`_compute_open_target`);
         #: None until the first repair of this session starts.
         self._repair_open_target: Path | None = None
+
+        #: Session-lifetime scratch directory backing
+        #: :attr:`_material_cache`, and the cache itself. Every archive
+        #: member mined by a scan is kept here so the repair phase can
+        #: splice a donor's bytes without re-reading (and, for a
+        #: compressed tar, re-decompressing) the whole backup, and so a
+        #: rescan of the same archive costs nothing. The window owns
+        #: both: they are created here and removed in
+        #: :meth:`closeEvent`.
+        self._cache_dir = tempfile.TemporaryDirectory(
+            prefix="pptrepair-cache-")
+        self._material_cache = ArchiveMaterialCache(Path(self._cache_dir.name))
 
         #: Persisted preferences (QSettings-backed), loaded once here
         #: and applied to the run-options panel below; also reached
@@ -474,6 +500,7 @@ class MainWindow(QMainWindow):
             follow_symlinks=self._settings.follow_symlinks(),
             allow_download=self._run_options.allow_download(),
             max_file_bytes=self._run_options.max_file_bytes(),
+            ignore_hidden=self._run_options.ignore_hidden(),
         )
 
         self._files_diagnosed = 0
@@ -481,7 +508,9 @@ class MainWindow(QMainWindow):
         self._results_panel.clear()
         self._results_panel.hide()
 
-        worker = ScanWorker(request, self)
+        worker = ScanWorker(request, self, cache=self._material_cache)
+        worker.walk_progress.connect(self._on_walk_progress)
+        worker.archive_progress.connect(self._on_archive_progress)
         worker.file_scanned.connect(self._on_file_scanned)
         worker.material_scanned.connect(self._on_material_scanned)
         worker.download_started.connect(self._on_download_started)
@@ -577,6 +606,40 @@ class MainWindow(QMainWindow):
         self._scan_action.setEnabled(enabled)
 
     # -- worker signal handlers (UI thread) ----------------------------
+
+    def _on_walk_progress(self, path: str) -> None:
+        """Report which directory the discovery walk is currently visiting.
+
+        Fires during the otherwise-silent discovery phase, before any
+        file has been diagnosed; the initial :meth:`_start_scan`
+        ``tr("Scanning…")`` message is overwritten by this once the
+        walk reaches its first (throttled) directory.
+        """
+        self.statusBar().showMessage(tr("Scanning {path}…").format(path=path))
+
+    def _on_archive_progress(self, path: str, done: int, total: int) -> None:
+        """Report how far into a backup archive the mining pass has got.
+
+        The only feedback available while a single huge archive is being
+        read, where minutes can pass between two mined members. *total*
+        is the archive's size in bytes and *done* the position reached
+        in it; a *total* of 0 means the size could not be determined
+        (see :func:`pptrepair.archive.iter_materialized_members`), so
+        the percentage is dropped rather than faked.
+
+        :param path: the archive being read, named to the user by its
+            file name alone.
+        :param done: bytes of *path* processed so far.
+        :param total: *path*'s total size in bytes, or 0 when unknown.
+        """
+        name = Path(path).name
+        if total > 0:
+            self.statusBar().showMessage(
+                tr("Reading archive {name}… {percent}%").format(
+                    name=name, percent=done * 100 // total))
+        else:
+            self.statusBar().showMessage(
+                tr("Reading archive {name}…").format(name=name))
 
     def _on_file_scanned(self, outcome: object) -> None:
         """Count one diagnosed file and refresh the progress readout."""
@@ -872,7 +935,7 @@ class MainWindow(QMainWindow):
         self._open_output_button.setEnabled(False)
         self._open_output_button.hide()
 
-        worker = MultiRepairWorker(request, self)
+        worker = MultiRepairWorker(request, self, cache=self._material_cache)
         worker.merge_done.connect(self._on_merge_done)
         worker.file_repaired.connect(self._on_multi_file_repaired)
         worker.finished_ok.connect(self._on_multi_finished_ok)
@@ -1008,7 +1071,10 @@ class MainWindow(QMainWindow):
         :attr:`_settings`'s most-recently-used list exactly once,
         regardless of how it was added. A path already present (a
         duplicate, per :attr:`AddResult.duplicates`) is left where it
-        is in that list.
+        is in that list. Any rejected source (per
+        :attr:`AddResult.rejected`) is additionally reported through
+        :meth:`_show_reject_details`, since the status bar's one-line
+        summary has no room for individual reasons.
 
         :param result: the outcome of one
             :meth:`~pptrepair.gui.sources.SourceListModel.add_paths` call.
@@ -1017,6 +1083,24 @@ class MainWindow(QMainWindow):
         for entry in result.added:
             if entry.kind is SourceKind.FOLDER:
                 self._settings.push_recent_folder(entry.path)
+        if result.rejected:
+            self._show_reject_details(result.rejected)
+
+    def _show_reject_details(
+        self, rejected: Sequence[RejectedSource]
+    ) -> None:
+        """Show a dialog detailing why each path in *rejected* was skipped.
+
+        A thin wrapper around :func:`QMessageBox.warning` -- kept as its
+        own method so tests can monkeypatch it and record its calls
+        without having to drive a real modal dialog.
+
+        :param rejected: the rejected sources to report, as returned by
+            :meth:`~pptrepair.gui.sources.SourceListModel.add_paths`.
+        """
+        QMessageBox.warning(
+            self, tr("Rejected sources"),
+            self._format_reject_details(rejected))
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         """Accept a drag that carries at least one local file URL.
@@ -1056,6 +1140,27 @@ class MainWindow(QMainWindow):
         return any(url.isLocalFile() for url in mime_data.urls())
 
     @staticmethod
+    def _format_reject_details(rejected: Sequence[RejectedSource]) -> str:
+        """Render one reason line per rejected source, newline-joined.
+
+        :param rejected: the rejected sources to describe, as returned
+            by :meth:`~pptrepair.gui.sources.SourceListModel.add_paths`.
+        :returns: the message body for :meth:`_show_reject_details`.
+        """
+        lines = []
+        for item in rejected:
+            if item.reason is RejectReason.NOT_FOUND:
+                reason_text = tr("not found")
+            elif item.reason is RejectReason.ACCESS_ERROR:
+                reason_text = tr(
+                    "could not be accessed ({detail})").format(
+                        detail=item.detail)
+            else:
+                reason_text = tr("unsupported file type")
+            lines.append(f"{item.path} — {reason_text}")
+        return "\n".join(lines)
+
+    @staticmethod
     def _format_add_result(result: AddResult) -> str:
         """Summarise *result* as an English status-bar message.
 
@@ -1085,7 +1190,18 @@ class MainWindow(QMainWindow):
 
         Requests cancellation and blocks (briefly) for each worker to
         unwind so the process never exits with a live scan/repair
-        thread. Runs on the UI thread.
+        thread. Only then is the session's archive material cache
+        deleted -- a worker still mining into it must never have the
+        directory pulled out from under it. Runs on the UI thread.
+
+        Deleting the cache is best effort (a file locked by a virus
+        scanner, a vanished directory, ...): a leftover temporary
+        directory must not stop the window from closing. Should this
+        deletion never happen at all -- a hard crash, ``os._exit``, a
+        close event that is not delivered -- :mod:`tempfile`'s own
+        finalizer for the directory object is the backstop, and the
+        operating system's temporary-directory policy the one after
+        that.
 
         :param event: Qt's close event.
         """
@@ -1094,4 +1210,6 @@ class MainWindow(QMainWindow):
             if worker is not None and worker.isRunning():
                 worker.cancel()
                 worker.wait(_CLOSE_WAIT_MS)
+        with contextlib.suppress(OSError):
+            self._cache_dir.cleanup()
         super().closeEvent(event)

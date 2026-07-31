@@ -331,3 +331,23 @@ def test_max_file_size_skips_oversize_file_no_artifact_written(
     assert "Skipped: 1 file(s) over the size limit" in out_text
     assert "Repaired: 0 file(s)" in out_text
     assert not out.exists()
+
+
+# --- --include-hidden -----------------------------------------------------
+
+
+def test_include_hidden_flag_is_accepted_and_repairs_a_hidden_file(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """--include-hidden is a recognised flag; with it, a hidden corrupted
+    file is repaired instead of being silently skipped by default."""
+    root = _mkroot(tmp_path)
+    _write(root, ".trunc.pptx", _rebuildable_truncated())
+    out = tmp_path / "out"
+
+    exit_code = main(
+        ["repair-all", str(root), "-o", str(out), "--include-hidden"])
+
+    out_text = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert "Repaired: 1 file(s)" in out_text

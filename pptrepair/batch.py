@@ -390,6 +390,7 @@ def repair_paths(roots: Sequence[Path], *, output_dir: Path | None,
                  follow_symlinks: bool = False, allow_download: bool = False,
                  include_filenames: bool = False, search_archives: bool = False,
                  max_file_bytes: int | None = None,
+                 ignore_hidden: bool = True,
                  lang: str = "en",
                  progress: Callable[[FileOutcome], None] | None = None,
                  repair_progress: Callable[[BatchItem], None] | None = None,
@@ -416,17 +417,20 @@ def repair_paths(roots: Sequence[Path], *, output_dir: Path | None,
       None) in *in_place* mode; *in_place* and a None *output_dir* are
       only valid together.
     * *force* / *follow_symlinks* / *allow_download* / *include_filenames*
-      / *search_archives* / *max_file_bytes* / *lang* / *on_download*
-      keep their :func:`scan_paths` / :func:`repair_file` meanings.
-      *search_archives* is passed to phase 1 only: the mined archive
-      material feeds the report's donor-candidate sections, but phase 2
-      repairs strictly ``scan.corrupted()`` (on-disk files), so no
-      archive member is ever itself repaired. *max_file_bytes* is
-      likewise phase-1 only: a file it excludes never becomes a
-      ``scan.corrupted()`` entry, so phase 2 never sees it either;
-      ``counts()`` is unaffected (a skip is scan-layer bookkeeping, not
-      a repair action), left at the default ``None`` this is a
-      complete no-op.
+      / *search_archives* / *max_file_bytes* / *ignore_hidden* / *lang*
+      / *on_download* keep their :func:`scan_paths` / :func:`repair_file`
+      meanings. *search_archives* is passed to phase 1 only: the mined
+      archive material feeds the report's donor-candidate sections, but
+      phase 2 repairs strictly ``scan.corrupted()`` (on-disk files), so
+      no archive member is ever itself repaired. *max_file_bytes* and
+      *ignore_hidden* are likewise phase-1 only: a file either of them
+      excludes never becomes a ``scan.corrupted()`` entry, so phase 2 never sees
+      it either; ``counts()`` is unaffected (a skip is scan-layer
+      bookkeeping, not a repair action). *max_file_bytes* left at its
+      default ``None`` (no limit) is a complete no-op; *ignore_hidden*
+      defaults to ``True``, matching :func:`scan_paths`'s own default of
+      skipping hidden files, so a caller that wants them examined must
+      pass ``ignore_hidden=False`` explicitly.
     * *material_progress* is forwarded to phase 1's :func:`scan_paths`
       as-is (phase 2 never touches archive material); a no-op whenever
       *search_archives* is False, or left at the default ``None``.
@@ -460,6 +464,7 @@ def repair_paths(roots: Sequence[Path], *, output_dir: Path | None,
         search_archives=search_archives,
         exclude=exclude,
         max_file_bytes=max_file_bytes,
+        ignore_hidden=ignore_hidden,
         progress=progress,
         on_download=on_download,
         material_progress=material_progress,

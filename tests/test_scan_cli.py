@@ -150,7 +150,7 @@ def test_json_output_schema_and_no_progress_lines_mixed_in(
         "fingerprints_skipped",
     }
     assert set(summary["skipped"]) == {
-        "legacy", "office_temp", "cloud_placeholder", "oversize"}
+        "legacy", "office_temp", "cloud_placeholder", "oversize", "hidden"}
     assert summary["scanned"] == 2
     assert summary["verdicts"] == {"normal": 1, "head_zero_fill": 1}
 
@@ -498,6 +498,43 @@ def test_scan_paths_progress_cancellation_leaves_no_report_files(
     assert not (report_dir / "scan_report.json").exists()
 
 
+# --- scan_paths() on_directory ---------------------------------------------
+
+
+def test_scan_paths_on_directory_passes_through_to_walker(
+    tmp_path: Path,
+) -> None:
+    """scan_paths forwards on_directory to discover_targets unchanged: the
+    walked root and its subdirectory both reach the caller's callback."""
+    root = _mkroot(tmp_path)
+    sub_dir = root / "sub"
+    sub_dir.mkdir()
+    _write(sub_dir, "deck.pptx",
+          build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+
+    visited: list[Path] = []
+    result = scan_module.scan_paths([root], on_directory=visited.append)
+
+    assert visited == [root, sub_dir]
+    assert len(result.outcomes) == 1
+
+
+def test_scan_paths_on_directory_cancellation_propagates(
+    tmp_path: Path,
+) -> None:
+    """An on_directory callback that raises OperationCancelled aborts the
+    scan before any file is diagnosed."""
+    root = _mkroot(tmp_path)
+    _write(root, "deck.pptx",
+          build_minimal_pptx(media_bytes=_MEDIA_BYTES))
+
+    def _cancel_on_first(_path: Path) -> None:
+        raise OperationCancelled("user requested cancellation")
+
+    with pytest.raises(OperationCancelled):
+        scan_module.scan_paths([root], on_directory=_cancel_on_first)
+
+
 # --- --max-file-size -----------------------------------------------------
 
 
@@ -553,3 +590,40 @@ def test_max_file_size_rejects_invalid_argument(
     with pytest.raises(SystemExit) as exc_info:
         main(["scan", str(root), "--max-file-size", bad_value])
     assert exc_info.value.code == 2
+
+
+def test_hidden_file_skipped_by_default_and_examined_with_include_hidden(
+    tmp_path: Path, capsys: CaptureFixture
+) -> None:
+    """A hidden .pptx is excluded from discovery by default -- counted
+    in skipped_hidden, not diagnosed -- and examined like any other
+    file once --include-hidden is given."""
+    root = _mkroot(tmp_path)
+    visible_path = _write(
+        root, "visible.pptx", build_minimal_pptx(media_bytes=1000))
+    hidden_path = _write(
+        root, ".hidden.pptx", build_minimal_pptx(media_bytes=1000))
+
+    exit_code = main(["scan", str(root)])
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert "Skipped: 1 hidden file(s)" in out
+    assert "Scanned: 1 file(s)" in out
+
+    exit_code_json = main(["scan", str(root), "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code_json == EXIT_OK
+    assert payload["summary"]["skipped"]["hidden"] == 1
+    assert payload["skipped_hidden"] == [str(hidden_path)]
+    assert payload["summary"]["scanned"] == 1
+    assert all(entry["path"] != str(hidden_path) for entry in payload["files"])
+    assert str(visible_path) in {entry["path"] for entry in payload["files"]}
+
+    exit_code_included = main(["scan", str(root), "--include-hidden", "--json"])
+    payload_included = json.loads(capsys.readouterr().out)
+    assert exit_code_included == EXIT_OK
+    assert payload_included["summary"]["skipped"]["hidden"] == 0
+    assert payload_included["skipped_hidden"] == []
+    assert payload_included["summary"]["scanned"] == 2
+    assert {entry["path"] for entry in payload_included["files"]} == {
+        str(visible_path), str(hidden_path)}

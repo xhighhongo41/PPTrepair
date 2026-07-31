@@ -1,6 +1,6 @@
 """Tests for the GUI's single-file repair worker, results tab and wiring.
 
-Covers :class:`~pptrepair.gui.worker.RepairWorker`,
+Covers :class:`~pptrepair.gui.repair_workers.RepairWorker`,
 :class:`~pptrepair.gui.results.RepairResultsModel` and the repair
 wiring added to :class:`pptrepair.gui.main_window.MainWindow`. Skipped
 wholesale when PySide6 is not installed (the optional ``[gui]``
@@ -28,8 +28,8 @@ from pytestqt.qtbot import QtBot
 
 from pptrepair.batch import BatchResult
 from pptrepair.gui.main_window import MainWindow
+from pptrepair.gui.repair_workers import RepairRequest, RepairWorker
 from pptrepair.gui.run_options import RepairMode
-from pptrepair.gui.worker import RepairRequest, RepairWorker
 
 # --------------------------------------------------------------------------
 # fixture helpers
@@ -177,6 +177,34 @@ def test_repair_worker_cancellation_stops_early(
     repaired_artifacts = sorted(root.glob("*.repaired.pptx"))
     assert len(repaired_artifacts) == 2
     assert worker.wait(5000)
+
+
+def test_repair_worker_failure_prints_traceback_to_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unexpected exception from _execute prints its full traceback to
+    stderr, while the failed signal still carries only the short summary
+    the UI shows."""
+    root = _mkroot(tmp_path)
+    worker = RepairWorker(RepairRequest(
+        roots=(root,), output_dir=None, in_place=True))
+
+    def _boom() -> BatchResult:
+        raise ValueError("boom")
+
+    monkeypatch.setattr(worker, "_execute", _boom)
+    messages: list[str] = []
+    worker.failed.connect(messages.append)
+
+    # Called directly on this thread (not started as a QThread), so the
+    # run is synchronous and capsys can capture stderr from it.
+    worker.run()
+
+    captured = capsys.readouterr()
+    assert "Traceback" in captured.err
+    assert "ValueError: boom" in captured.err
+    assert messages == ["ValueError: boom"]
 
 
 # --------------------------------------------------------------------------
