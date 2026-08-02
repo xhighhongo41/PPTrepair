@@ -1,0 +1,10 @@
+// Cloudflare Workers デプロイ設定(静的アセットのみ・Workerスクリプトなし)
+// ビルド(tools/build_webapp.sh)が生成する webapp/ をそのまま配信する。
+// webapp/_headers のセキュリティヘッダーはWorkers静的アセットでも有効。
+{
+	"name": "pptrepair",
+	"compatibility_date": "2026-08-02",
+	"assets": {
+		"directory": "./webapp"
+	}
+}
