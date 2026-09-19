@@ -248,3 +248,7 @@ webapp/wheels/
 .DS_Store
 
 
+# Wrangler (Cloudflare Workers) のローカル作業ファイル・ローカル秘密設定
+.wrangler/
+.dev.vars*
+!.dev.vars.example
